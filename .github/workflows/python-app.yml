@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   build:
+    name: usl_pipeline CI
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
