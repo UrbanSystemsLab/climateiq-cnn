@@ -1,4 +1,6 @@
+.idea
 build
+climateiq-cnn.iml
 dist
 __pycache__
 *.egg-info
