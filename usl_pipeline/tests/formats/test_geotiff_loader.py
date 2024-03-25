@@ -1,13 +1,17 @@
+import os
 import unittest
 from usl_pipeline.formats import geotiff_loader
 from rasterio import CRS
 
 
-class GeodiffLoaderTest(unittest.TestCase):
+class GeotiffLoaderTest(unittest.TestCase):
 
     def test_load_elevation_from_geotiff(self):
+        test_file_path = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)), "test_data.tif"
+        )
         (header, data, crs) = geotiff_loader.load_elevation_from_geotiff(
-            "test_data.tif", load_data=True
+            test_file_path, load_data=True
         )
         self.assertDictEqual(
             header,
