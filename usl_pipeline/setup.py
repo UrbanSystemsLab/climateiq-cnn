@@ -8,6 +8,11 @@ setup(
     install_requires=[
         "rasterio",
     ],
+    entry_points={
+        "console_scripts": [
+            "upload_map = usl_pipeline.upload_map:main",
+        ],
+    },
     extras_require={
         "dev": [
             "black~=24.0",
