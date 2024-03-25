@@ -2,7 +2,8 @@ import rasterio.features
 
 
 def load_elevation_from_geotiff(
-        file_path: str, load_data: bool = False, result_nodata: float = None):
+    file_path: str, load_data: bool = False, result_nodata: float = None
+):
     """
     Loading elevation raster data from GeoTIFF file.
     :param file_path: path to a file to load from
@@ -17,14 +18,16 @@ def load_elevation_from_geotiff(
         transform = src.transform
         ll_corner = transform * (0, src.height)
         input_nodata = src.nodata
-        elv_header = {"ncols": int(src.width),
-                      "nrows": int(src.height),
-                      "xllcorner": float(ll_corner[0]),
-                      "yllcorner": float(ll_corner[1]),
-                      "cellsize": float(transform[0]),
-                      "nodata_value": float(
-                              result_nodata if result_nodata is not None
-                              else input_nodata)}
+        elv_header = {
+            "ncols": int(src.width),
+            "nrows": int(src.height),
+            "xllcorner": float(ll_corner[0]),
+            "yllcorner": float(ll_corner[1]),
+            "cellsize": float(transform[0]),
+            "nodata_value": float(
+                result_nodata if result_nodata is not None else input_nodata
+            ),
+        }
         elv_data = None
 
         if load_data:
