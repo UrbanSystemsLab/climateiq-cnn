@@ -7,8 +7,10 @@ from usl_pipeline.shared.entities import ElevationHeader
 
 
 def read_from_geotiff(
-        file: typing.BinaryIO, header_only: bool = False, band: int = 1,
-        no_data_value: float = None
+    file: typing.BinaryIO,
+    header_only: bool = False,
+    band: int = 1,
+    no_data_value: float = None,
 ) -> Elevation:
     """Loading elevation raster data from GeoTIFF file.
 
@@ -25,20 +27,21 @@ def read_from_geotiff(
         Elevation object.
     """
 
-    with rasterio.open(file, driver='GTiff') as src:
+    with rasterio.open(file, driver="GTiff") as src:
         transform = src.transform
         ll_corner = transform * (0, src.height)
         input_nodata = src.nodata
+        final_nodata_value = (
+            no_data_value if no_data_value is not None else input_nodata
+        )
         elv_header = ElevationHeader(
-                col_count=src.width,
-                row_count=src.height,
-                x_ll_corner=ll_corner[0],
-                y_ll_corner=ll_corner[1],
-                cell_size=transform[0],
-                nodata_value=(
-                        no_data_value if no_data_value is not None else input_nodata
-                ),
-                crs=src.crs
+            col_count=src.width,
+            row_count=src.height,
+            x_ll_corner=ll_corner[0],
+            y_ll_corner=ll_corner[1],
+            cell_size=transform[0],
+            nodata_value=final_nodata_value,
+            crs=src.crs,
         )
         elv_data = None
 

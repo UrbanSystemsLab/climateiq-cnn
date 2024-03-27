@@ -20,6 +20,7 @@ class ElevationHeader:
             value correspond to missing data.
         crs: Optional value defining Coordinate Reference System.
     """
+
     col_count: int
     row_count: int
     x_ll_corner: float
