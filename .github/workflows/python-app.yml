@@ -25,7 +25,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r usl_pipeline/dev-requirements.txt
+        pip install -r usl_pipeline/requirements.txt
         pip install -e usl_pipeline[dev]
     - name: Lint with flake8
       run: |

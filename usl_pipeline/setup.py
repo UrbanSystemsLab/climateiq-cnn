@@ -2,7 +2,6 @@
 
 from setuptools import setup, find_packages
 
-
 setup(
     name="usl_pipeline",
     packages=find_packages(),
@@ -11,9 +10,9 @@ setup(
     ],
     extras_require={
         "dev": [
-            "black",
-            "flake8",
-            "pytest",
+            "black~=24.0",
+            "flake8~=7.0",
+            "pytest~=8.0",
         ]
     },
 )
