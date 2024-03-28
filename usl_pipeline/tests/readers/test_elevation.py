@@ -1,5 +1,3 @@
-import os
-
 import numpy
 from numpy.testing import assert_array_equal
 import rasterio
@@ -11,12 +9,14 @@ from usl_pipeline.shared.geo_data import ElevationHeader
 
 
 def prepare_test_geotiff_elevation_memory_file(mem_file: MemoryFile):
-    tiff_array = numpy.array([
+    tiff_array = numpy.array(
+        [
             [0.0, 1.0, 2.0],
             [3.0, 4.0, 5.0],
-    ])
+        ]
+    )
     with mem_file.open(
-        driver='GTiff',
+        driver="GTiff",
         dtype=rasterio.float32,
         nodata=0.0,
         width=3,
@@ -26,6 +26,7 @@ def prepare_test_geotiff_elevation_memory_file(mem_file: MemoryFile):
         transform=Affine(2.0, 0.0, 100.0, 0.0, -2.0, 500.0),
     ) as raster:
         raster.write(tiff_array.astype(rasterio.float32), 1)
+
 
 def test_load_elevation_from_geotiff_default_no_data():
     with rasterio.io.MemoryFile() as mem_file:
@@ -40,10 +41,13 @@ def test_load_elevation_from_geotiff_default_no_data():
             nodata_value=0.0,
             crs=CRS({"init": "EPSG:32618"}),
         )
-        assert_array_equal(elevation.data, [
-            [0.0, 1.0, 2.0],
-            [3.0, 4.0, 5.0],
-        ])
+        assert_array_equal(
+            elevation.data,
+            [
+                [0.0, 1.0, 2.0],
+                [3.0, 4.0, 5.0],
+            ],
+        )
         assert not elevation.header.crs.is_geographic
 
 
@@ -60,7 +64,10 @@ def test_load_elevation_from_geotiff_with_changed_no_data():
             nodata_value=-9999.0,
             crs=CRS({"init": "EPSG:32618"}),
         )
-        assert_array_equal(elevation.data, [
-            [-9999.0, 1.0, 2.0],
-            [3.0, 4.0, 5.0],
-        ])
+        assert_array_equal(
+            elevation.data,
+            [
+                [-9999.0, 1.0, 2.0],
+                [3.0, 4.0, 5.0],
+            ],
+        )
