@@ -1,49 +1,66 @@
 import os
 
-from rasterio import CRS
+import numpy
+from numpy.testing import assert_array_equal
+import rasterio
+from rasterio import Affine, CRS
+from rasterio.io import MemoryFile
 
 from usl_pipeline.readers.elevation import read_from_geotiff
-from usl_pipeline.shared.entities import ElevationHeader
+from usl_pipeline.shared.geo_data import ElevationHeader
 
+
+def prepare_test_geotiff_elevation_memory_file(mem_file: MemoryFile):
+    tiff_array = numpy.array([
+            [0.0, 1.0, 2.0],
+            [3.0, 4.0, 5.0],
+    ])
+    with mem_file.open(
+        driver='GTiff',
+        dtype=rasterio.float32,
+        nodata=0.0,
+        width=3,
+        height=2,
+        count=1,
+        crs=CRS.from_epsg(32618),
+        transform=Affine(2.0, 0.0, 100.0, 0.0, -2.0, 500.0),
+    ) as raster:
+        raster.write(tiff_array.astype(rasterio.float32), 1)
 
 def test_load_elevation_from_geotiff_default_no_data():
-    test_file_path = os.path.join(
-        os.path.dirname(os.path.realpath(__file__)), "test_data.tif"
-    )
-    with open(test_file_path, "rb") as fd:
-        elevation = read_from_geotiff(fd)
+    with rasterio.io.MemoryFile() as mem_file:
+        prepare_test_geotiff_elevation_memory_file(mem_file)
+        elevation = read_from_geotiff(mem_file)
         assert elevation.header == ElevationHeader(
-            col_count=2,
+            col_count=3,
             row_count=2,
-            x_ll_corner=587069.5669010617,
-            y_ll_corner=4505948.133973204,
+            x_ll_corner=100.0,
+            y_ll_corner=496.0,
             cell_size=2.0,
             nodata_value=0.0,
             crs=CRS({"init": "EPSG:32618"}),
         )
-        assert elevation.data == [
-            [0.0, 5.72777795791626],
-            [5.713333606719971, 5.742222309112549],
-        ]
+        assert_array_equal(elevation.data, [
+            [0.0, 1.0, 2.0],
+            [3.0, 4.0, 5.0],
+        ])
         assert not elevation.header.crs.is_geographic
 
 
 def test_load_elevation_from_geotiff_with_changed_no_data():
-    test_file_path = os.path.join(
-        os.path.dirname(os.path.realpath(__file__)), "test_data.tif"
-    )
-    with open(test_file_path, "rb") as fd:
-        elevation = read_from_geotiff(fd, no_data_value=-9999.0)
+    with rasterio.io.MemoryFile() as mem_file:
+        prepare_test_geotiff_elevation_memory_file(mem_file)
+        elevation = read_from_geotiff(mem_file, no_data_value=-9999.0)
         assert elevation.header == ElevationHeader(
-            col_count=2,
+            col_count=3,
             row_count=2,
-            x_ll_corner=587069.5669010617,
-            y_ll_corner=4505948.133973204,
+            x_ll_corner=100.0,
+            y_ll_corner=496.0,
             cell_size=2.0,
             nodata_value=-9999.0,
             crs=CRS({"init": "EPSG:32618"}),
         )
-        assert elevation.data == [
-            [-9999.0, 5.72777795791626],
-            [5.713333606719971, 5.742222309112549],
-        ]
+        assert_array_equal(elevation.data, [
+            [-9999.0, 1.0, 2.0],
+            [3.0, 4.0, 5.0],
+        ])

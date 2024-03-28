@@ -1,16 +1,17 @@
 import typing
+from typing import Optional
 
 import rasterio.features
 
-from usl_pipeline.shared.entities import Elevation
-from usl_pipeline.shared.entities import ElevationHeader
+from usl_pipeline.shared.geo_data import Elevation
+from usl_pipeline.shared.geo_data import ElevationHeader
 
 
 def read_from_geotiff(
     file: typing.BinaryIO,
     header_only: bool = False,
     band: int = 1,
-    no_data_value: float = None,
+    no_data_value: Optional[float] = None,
 ) -> Elevation:
     """Loading elevation raster data from GeoTIFF file.
 
@@ -28,6 +29,7 @@ def read_from_geotiff(
     """
 
     with rasterio.open(file, driver="GTiff") as src:
+        print(src.profile)
         transform = src.transform
         ll_corner = transform * (0, src.height)
         input_nodata = src.nodata
@@ -49,6 +51,6 @@ def read_from_geotiff(
             data = src.read(band)
             if no_data_value is not None:
                 data[data == input_nodata] = no_data_value
-            elv_data = data.tolist()
+            elv_data = data
 
         return Elevation(header=elv_header, data=elv_data)

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -27,10 +28,10 @@ class ElevationHeader:
     y_ll_corner: float
     cell_size: float
     nodata_value: float
-    crs: CRS = None
+    crs: Optional[CRS] = None
 
 
 @dataclass
 class Elevation:
     header: ElevationHeader
-    data: npt.NDArray[np.float64] = None
+    data: Optional[npt.NDArray[np.float64]] = None
