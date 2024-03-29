@@ -4,7 +4,7 @@ import rasterio
 from rasterio import Affine, CRS
 from rasterio.io import MemoryFile
 
-from usl_pipeline.readers.elevation import read_from_geotiff
+from usl_pipeline.readers.elevation_readers import read_from_geotiff
 from usl_pipeline.shared.geo_data import ElevationHeader
 
 
