@@ -1,29 +1,27 @@
 import typing
-from typing import Optional
 
 import numpy
 import rasterio.features
 
-from usl_pipeline.shared.geo_data import Elevation
-from usl_pipeline.shared.geo_data import ElevationHeader
+from usl_pipeline.shared import geo_data
 
 
 def read_from_geotiff(
     file: typing.BinaryIO,
     header_only: bool = False,
     band: int = 1,
-    no_data_value: Optional[float] = None,
-) -> Elevation:
+    no_data_value: typing.Optional[float] = None,
+) -> geo_data.Elevation:
     """Loading elevation raster data from GeoTIFF file/stream.
 
     Args:
         file: Binary stream to load from.
-        header_only: Indicates that only header should be loaded, whereas
-            elevation data should be skipped.
+        header_only: Indicates that only header should be loaded, whereas elevation data
+            should be skipped.
         band: Index of a band that should be loaded from GeoTIFF.
-        no_data_value: Optional value to set in the returned data to indicate
-            absence of data. If not supplied, the no-data value defined in the
-            TIFF file itself will be used.
+        no_data_value: Optional value to set in the returned data to indicate absence of
+            data. If not supplied, the no-data value defined in the TIFF file itself
+            will be used.
 
     Returns:
         Elevation object.
@@ -33,7 +31,7 @@ def read_from_geotiff(
         transform = src.transform
         ll_corner = transform * (0, src.height)
         input_nodata = src.nodata
-        elv_header = ElevationHeader(
+        elv_header = geo_data.ElevationHeader(
             col_count=src.width,
             row_count=src.height,
             x_ll_corner=ll_corner[0],
@@ -49,23 +47,23 @@ def read_from_geotiff(
             if no_data_value is not None:
                 elv_data[elv_data == input_nodata] = no_data_value
 
-        return Elevation(header=elv_header, data=elv_data)
+        return geo_data.Elevation(header=elv_header, data=elv_data)
 
 
 def read_from_esri_ascii(
     file: typing.TextIO,
     header_only: bool = False,
-    no_data_value: Optional[float] = None,
-) -> Elevation:
+    no_data_value: typing.Optional[float] = None,
+) -> geo_data.Elevation:
     """Loading elevation raster data from Esri ASCII file/stream.
 
     Args:
         file: Binary stream to load from.
-        header_only: Indicates that only header should be loaded, whereas
-            elevation data should be skipped.
-        no_data_value: Optional value to set in the returned data to indicate
-            absence of data. If not supplied, the no-data value defined in the
-            TIFF file itself will be used.
+        header_only: Indicates that only header should be loaded, whereas elevation data
+            should be skipped.
+        no_data_value: Optional value to set in the returned data to indicate absence of
+            data. If not supplied, the no-data value defined in the TIFF file itself
+            will be used.
 
     Returns:
         Elevation object.
@@ -75,10 +73,10 @@ def read_from_esri_ascii(
     for row_index in range(6):
         line = file.readline()
         # split into key/value pair
-        parts = line.split(maxsplit=1)
-        header_map[parts[0].lower()] = parts[1]
+        key, value = line.split(maxsplit=1)
+        header_map[key.lower()] = value
     input_nodata = float(header_map["nodata_value"])
-    header = ElevationHeader(
+    header = geo_data.ElevationHeader(
         col_count=int(header_map["ncols"]),
         row_count=int(header_map["nrows"]),
         x_ll_corner=float(header_map["xllcorner"]),
@@ -94,4 +92,4 @@ def read_from_esri_ascii(
         if no_data_value is not None:
             data[data == input_nodata] = no_data_value
 
-    return Elevation(header=header, data=data)
+    return geo_data.Elevation(header=header, data=data)
