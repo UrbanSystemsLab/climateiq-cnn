@@ -28,7 +28,6 @@ def read_from_geotiff(
     Returns:
         Elevation object.
     """
-
     with rasterio.open(file, driver="GTiff") as src:
         print(src.profile)
         transform = src.transform
