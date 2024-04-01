@@ -8,7 +8,9 @@ from rasterio import CRS
 
 @dataclass
 class ElevationHeader:
-    """Elevation header data class keeping information needed to convert
+    """Elevation header data.
+
+    Elevation header data class keeping information needed to convert
     geo-spacial coordinates to raster cells and back.
 
     Args:
