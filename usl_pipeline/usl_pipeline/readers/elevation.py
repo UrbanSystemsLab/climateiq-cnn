@@ -70,13 +70,12 @@ def read_from_esri_ascii(
     Returns:
         Elevation object.
     """
-    print(type(file))
     # read 6 header lines
     header_map = {}
-    for row_index in range(0, 6):
+    for row_index in range(6):
         line = file.readline()
         # split into key/value pair
-        parts = line.split(" ", 1)
+        parts = line.split(maxsplit=1)
         header_map[parts[0].lower()] = parts[1]
     input_nodata = float(header_map["nodata_value"])
     header = ElevationHeader(
@@ -91,7 +90,7 @@ def read_from_esri_ascii(
     # read data matrix
     data = None
     if not header_only:
-        data = numpy.loadtxt(file, dtype="float32")
+        data = numpy.loadtxt(file, dtype="float64")
         if no_data_value is not None:
             data[data == input_nodata] = no_data_value
 
