@@ -9,8 +9,9 @@ import rasterio
 import main
 
 
+@mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_build_feature_matrix(mock_client):
+def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
     # Get some random data to place in a tiff file.
     height = 5
     width = 3
@@ -40,8 +41,8 @@ def test_build_feature_matrix(mock_client):
     archive.seek(0)
 
     # Set the archive to be returned by the mock GCS client.
-    mock_client().bucket("").blob("").open.return_value = archive
-    mock_client.reset_mock()
+    mock_storage_client().bucket("").blob("").open.return_value = archive
+    mock_storage_client.reset_mock()
 
     main._build_feature_matrix(
         functions_framework.CloudEvent(
@@ -51,7 +52,7 @@ def test_build_feature_matrix(mock_client):
     )
 
     # Ensure we worked with the right GCP paths.
-    mock_client.assert_has_calls(
+    mock_storage_client.assert_has_calls(
         [
             mock.call().bucket("bucket"),
             mock.call().bucket().blob("map/name.tar"),
@@ -63,8 +64,30 @@ def test_build_feature_matrix(mock_client):
     )
 
     # Ensure we attempted to upload a serialized matrix of the tiff.
-    mock_client().bucket("").blob("").upload_from_file.assert_called_once()
+    mock_storage_client().bucket("").blob("").upload_from_file.assert_called_once()
     uploaded_array = numpy.load(
-        mock_client().bucket("").blob("").upload_from_file.call_args[0][0]
+        mock_storage_client().bucket("").blob("").upload_from_file.call_args[0][0]
     )
     numpy.testing.assert_array_equal(uploaded_array, tiff_array)
+
+    # Ensure we wrote an entry to Firestore.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("maps"),
+            mock.call().collection().document("map"),
+            mock.call().collection().document().collection("chunks"),
+            mock.call().collection().document().collection().document("name"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document()
+            .set(
+                {
+                    "feature_matrix_path": "gcs://climateiq-map-feature-chunks/map/name.npy"
+                },
+                merge=True,
+            ),
+        ]
+    )
