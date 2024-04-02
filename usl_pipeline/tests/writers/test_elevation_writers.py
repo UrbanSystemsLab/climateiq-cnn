@@ -15,7 +15,7 @@ def test_write_to_esri_ascii_raster_file():
         cell_size=2.0,
         nodata_value=0.0,
     )
-    data = numpy.asarray([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
+    data = numpy.asarray([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0123456789]])
     elevation = Elevation(header=header, data=data)
     buffer = StringIO()
     write_to_esri_ascii_raster_file(elevation, buffer)
@@ -27,5 +27,5 @@ def test_write_to_esri_ascii_raster_file():
         "cellsize 2.0\n"
         "NODATA_value 0.0\n"
         "0.0 1.0 2.0\n"
-        "3.0 4.0 5.0\n"
+        "3.0 4.0 5.0123456789\n"
     )
