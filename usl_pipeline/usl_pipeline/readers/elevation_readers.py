@@ -27,7 +27,6 @@ def read_from_geotiff(
         Elevation object.
     """
     with rasterio.open(file, driver="GTiff") as src:
-        print(src.profile)
         transform = src.transform
         ll_corner = transform * (0, src.height)
         input_nodata = src.nodata
