@@ -6,7 +6,7 @@ setup(
     name="usl_pipeline",
     packages=find_packages(),
     install_requires=[
-        "gdal<=3.8.3",
+        "gdal<=3.6.4",
         "rasterio",
     ],
     extras_require={
