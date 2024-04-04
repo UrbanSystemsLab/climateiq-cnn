@@ -2,8 +2,8 @@ from io import StringIO
 
 import numpy
 
-from usl_pipeline.writers.elevation_writers import write_to_esri_ascii_raster_file
-from usl_pipeline.shared.geo_data import Elevation, ElevationHeader
+from usl_lib.writers.elevation_writers import write_to_esri_ascii_raster_file
+from usl_lib.shared.geo_data import Elevation, ElevationHeader
 
 
 def test_write_to_esri_ascii_raster_file():

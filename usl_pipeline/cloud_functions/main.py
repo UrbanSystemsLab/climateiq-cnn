@@ -10,6 +10,8 @@ import functions_framework
 import numpy
 import rasterio
 
+from usl_lib.readers import elevation_readers
+
 FEATURE_BUCKET_NAME = "climateiq-map-feature-chunks"
 
 
@@ -61,8 +63,10 @@ def _build_feature_matrix_from_archive(archive: BinaryIO) -> numpy.matrix | None
             name = pathlib.PurePosixPath(member.name).name
             if name == "elevation.tiff":
                 fd = tar.extractfile(member)
-                with rasterio.open(rasterio.io.MemoryFile(fd.read())) as raster:
-                    return raster.read(1)
+                elevation = elevation_readers.read_from_geotiff(
+                    rasterio.io.MemoryFile(fd.read())
+                )
+                return elevation.data
             # TODO: handle additional archive members.
             else:
                 logging.warning(f"Unexpected member name: {name}")
