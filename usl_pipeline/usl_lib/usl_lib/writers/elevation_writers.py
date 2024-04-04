@@ -2,7 +2,7 @@ import typing
 
 import numpy
 
-from usl_pipeline.shared.geo_data import Elevation
+from usl_lib.shared.geo_data import Elevation
 
 
 def write_to_esri_ascii_raster_file(elevation: Elevation, file: typing.TextIO) -> None:

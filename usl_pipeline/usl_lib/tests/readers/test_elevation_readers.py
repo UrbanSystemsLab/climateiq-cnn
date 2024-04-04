@@ -5,8 +5,8 @@ from numpy import testing
 import rasterio
 import rasterio.io
 
-from usl_pipeline.readers import elevation_readers
-from usl_pipeline.shared import geo_data
+from usl_lib.readers import elevation_readers
+from usl_lib.shared import geo_data
 
 
 def prepare_test_geotiff_elevation_memory_file(mem_file: rasterio.io.MemoryFile):

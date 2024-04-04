@@ -3,14 +3,11 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="usl_pipeline",
+    name="map_uploader",
     packages=find_packages(),
-    install_requires=[
-        "rasterio",
-    ],
     entry_points={
         "console_scripts": [
-            "upload_map = usl_pipeline.upload_map:main",
+            "upload_map = map_uploader.main:main",
         ],
     },
     extras_require={
