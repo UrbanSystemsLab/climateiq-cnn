@@ -11,6 +11,9 @@ To run the tests:
 To run the linter:
 - flake8 .
 
+To run the type checker:
+- mypy --config-file ../mypy.ini .
+
 To run the code auto-formatter:
 - black .
 
