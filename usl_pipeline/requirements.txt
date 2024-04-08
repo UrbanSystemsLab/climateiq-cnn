@@ -22,6 +22,7 @@ google-cloud-appengine-logging==1.4.3
 google-cloud-audit-log==0.2.5
 google-cloud-core==2.4.1
 google-cloud-error-reporting==1.11.0
+google-cloud-firestore==2.16.0
 google-cloud-logging==3.10.0
 google-cloud-storage==2.16.0
 google-crc32c==1.5.0

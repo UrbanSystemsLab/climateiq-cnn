@@ -9,8 +9,9 @@ import rasterio
 import main
 
 
+@mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_build_feature_matrix(mock_client):
+def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
     # Get some random data to place in a tiff file.
     height = 5
     width = 3
@@ -33,15 +34,29 @@ def test_build_feature_matrix(mock_client):
     # Place the tiff file bytes into an archive.
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode="w") as tar:
-        tf = tarfile.TarInfo("elevation.tiff")
+        tf = tarfile.TarInfo("elevation.tif")
         tf.size = len(tiff_bytes)
         tar.addfile(tf, io.BytesIO(tiff_bytes))
     # Seek to the beginning so the file can be read.
     archive.seek(0)
 
-    # Set the archive to be returned by the mock GCS client.
-    mock_client().bucket("").blob("").open.return_value = archive
-    mock_client.reset_mock()
+    # Create a mock blob for the archive which will return the above tiff when opened.
+    mock_archive_blob = mock.MagicMock()
+    mock_archive_blob.name = "map/name.tar"
+    mock_archive_blob.bucket.name = "bucket"
+    mock_archive_blob.open.return_value = archive
+
+    # Create a mock blob for feature matrix we will upload.
+    mock_feature_blob = mock.MagicMock()
+    mock_feature_blob.name = "map/name.npy"
+    mock_feature_blob.bucket.name = "climateiq-map-feature-chunks"
+
+    # Return the mock blobs.
+    mock_storage_client().bucket("").blob.side_effect = [
+        mock_archive_blob,
+        mock_feature_blob,
+    ]
+    mock_storage_client.reset_mock()
 
     main._build_feature_matrix(
         functions_framework.CloudEvent(
@@ -51,20 +66,43 @@ def test_build_feature_matrix(mock_client):
     )
 
     # Ensure we worked with the right GCP paths.
-    mock_client.assert_has_calls(
+    mock_storage_client.assert_has_calls(
         [
             mock.call().bucket("bucket"),
             mock.call().bucket().blob("map/name.tar"),
-            mock.call().bucket().blob().open("rb"),
             mock.call().bucket("climateiq-map-feature-chunks"),
             mock.call().bucket().blob("map/name.npy"),
-            mock.call().bucket().blob().upload_from_file(mock.ANY),
         ]
     )
 
+    mock_archive_blob.open.assert_called_once_with("rb")
+
     # Ensure we attempted to upload a serialized matrix of the tiff.
-    mock_client().bucket("").blob("").upload_from_file.assert_called_once()
-    uploaded_array = numpy.load(
-        mock_client().bucket("").blob("").upload_from_file.call_args[0][0]
-    )
+    mock_feature_blob.upload_from_file.assert_called_once_with(mock.ANY)
+    uploaded_array = numpy.load(mock_feature_blob.upload_from_file.call_args[0][0])
     numpy.testing.assert_array_equal(uploaded_array, tiff_array)
+
+    # Ensure we wrote firestore entries for the chunk.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("map"),
+            mock.call().collection().document().collection("chunks"),
+            mock.call().collection().document().collection().document("name"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document()
+            .set(
+                {
+                    "archive_path": "gs://bucket/map/name.tar",
+                    "feature_matrix_path": (
+                        "gs://climateiq-map-feature-chunks/map/name.npy"
+                    ),
+                },
+                merge=True,
+            ),
+        ]
+    )

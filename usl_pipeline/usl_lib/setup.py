@@ -7,6 +7,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         "gdal<=3.6.4",
+        "google-cloud-firestore",
         "rasterio",
     ],
     extras_require={

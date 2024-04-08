@@ -5,6 +5,7 @@ import tarfile
 from typing import BinaryIO, Optional
 
 from google.cloud import error_reporting
+from google.cloud import firestore
 from google.cloud import storage
 import functions_framework
 import numpy
@@ -12,8 +13,8 @@ from numpy.typing import NDArray
 import rasterio
 
 from usl_lib.readers import elevation_readers
-
-FEATURE_BUCKET_NAME = "climateiq-map-feature-chunks"
+from usl_lib.storage import cloud_storage
+from usl_lib.storage import metastore
 
 
 @functions_framework.cloud_event
@@ -37,24 +38,28 @@ def _build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     """Builds a feature matrix when an archive of geo files is uploaded."""
     storage_client = storage.Client()
     bucket = storage_client.bucket(cloud_event.data["bucket"])
-    blob = bucket.blob(cloud_event.data["name"])
+    chunk_name = cloud_event.data["name"]
+    chunk_blob = bucket.blob(chunk_name)
 
-    with blob.open("rb") as archive:
+    with chunk_blob.open("rb") as archive:
         feature_matrix = _build_feature_matrix_from_archive(archive)
         if feature_matrix is None:
-            raise ValueError(f"Empty archive found in {blob}")
+            raise ValueError(f"Empty archive found in {chunk_blob}")
 
-    feature_file_name = str(
-        pathlib.PurePosixPath(cloud_event.data["name"]).with_suffix(".npy")
+    feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
+    feature_blob = storage_client.bucket(cloud_storage.FEATURE_CHUNKS_BUCKET).blob(
+        str(feature_file_name)
     )
-    feature_blob = storage_client.bucket(FEATURE_BUCKET_NAME).blob(feature_file_name)
 
     # Write the feature matrix in .npy format to GCS.
     matrix_file = io.BytesIO()
     numpy.save(matrix_file, feature_matrix)
     # Seek to the beginning so the file can be read.
+    matrix_file.flush()
     matrix_file.seek(0)
     feature_blob.upload_from_file(matrix_file)
+
+    _write_metastore_entry(chunk_blob, feature_blob)
 
 
 def _build_feature_matrix_from_archive(
@@ -68,8 +73,7 @@ def _build_feature_matrix_from_archive(
                 continue
 
             name = pathlib.PurePosixPath(member.name).name
-            if name == "elevation.tiff":
-
+            if name == "elevation.tif":
                 elevation = elevation_readers.read_from_geotiff(
                     rasterio.io.MemoryFile(fd.read())
                 )
@@ -79,3 +83,21 @@ def _build_feature_matrix_from_archive(
                 logging.warning(f"Unexpected member name: {name}")
 
     return None
+
+
+def _write_metastore_entry(
+    chunk_blob: storage.Blob, feature_blob: storage.Blob
+) -> None:
+    """Writes a Firestore entry for the new feature matrix chunk."""
+    db = firestore.Client()
+
+    # The GCS paths should be in the form map_name/chunk_name
+    as_path = pathlib.PurePosixPath(chunk_blob.name)
+    map_name = str(as_path.parent)
+    chunk_name = as_path.stem
+
+    metastore.StudyAreaChunk(
+        id_=chunk_name,
+        archive_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
+        feature_matrix_path=f"gs://{feature_blob.bucket.name}/{feature_blob.name}",
+    ).merge(db, map_name)
