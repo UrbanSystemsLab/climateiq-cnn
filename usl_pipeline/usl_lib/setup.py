@@ -14,6 +14,7 @@ setup(
             "flake8~=7.0",
             "flake8-docstrings~=1.7",
             "pytest~=8.0",
+            "mypy~=1.9",
         ]
     },
 )

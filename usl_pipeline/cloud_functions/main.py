@@ -2,12 +2,13 @@ import io
 import pathlib
 import logging
 import tarfile
-from typing import BinaryIO
+from typing import BinaryIO, Optional
 
 from google.cloud import error_reporting
 from google.cloud import storage
 import functions_framework
 import numpy
+from numpy.typing import NDArray
 import rasterio
 
 from usl_lib.readers import elevation_readers
@@ -56,13 +57,19 @@ def _build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     feature_blob.upload_from_file(matrix_file)
 
 
-def _build_feature_matrix_from_archive(archive: BinaryIO) -> numpy.matrix | None:
+def _build_feature_matrix_from_archive(
+    archive: BinaryIO,
+) -> Optional[NDArray[numpy.float64]]:
     """Builds a feature matrix for the given archive."""
     with tarfile.TarFile(fileobj=archive) as tar:
         for member in tar:
+            fd = tar.extractfile(member)
+            if fd is None:
+                continue
+
             name = pathlib.PurePosixPath(member.name).name
             if name == "elevation.tiff":
-                fd = tar.extractfile(member)
+
                 elevation = elevation_readers.read_from_geotiff(
                     rasterio.io.MemoryFile(fd.read())
                 )
@@ -70,3 +77,5 @@ def _build_feature_matrix_from_archive(archive: BinaryIO) -> numpy.matrix | None
             # TODO: handle additional archive members.
             else:
                 logging.warning(f"Unexpected member name: {name}")
+
+    return None
