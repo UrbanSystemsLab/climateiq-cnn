@@ -6,7 +6,9 @@ setup(
     name="usl_lib",
     packages=find_packages(),
     install_requires=[
+        "fiona",
         "rasterio",
+        "shapely",
     ],
     extras_require={
         "dev": [
