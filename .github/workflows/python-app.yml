@@ -27,6 +27,10 @@ jobs:
       # to ensure the library works with the union of cloud_function and upload_map's
       # requirements.
       run: |
+        sudo apt-get update -qq
+        sudo add-apt-repository ppa:ubuntugis/ppa -y
+        sudo apt-get update -qq
+        sudo apt-get install -y gdal-bin libgdal-dev
         python -m pip install --upgrade pip
         cd usl_pipeline
         pip install -r requirements.txt
@@ -52,6 +56,10 @@ jobs:
         python-version: "3.11"
     - name: Install dependencies
       run: |
+        sudo apt-get update -qq
+        sudo add-apt-repository ppa:ubuntugis/ppa -y
+        sudo apt-get update -qq
+        sudo apt-get install -y gdal-bin libgdal-dev
         python -m pip install --upgrade pip
         cd usl_pipeline/map_uploader
         pip install -r requirements.txt
@@ -112,4 +120,34 @@ jobs:
         diff requirements.txt requirements.txt.orig
         echo 'Ensuring requirements.txt can be installed.'
         echo 'If this fails, ensure the cloud_functions and map_uploader do not require different versions of the same package.'
+        sudo apt-get update -qq
+        sudo add-apt-repository ppa:ubuntugis/ppa -y
+        sudo apt-get update -qq
+        sudo apt-get install -y gdal-bin libgdal-dev
         pip install -r requirements.txt
+
+  type_checking:
+    # We run type checking against all the different packages together
+    # so MyPy can access the type definitions of shared library code
+    # while checking another package.
+    name: Type Checking from MyPy
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.11"
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo add-apt-repository ppa:ubuntugis/ppa -y
+        sudo apt-get update -qq
+        sudo apt-get install -y gdal-bin libgdal-dev
+        python -m pip install --upgrade pip
+        cd usl_pipeline
+        pip install -r requirements.txt
+        pip install -e usl_lib[dev] -e map_uploader[dev]
+    - name: MyPy
+      run: |
+        mypy usl_pipeline
