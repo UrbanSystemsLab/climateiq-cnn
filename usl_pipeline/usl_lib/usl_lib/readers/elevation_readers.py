@@ -3,7 +3,7 @@ import typing
 import numpy
 import rasterio.features
 
-from usl_pipeline.shared import geo_data
+from usl_lib.shared import geo_data
 
 
 def read_from_geotiff(
