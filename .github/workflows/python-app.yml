@@ -120,6 +120,10 @@ jobs:
         diff requirements.txt requirements.txt.orig
         echo 'Ensuring requirements.txt can be installed.'
         echo 'If this fails, ensure the cloud_functions and map_uploader do not require different versions of the same package.'
+        sudo apt-get update -qq
+        sudo add-apt-repository ppa:ubuntugis/ppa -y
+        sudo apt-get update -qq
+        sudo apt-get install -y gdal-bin libgdal-dev
         pip install -r requirements.txt
 
   type_checking:
