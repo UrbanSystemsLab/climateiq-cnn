@@ -1,3 +1,4 @@
+import pathlib
 import tempfile
 
 import numpy
@@ -7,10 +8,9 @@ import rasterio
 from usl_lib.readers import elevation_readers
 from usl_lib.chunkers import elevation_chunkers
 from usl_lib.shared import geo_data
-from usl_lib.shared import suppliers
 
 
-def prepare_test_geotiff_elevation_memory_file(file_path: str) -> None:
+def prepare_test_geotiff_elevation_file(file_path: str) -> None:
     tiff_array = numpy.array(
         [
             [0.0, 1.0, 2.0],
@@ -34,14 +34,16 @@ def prepare_test_geotiff_elevation_memory_file(file_path: str) -> None:
 
 
 def assert_chunk_data_equal(
-    chunk_path_generator: suppliers.ChunkFilePathGenerator,
+    chunk_dir_path: str,
     y_chunk_index: int,
     x_chunk_index: int,
     expected_header: geo_data.ElevationHeader,
     expected_data: list,
 ) -> None:
-    file_path = chunk_path_generator.generate(y_chunk_index, x_chunk_index)
-    with open(file_path, "rb") as input_file:
+    file_path = pathlib.Path(chunk_dir_path) / "chunk_{0}_{1}".format(
+        y_chunk_index, x_chunk_index
+    )
+    with file_path.open("rb") as input_file:
         elevation = elevation_readers.read_from_geotiff(input_file)
     assert elevation.header == expected_header
     testing.assert_array_equal(
@@ -50,25 +52,35 @@ def assert_chunk_data_equal(
     )
 
 
+def chunk_descriptor(
+    dir_path: str, y_chunk_index: int, x_chunk_index: int
+) -> elevation_chunkers.ChunkDescriptor:
+    file_name = "chunk_{0}_{1}".format(y_chunk_index, x_chunk_index)
+    return elevation_chunkers.ChunkDescriptor(
+        y_chunk_index=y_chunk_index,
+        x_chunk_index=x_chunk_index,
+        path=pathlib.Path(dir_path) / file_name,
+    )
+
+
 def test_split_geotiff_into_chunks() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        chunk_file_path_generator = suppliers.PatternBasedChunkFilePathGenerator(
-            temp_dir, "chunk_{0}_{1}_elevation.tif"
-        )
         with tempfile.NamedTemporaryFile() as temp_file:
             input_file_path = temp_file.name
-            prepare_test_geotiff_elevation_memory_file(input_file_path)
-            (y_chunk_count, x_chunk_count) = (
-                elevation_chunkers.split_geotiff_into_chunks(
-                    input_file_path, 2, chunk_file_path_generator
-                )
+            prepare_test_geotiff_elevation_file(input_file_path)
+            chunk_descriptors = elevation_chunkers.split_geotiff_into_chunks(
+                input_file_path, 2, temp_dir
             )
 
-            assert y_chunk_count == 2
-            assert x_chunk_count == 2
+            assert chunk_descriptors == [
+                chunk_descriptor(temp_dir, 0, 0),
+                chunk_descriptor(temp_dir, 0, 1),
+                chunk_descriptor(temp_dir, 1, 0),
+                chunk_descriptor(temp_dir, 1, 1),
+            ]
             # Chunk: y=0, x=0
             assert_chunk_data_equal(
-                chunk_file_path_generator,
+                temp_dir,
                 0,
                 0,
                 geo_data.ElevationHeader(
@@ -85,7 +97,7 @@ def test_split_geotiff_into_chunks() -> None:
 
             # Chunk: y=0, x=1
             assert_chunk_data_equal(
-                chunk_file_path_generator,
+                temp_dir,
                 0,
                 1,
                 geo_data.ElevationHeader(
@@ -102,7 +114,7 @@ def test_split_geotiff_into_chunks() -> None:
 
             # Chunk: y=1, x=0
             assert_chunk_data_equal(
-                chunk_file_path_generator,
+                temp_dir,
                 1,
                 0,
                 geo_data.ElevationHeader(
@@ -119,7 +131,7 @@ def test_split_geotiff_into_chunks() -> None:
 
             # Chunk: y=1, x=1
             assert_chunk_data_equal(
-                chunk_file_path_generator,
+                temp_dir,
                 1,
                 1,
                 geo_data.ElevationHeader(

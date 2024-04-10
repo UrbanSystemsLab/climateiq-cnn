@@ -3,7 +3,7 @@ Getting Started
 
 To install the package and its requirements for local development:
 - System dependencies:
-  - GDAL version 3.6.4 or later (apt-get install gdal-bin libgdal-dev)
+  - GDAL version 3.6.4 or later (see https://gdal.org/download.html for details)
 - pip install -r requirements.txt
 - pip install -e usl_lib[dev] -e map_uploader[dev]
 
