@@ -2,6 +2,8 @@ Getting Started
 ===============
 
 To install the package and its requirements for local development:
+- System dependencies:
+  - GDAL version 3.6.4 or later (see https://gdal.org/download.html for details)
 - pip install -r requirements.txt
 - pip install -e usl_lib[dev] -e map_uploader[dev]
 
@@ -37,5 +39,5 @@ This `requirements.txt` file is used in GitHub's automated testing to ensure the
 common `usl_lib` code works with both sets of requirements.
 It also forces `map_uploader` and `cloud_functions` to use the same version of
 libraries they both depend upon.
-The GitHub build will fail with a mesage about conflicting dependencies if the
+The GitHub build will fail with a message about conflicting dependencies if the
 two require inconsistent versions of the same library.

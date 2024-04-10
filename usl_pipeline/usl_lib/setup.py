@@ -6,6 +6,7 @@ setup(
     name="usl_lib",
     packages=find_packages(),
     install_requires=[
+        "gdal<=3.6.4",
         "rasterio",
     ],
     extras_require={
