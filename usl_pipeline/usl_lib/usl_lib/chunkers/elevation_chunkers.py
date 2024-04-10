@@ -1,4 +1,5 @@
 from osgeo import gdal
+import typing
 
 from usl_lib.readers import elevation_readers
 from usl_lib.shared import suppliers
@@ -8,7 +9,7 @@ def split_geotiff_into_chunks(
     elevation_file_path: str,
     chunk_size: int,
     chunk_file_path_generator: suppliers.ChunkFilePathGenerator,
-) -> (int, int):
+) -> typing.Tuple[int, int]:
     """Produces a grid of chunk GeoTIFF files based on input GeoTIFF file.
 
     Args:

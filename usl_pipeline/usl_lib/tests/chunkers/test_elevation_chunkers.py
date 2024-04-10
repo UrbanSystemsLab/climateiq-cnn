@@ -45,7 +45,7 @@ def assert_chunk_data_equal(
         elevation = elevation_readers.read_from_geotiff(input_file)
     assert elevation.header == expected_header
     testing.assert_array_equal(
-        elevation.data,
+        elevation.data,  # type: ignore
         expected_data,
     )
 
