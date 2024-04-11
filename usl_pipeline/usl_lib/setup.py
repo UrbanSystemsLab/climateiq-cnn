@@ -8,6 +8,7 @@ setup(
     install_requires=[
         "fiona",
         "gdal<=3.6.4",
+        "pyproj",
         "rasterio",
         "shapely",
     ],
