@@ -4,12 +4,13 @@ import numpy as np
 from numpy.lib import stride_tricks
 
 
-def temporal_window_view(data, window: int):
+def temporal_window_view(data: np.ndarray, window: int) -> np.ndarray:
     """Creates a sliding window view over 1D temporal data.
 
     Args:
-        data: A 2D tensor, where the first axis is the batch dimension and the
-            second axis is the temporal data. Shape: [B, T].
+        data: A 2D array, where the first axis is the batch dimension and the
+            second axis is the temporal data. Must be coercible into a
+            np.ndarray.
         window: The window size.
 
     Returns:
