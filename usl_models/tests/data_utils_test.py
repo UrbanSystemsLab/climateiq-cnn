@@ -1,4 +1,4 @@
-from flood_ml import data_utils
+from usl_models.flood_ml import data_utils
 
 from numpy import testing as np_testing
 import tensorflow as tf

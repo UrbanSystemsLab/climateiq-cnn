@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="flood_ml",
+    name="usl_models",
     packages=find_packages(),
     extras_require={
         "dev": [
