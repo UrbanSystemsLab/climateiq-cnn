@@ -45,7 +45,6 @@ def fake_flood_input_batch(
         - "spatiotemporal": Optional. A 5D tensor of time series flood maps
             [batch, time, height, width, 1].
     """
-
     geospatial = tf.random.normal((batch_size, height, width, constants.GEO_FEATURES))
     temporal = tf.random.normal((batch_size, rainfall_duration))
 
