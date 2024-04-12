@@ -6,12 +6,9 @@ setup(
     name="usl_lib",
     packages=find_packages(),
     install_requires=[
-        "fiona",
         "gdal<=3.6.4",
         "google-cloud-firestore",
-        "pyproj",
         "rasterio",
-        "shapely",
     ],
     extras_require={
         "dev": [

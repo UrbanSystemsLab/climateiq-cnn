@@ -1,35 +1,29 @@
-import typing
+from typing import Optional, Tuple
 
 import fiona
 import fiona.crs
 import pyproj
 from shapely.geometry import Polygon
 
-
 SHAPE_FILE_POLYGON_FEATURE_TYPE = "Polygon"
 
 
 def read_polygons_from_shape_file(
     file_path: str,
-    target_crs: typing.Optional[str] = None,
-    mask_value_feature_property: typing.Optional[str] = None,
-    skip_zero_mask_values: bool = True,
-) -> list[typing.Tuple[Polygon, int]]:
+    target_crs: Optional[str] = None,
+    mask_value_feature_property: Optional[str] = None,
+) -> list[Tuple[Polygon, int]]:
     """Reads polygon data from shape file.
 
-    Function reads all the polygon shapes from shape file. There is optional support for
-    transformation of coordinates to different CRS. Another option is to load masks
-    associated to each polygon feature in caller-defined property. Third option is the
-    ability to filter out polygons with 0 values in associated mask (switched on by
-    default).
+    The function supports several optional transformations. target_crs transforms the
+    coordinates to a different CRS. mask_value_feature_property loads masks
+    associated to each polygon feature in caller-defined property.
 
     Args:
         file_path: Path to a shape file to read from.
         target_crs: Optional CRS to transform coordinates to.
         mask_value_feature_property: Optional shape feature property to load mask from.
             In case this property is not defined by the caller, mask value 1 is used.
-        skip_zero_mask_values: Indicates that polygons with mask 0 should be skipped.
-            This mode is switched on by default.
 
     Returns:
          The list of tuples combining polygon with associated mask.
@@ -44,18 +38,31 @@ def read_polygons_from_shape_file(
     polygons = []
     for feature in layer:
         feature_type = feature.geometry.type
+        # Skipping non polygon features:
         if feature_type != SHAPE_FILE_POLYGON_FEATURE_TYPE:
             continue
         fragments = feature.geometry.coordinates
-        mask_value = (
-            1
-            if mask_value_feature_property is None
-            else int(
-                fiona.model.to_dict(feature.properties)[mask_value_feature_property]
-            )
-        )
-        if mask_value == 0 and skip_zero_mask_values:
-            continue
+        mask_value = 1
+
+        if mask_value_feature_property is not None:
+            feature_properties = fiona.model.to_dict(feature.properties)
+            if mask_value_feature_property not in feature_properties:
+                raise ValueError(
+                    "Mask value key '{}' not found in feature properties {}".format(
+                        mask_value_feature_property, feature_properties
+                    )
+                )
+            try:
+                mask_value = int(feature_properties[mask_value_feature_property])
+            except ValueError:
+                raise ValueError(
+                    "Mask value '{}' for key '{}' should be integer in {}".format(
+                        feature_properties[mask_value_feature_property],
+                        mask_value_feature_property,
+                        feature_properties,
+                    )
+                )
+
         for fragment in fragments:
             transformed_fragment = fragment
             if transformer is not None:
