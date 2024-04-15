@@ -57,7 +57,7 @@ def read_from_esri_ascii(
     """Loading elevation raster data from Esri ASCII file/stream.
 
     Args:
-        file: Binary stream to load from.
+        file: Text stream to load from.
         header_only: Indicates that only header should be loaded, whereas elevation data
             should be skipped.
         no_data_value: Optional value to set in the returned data to indicate absence of
