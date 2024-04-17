@@ -71,7 +71,8 @@ jobs:
         black usl_pipeline/map_uploader --check
     - name: Test with pytest
       run: |
-        pytest usl_pipeline/map_uploader usl_pipeline/usl_lib
+        pytest usl_pipeline/map_uploader
+        pytest usl_pipeline/usl_lib
     - name: MyPy Type Checking
       run: |
         mypy usl_pipeline/map_uploader

@@ -9,6 +9,7 @@ setup(
         "gdal<=3.6.4",
         "google-cloud-firestore",
         "rasterio",
+        "shapely",
     ],
     extras_require={
         "dev": [
