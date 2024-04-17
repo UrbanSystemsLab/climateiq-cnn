@@ -23,9 +23,6 @@ jobs:
       with:
         python-version: "3.11"
     - name: Install dependencies
-      # Use the combined requirements.txt from the gen_requirements_txt.sh script
-      # to ensure the library works with the union of cloud_function and upload_map's
-      # requirements.
       run: |
         sudo apt-get update -qq
         sudo add-apt-repository ppa:ubuntugis/ppa -y
@@ -33,7 +30,6 @@ jobs:
         sudo apt-get install -y gdal-bin libgdal-dev
         python -m pip install --upgrade pip
         cd usl_pipeline
-        pip install -r requirements.txt
         pip install -e usl_lib[dev]
     - name: Lint with flake8
       run: |
@@ -44,6 +40,9 @@ jobs:
     - name: Test with pytest
       run: |
         pytest usl_pipeline/usl_lib
+    - name: MyPy Type Checking
+      run: |
+        mypy usl_pipeline/usl_lib
 
   map_uploader:
     name: Map Uploader CI
@@ -73,6 +72,10 @@ jobs:
     - name: Test with pytest
       run: |
         pytest usl_pipeline/map_uploader
+        pytest usl_pipeline/usl_lib
+    - name: MyPy Type Checking
+      run: |
+        mypy usl_pipeline/map_uploader
 
   cloud_functions:
     name: Cloud Funcations CI
@@ -90,7 +93,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r usl_pipeline/cloud_functions/requirements.txt
         cp -r usl_pipeline/usl_lib/usl_lib usl_pipeline/cloud_functions
-        pip install black~=24.0 flake8~=7.0 flake8-docstrings~=1.7 pytest~=8.0
+        pip install black~=24.0 flake8~=7.0 flake8-docstrings~=1.7 pytest~=8.0 mypy~=1.9
     - name: Lint with flake8
       run: |
         flake8 usl_pipeline/cloud_functions --show-source --statistics
@@ -98,59 +101,16 @@ jobs:
       run: |
         black usl_pipeline/cloud_functions --check
     - name: Test with pytest
+      # This is currently broken because usl_lib depends on gdal, which
+      # cloud_functions does not have in its requirmenets.txt (and can not, as
+      # it would break the cloud function.)
+      # run: |
+      #   pytest usl_pipeline/cloud_functions usl_pipeline/usl_lib
       run: |
         pytest usl_pipeline/cloud_functions
-
-  consistent_requirements:
-    name: Ensure Consistent Requirements
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v3
-      with:
-        python-version: "3.11"
-    - name: Ensure Consistent Requirements
+    - name: MyPy Type Checking
       run: |
-        cd usl_pipeline
-        cp requirements.txt requirements.txt.orig
-        ./gen_requirements_txt.sh
-        echo 'Ensuring gen_requirements_txt.sh has been run.'
-        echo 'If this fails, run gen_requirements_txt.sh and commit its changes.'
-        diff requirements.txt requirements.txt.orig
-        echo 'Ensuring requirements.txt can be installed.'
-        echo 'If this fails, ensure the cloud_functions and map_uploader do not require different versions of the same package.'
-        sudo apt-get update -qq
-        sudo add-apt-repository ppa:ubuntugis/ppa -y
-        sudo apt-get update -qq
-        sudo apt-get install -y gdal-bin libgdal-dev
-        pip install -r requirements.txt
-
-  type_checking:
-    # We run type checking against all the different packages together
-    # so MyPy can access the type definitions of shared library code
-    # while checking another package.
-    name: Type Checking from MyPy
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v3
-      with:
-        python-version: "3.11"
-    - name: Install dependencies
-      run: |
-        sudo apt-get update -qq
-        sudo add-apt-repository ppa:ubuntugis/ppa -y
-        sudo apt-get update -qq
-        sudo apt-get install -y gdal-bin libgdal-dev
-        python -m pip install --upgrade pip
-        cd usl_pipeline
-        pip install -r requirements.txt
-        pip install -e usl_lib[dev] -e map_uploader[dev]
-    - name: MyPy
-      run: |
-        mypy usl_pipeline
+        mypy usl_pipeline/cloud_functions
 
   usl_models:
     name: USL Models CI

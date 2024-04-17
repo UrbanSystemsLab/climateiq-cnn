@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 import fiona
 import fiona.crs
 import pyproj
-from shapely.geometry import Polygon
+from shapely import geometry
 
 SHAPE_FILE_POLYGON_FEATURE_TYPE = "Polygon"
 
@@ -12,7 +12,7 @@ def read_polygons_from_shape_file(
     file_path: str,
     target_crs: Optional[str] = None,
     mask_value_feature_property: Optional[str] = None,
-) -> list[Tuple[Polygon, int]]:
+) -> list[Tuple[geometry.Polygon, int]]:
     """Reads polygon data from shape file.
 
     The function supports several optional transformations. target_crs transforms the
@@ -70,5 +70,5 @@ def read_polygons_from_shape_file(
                     [p[0] for p in fragment], [p[1] for p in fragment]
                 )
                 transformed_fragment = zip(xx, yy)
-            polygons.append((Polygon(transformed_fragment), mask_value))
+            polygons.append((geometry.Polygon(transformed_fragment), mask_value))
     return polygons
