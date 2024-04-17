@@ -1,12 +1,12 @@
 import typing
-from typing import Generator, Tuple
+from typing import Iterable, Tuple
 
 from shapely import geometry
 
 
 def read_polygons_from_text_file(
     file: typing.TextIO,
-) -> Generator[Tuple[geometry.Polygon, int], None, None]:
+) -> Iterable[Tuple[geometry.Polygon, int]]:
     """Reads polygon information with optional mask values from text file.
 
     The algorithm detects if the first column in the file contains mask values that are
