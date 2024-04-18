@@ -42,7 +42,7 @@ class FloodConvLSTM(tf.keras.Model):
             layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
         ]
         self.st_cnn = tf.keras.Sequential(
-            [layers.TimeDistributed(layer) for layer in st_cnn_layers]
+            layers.TimeDistributed(layer) for layer in st_cnn_layers
         )
 
         # Geospatial CNN
