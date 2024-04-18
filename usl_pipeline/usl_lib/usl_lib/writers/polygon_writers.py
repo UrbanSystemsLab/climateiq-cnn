@@ -4,10 +4,6 @@ from typing import Tuple
 from shapely import geometry
 
 
-def num_list_to_strings(num_list):
-    return list(map(lambda v: str(v), num_list))
-
-
 def write_polygons_to_text_file(
     polygons_with_masks: list[Tuple[geometry.Polygon, int]],
     output_file: typing.TextIO,
@@ -20,21 +16,16 @@ def write_polygons_to_text_file(
         output_file: File text stream to write to.
         support_mask_values: Optional indicator that masks should be added into output
             as additional first column.
-
-    Returns:
-        The generator of tuples combining polygon with associated mask to iterate over.
     """
     output_file.write(f"{len(polygons_with_masks)}\n")
     for polygon_mask in polygons_with_masks:
         xx, yy = polygon_mask[0].exterior.coords.xy
-        x_list = xx.tolist()
-        y_list = yy.tolist()
         mask_prefix = f"{polygon_mask[1]} " if support_mask_values else ""
         output_file.write(
             "{}{} {} {}\n".format(
                 mask_prefix,
-                len(x_list),
-                " ".join(num_list_to_strings(x_list)),
-                " ".join(num_list_to_strings(y_list)),
+                len(xx),
+                " ".join(str(v) for v in xx),
+                " ".join(str(v) for v in yy),
             )
         )
