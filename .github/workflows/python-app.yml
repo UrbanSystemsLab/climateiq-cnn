@@ -16,12 +16,22 @@ jobs:
   usl_lib:
     name: usl_lib CI
     runs-on: ubuntu-latest
+    env:
+      FIRESTORE_EMULATOR_HOST: "localhost:8085"
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python 3.11
       uses: actions/setup-python@v3
       with:
         python-version: "3.11"
+    - name: Start FireStore Emulator
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
+        curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+        echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+        sudo apt-get update && sudo apt-get install -y google-cloud-cli google-cloud-cli-firestore-emulator
+        gcloud emulators firestore start --host-port=localhost:8085 &
     - name: Install dependencies
       run: |
         sudo apt-get update -qq
@@ -72,7 +82,6 @@ jobs:
     - name: Test with pytest
       run: |
         pytest usl_pipeline/study_area_uploader
-        pytest usl_pipeline/usl_lib
     - name: MyPy Type Checking
       run: |
         mypy usl_pipeline/study_area_uploader
@@ -101,11 +110,6 @@ jobs:
       run: |
         black usl_pipeline/cloud_functions --check
     - name: Test with pytest
-      # This is currently broken because usl_lib depends on gdal, which
-      # cloud_functions does not have in its requirmenets.txt (and can not, as
-      # it would break the cloud function.)
-      # run: |
-      #   pytest usl_pipeline/cloud_functions usl_pipeline/usl_lib
       run: |
         pytest usl_pipeline/cloud_functions
     - name: MyPy Type Checking

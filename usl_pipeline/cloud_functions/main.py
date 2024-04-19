@@ -1,8 +1,9 @@
+import dataclasses
 import io
 import pathlib
 import logging
 import tarfile
-from typing import BinaryIO, Optional
+from typing import BinaryIO, IO, Optional, Tuple
 
 from google.cloud import error_reporting
 from google.cloud import firestore
@@ -15,6 +16,19 @@ import rasterio
 from usl_lib.readers import elevation_readers
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import metastore
+
+
+@dataclasses.dataclass(slots=True)
+class FeatureMetadata:
+    """Additional information about the extracted features.
+
+    Attributes:
+        elevation_min: The lowest elevation height encountered.
+        elevation_max: The highest elevation height encountered.
+    """
+
+    elevation_min: Optional[float] = None
+    elevation_max: Optional[float] = None
 
 
 @functions_framework.cloud_event
@@ -42,7 +56,7 @@ def _build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     chunk_blob = bucket.blob(chunk_name)
 
     with chunk_blob.open("rb") as archive:
-        feature_matrix = _build_feature_matrix_from_archive(archive)
+        feature_matrix, metadata = _build_feature_matrix_from_archive(archive)
         if feature_matrix is None:
             raise ValueError(f"Empty archive found in {chunk_blob}")
 
@@ -59,13 +73,21 @@ def _build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     matrix_file.seek(0)
     feature_blob.upload_from_file(matrix_file)
 
-    _write_metastore_entry(chunk_blob, feature_blob)
+    _write_metastore_entry(chunk_blob, feature_blob, metadata)
 
 
 def _build_feature_matrix_from_archive(
     archive: BinaryIO,
-) -> Optional[NDArray[numpy.float64]]:
-    """Builds a feature matrix for the given archive."""
+) -> Tuple[Optional[NDArray], FeatureMetadata]:
+    """Builds a feature matrix for the given archive.
+
+    Args:
+      archive: The file containing the archive.
+
+    Returns:
+      A tuple of (array, metadata) for the feature matrix and
+      metadata describing the feature matrix.
+    """
     with tarfile.TarFile(fileobj=archive) as tar:
         for member in tar:
             fd = tar.extractfile(member)
@@ -74,21 +96,52 @@ def _build_feature_matrix_from_archive(
 
             name = pathlib.PurePosixPath(member.name).name
             if name == "elevation.tif":
-                elevation = elevation_readers.read_from_geotiff(
-                    rasterio.io.MemoryFile(fd.read())
-                )
-                return elevation.data
+                return _read_elevation_features(fd)
             # TODO: handle additional archive members.
             else:
                 logging.warning(f"Unexpected member name: {name}")
 
-    return None
+    return None, FeatureMetadata()
+
+
+def _read_elevation_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+    """Reads the elevation file into a matrix and returns metadata for the matrix.
+
+    Args:
+      fd: The file containing elevation data.
+
+    Returns:
+      A tuple of (array, metadata) for the elevation matrix and
+      metadata describing the feature matrix.
+    """
+    elevation = elevation_readers.read_from_geotiff(
+        rasterio.io.MemoryFile(fd.read())
+    ).data
+
+    if elevation is None:
+        raise ValueError("Elevation file unexpectedly empty.")
+
+    metadata = FeatureMetadata(
+        elevation_min=elevation.min(),
+        elevation_max=elevation.max(),
+    )
+
+    return elevation, metadata
 
 
 def _write_metastore_entry(
-    chunk_blob: storage.Blob, feature_blob: storage.Blob
+    chunk_blob: storage.Blob, feature_blob: storage.Blob, metadata: FeatureMetadata
 ) -> None:
-    """Writes a Firestore entry for the new feature matrix chunk."""
+    """Updates the metastore with new information for the given chunks.
+
+    Writes a Firestore entry for the new feature matrix chunk. Updates elvation_min and
+    elevation_max values supplied in the metadata for the whole study area.
+
+    Args:
+      chunk_blob: The GCS blob containing the raw chunk archive.
+      feature_blob: The GCS blob containing the feature tensor for the chunk.
+      metadata: Additional metadata describing the features.
+    """
     db = firestore.Client()
 
     # The GCS paths should be in the form study_area_name/chunk_name
@@ -101,3 +154,11 @@ def _write_metastore_entry(
         archive_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
         feature_matrix_path=f"gs://{feature_blob.bucket.name}/{feature_blob.name}",
     ).merge(db, study_area_name)
+
+    if metadata.elevation_min is not None and metadata.elevation_max is not None:
+        metastore.StudyArea.update_min_max_elevation(
+            db,
+            study_area_name,
+            min_=metadata.elevation_min,
+            max_=metadata.elevation_max,
+        )
