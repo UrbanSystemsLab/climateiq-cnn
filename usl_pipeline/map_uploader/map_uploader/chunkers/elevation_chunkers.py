@@ -1,18 +1,9 @@
-import dataclasses
 import pathlib
 
 from osgeo import gdal
 
+from usl_lib.chunkers import chunkers_data
 from usl_lib.readers import elevation_readers
-
-
-@dataclasses.dataclass
-class ChunkDescriptor:
-    """Information about chunk file."""
-
-    y_chunk_index: int
-    x_chunk_index: int
-    path: pathlib.Path
 
 
 def split_geotiff_into_chunks(
@@ -20,7 +11,7 @@ def split_geotiff_into_chunks(
     chunk_size: int,
     output_dir_path: str | pathlib.Path,
     chunk_file_name_pattern: str = "chunk_{y}_{x}",
-) -> list[ChunkDescriptor]:
+) -> list[chunkers_data.ChunkDescriptor]:
     """Produces a grid of chunk GeoTIFF files based on input GeoTIFF file.
 
     Args:
@@ -41,7 +32,7 @@ def split_geotiff_into_chunks(
     y_chunk_count = int((global_row_count + chunk_size - 1) / chunk_size)
 
     ds = gdal.Open(str(elevation_file_path))
-    chunk_descriptors: list[ChunkDescriptor] = []
+    chunk_descriptors: list[chunkers_data.ChunkDescriptor] = []
     for y_chunk_index in range(y_chunk_count):
         for x_chunk_index in range(x_chunk_count):
             chunk_file_path = pathlib.Path(
@@ -58,7 +49,7 @@ def split_geotiff_into_chunks(
                 srcWin=[col_start, row_start, col_count, row_count],
             )
             chunk_descriptors.append(
-                ChunkDescriptor(
+                chunkers_data.ChunkDescriptor(
                     y_chunk_index=y_chunk_index,
                     x_chunk_index=x_chunk_index,
                     path=chunk_file_path,
