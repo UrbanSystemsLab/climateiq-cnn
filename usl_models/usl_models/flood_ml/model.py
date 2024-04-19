@@ -36,9 +36,9 @@ class FloodConvLSTM(tf.keras.Model):
         # Spatiotemporal CNN
         st_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
         st_cnn_layers = [
-            layers.Conv2D(16, 5, **st_cnn_params),
+            layers.Conv2D(8, 5, **st_cnn_params),
             layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
-            layers.Conv2D(64, 5, **st_cnn_params),
+            layers.Conv2D(16, 5, **st_cnn_params),
             layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
         ]
         self.st_cnn = tf.keras.Sequential(
