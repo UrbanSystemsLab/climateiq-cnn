@@ -3,14 +3,14 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="map_uploader",
+    name="study_area_uploader",
     packages=find_packages(),
     install_requires=[
         "gdal<=3.6.4",
     ],
     entry_points={
         "console_scripts": [
-            "upload_map = map_uploader.main:main",
+            "upload_study_area = study_area_uploader.main:main",
         ],
     },
     extras_require={

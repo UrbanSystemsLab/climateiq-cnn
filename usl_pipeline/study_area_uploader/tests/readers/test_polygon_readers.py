@@ -6,7 +6,7 @@ import fiona
 import numpy.testing as npt
 import pyproj
 
-from map_uploader.readers import polygon_readers
+from study_area_uploader.readers import polygon_readers
 
 
 def test_read_polygons_from_shape_file_with_transformation():

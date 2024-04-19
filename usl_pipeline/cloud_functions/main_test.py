@@ -42,14 +42,14 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
 
     # Create a mock blob for the archive which will return the above tiff when opened.
     mock_archive_blob = mock.MagicMock()
-    mock_archive_blob.name = "map/name.tar"
+    mock_archive_blob.name = "study_area/name.tar"
     mock_archive_blob.bucket.name = "bucket"
     mock_archive_blob.open.return_value = archive
 
     # Create a mock blob for feature matrix we will upload.
     mock_feature_blob = mock.MagicMock()
-    mock_feature_blob.name = "map/name.npy"
-    mock_feature_blob.bucket.name = "climateiq-map-feature-chunks"
+    mock_feature_blob.name = "study_area/name.npy"
+    mock_feature_blob.bucket.name = "climateiq-study_area-feature-chunks"
 
     # Return the mock blobs.
     mock_storage_client().bucket("").blob.side_effect = [
@@ -61,7 +61,7 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
     main._build_feature_matrix(
         functions_framework.CloudEvent(
             {"source": "test", "type": "event"},
-            data={"bucket": "bucket", "name": "map/name.tar"},
+            data={"bucket": "bucket", "name": "study_area/name.tar"},
         )
     )
 
@@ -69,9 +69,9 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
     mock_storage_client.assert_has_calls(
         [
             mock.call().bucket("bucket"),
-            mock.call().bucket().blob("map/name.tar"),
-            mock.call().bucket("climateiq-map-feature-chunks"),
-            mock.call().bucket().blob("map/name.npy"),
+            mock.call().bucket().blob("study_area/name.tar"),
+            mock.call().bucket("climateiq-study_area-feature-chunks"),
+            mock.call().bucket().blob("study_area/name.npy"),
         ]
     )
 
@@ -87,7 +87,7 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
         [
             mock.call(),
             mock.call().collection("study_areas"),
-            mock.call().collection().document("map"),
+            mock.call().collection().document("study_area"),
             mock.call().collection().document().collection("chunks"),
             mock.call().collection().document().collection().document("name"),
             mock.call()
@@ -97,9 +97,9 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
             .document()
             .set(
                 {
-                    "archive_path": "gs://bucket/map/name.tar",
+                    "archive_path": "gs://bucket/study_area/name.tar",
                     "feature_matrix_path": (
-                        "gs://climateiq-map-feature-chunks/map/name.npy"
+                        "gs://climateiq-study_area-feature-chunks/study_area/name.npy"
                     ),
                 },
                 merge=True,

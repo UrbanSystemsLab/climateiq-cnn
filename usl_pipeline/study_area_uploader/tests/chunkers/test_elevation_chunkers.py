@@ -5,7 +5,7 @@ import numpy
 from numpy import testing
 import rasterio
 
-from map_uploader.chunkers import elevation_chunkers
+from study_area_uploader.chunkers import elevation_chunkers
 from usl_lib.chunkers import chunkers_data
 from usl_lib.readers import elevation_readers
 from usl_lib.shared import geo_data

@@ -44,8 +44,8 @@ jobs:
       run: |
         mypy usl_pipeline/usl_lib
 
-  map_uploader:
-    name: Map Uploader CI
+  study_area_uploader:
+    name: Study Area Uploader CI
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
@@ -60,22 +60,22 @@ jobs:
         sudo apt-get update -qq
         sudo apt-get install -y gdal-bin libgdal-dev
         python -m pip install --upgrade pip
-        cd usl_pipeline/map_uploader
+        cd usl_pipeline/study_area_uploader
         pip install -r requirements.txt
         pip install -e .[dev]
     - name: Lint with flake8
       run: |
-        flake8 usl_pipeline/map_uploader --show-source --statistics
+        flake8 usl_pipeline/study_area_uploader --show-source --statistics
     - name: Ensure black auto-formatter has run
       run: |
-        black usl_pipeline/map_uploader --check
+        black usl_pipeline/study_area_uploader --check
     - name: Test with pytest
       run: |
-        pytest usl_pipeline/map_uploader
+        pytest usl_pipeline/study_area_uploader
         pytest usl_pipeline/usl_lib
     - name: MyPy Type Checking
       run: |
-        mypy usl_pipeline/map_uploader
+        mypy usl_pipeline/study_area_uploader
 
   cloud_functions:
     name: Cloud Funcations CI

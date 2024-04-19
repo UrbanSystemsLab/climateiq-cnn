@@ -1,7 +1,7 @@
 def test_import():
     """Ensure the packages are importable."""
     # TODO: replace this with real tests as we build out script functionality.
-    from map_uploader import main
+    from study_area_uploader import main
     import usl_lib
 
     del main
