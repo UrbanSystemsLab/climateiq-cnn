@@ -91,13 +91,13 @@ def _write_metastore_entry(
     """Writes a Firestore entry for the new feature matrix chunk."""
     db = firestore.Client()
 
-    # The GCS paths should be in the form map_name/chunk_name
+    # The GCS paths should be in the form study_area_name/chunk_name
     as_path = pathlib.PurePosixPath(chunk_blob.name)
-    map_name = str(as_path.parent)
+    study_area_name = str(as_path.parent)
     chunk_name = as_path.stem
 
     metastore.StudyAreaChunk(
         id_=chunk_name,
         archive_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
         feature_matrix_path=f"gs://{feature_blob.bucket.name}/{feature_blob.name}",
-    ).merge(db, map_name)
+    ).merge(db, study_area_name)

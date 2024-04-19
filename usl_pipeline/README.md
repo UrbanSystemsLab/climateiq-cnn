@@ -5,7 +5,7 @@ To install the package and its requirements for local development:
 - System dependencies:
   - GDAL version 3.6.4 or later (see https://gdal.org/download.html for details)
 - pip install -r requirements.txt
-- pip install -e usl_lib[dev] -e map_uploader[dev]
+- pip install -e usl_lib[dev] -e study_area_uploader[dev]
 
 To run the tests:
 - pytest
@@ -21,7 +21,7 @@ To run the code auto-formatter:
 
 Package Layout
 ==============
-- **map_uploader** contains a script for chunking and uploading geographies to
+- **study_area_uploader** contains a script for chunking and uploading geographies to
 Google Cloud Storage.
 - **cloud_functions** contains source code for Google Cloud Functions used in
 the data pipeline.
