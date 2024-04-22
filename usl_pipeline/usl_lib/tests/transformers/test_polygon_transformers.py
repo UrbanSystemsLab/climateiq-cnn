@@ -1,0 +1,28 @@
+from numpy import testing
+from shapely import geometry
+
+from usl_lib.shared import geo_data
+from usl_lib.transformers import polygon_transformers
+
+
+def test_rasterize_polygons():
+    header = geo_data.ElevationHeader(
+        col_count=7,
+        row_count=4,
+        x_ll_corner=0.0,
+        y_ll_corner=0.0,
+        cell_size=1.0,
+        nodata_value=0.0,
+    )
+    p1 = geometry.Polygon([(1, 0), (3, 0), (3, 3), (1, 3), (1, 0)])
+    p2 = geometry.Polygon([(4, 1), (7, 1), (7, 3), (4, 3), (4, 1)])
+    raster = polygon_transformers.rasterize_polygons(header, [(p1, 1), (p2, 2)])
+    testing.assert_array_equal(
+        raster,
+        [
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 1, 1, 0, 2, 2, 2],
+            [0, 1, 1, 0, 2, 2, 2],
+            [0, 1, 1, 0, 0, 0, 0],
+        ],
+    )
