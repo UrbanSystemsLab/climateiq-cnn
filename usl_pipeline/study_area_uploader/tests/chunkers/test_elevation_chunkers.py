@@ -5,8 +5,9 @@ import numpy
 from numpy import testing
 import rasterio
 
+from study_area_uploader.chunkers import elevation_chunkers
+from usl_lib.chunkers import chunkers_data
 from usl_lib.readers import elevation_readers
-from usl_lib.chunkers import elevation_chunkers
 from usl_lib.shared import geo_data
 
 
@@ -54,9 +55,9 @@ def assert_chunk_data_equal(
 
 def chunk_descriptor(
     dir_path: str, y_chunk_index: int, x_chunk_index: int
-) -> elevation_chunkers.ChunkDescriptor:
+) -> chunkers_data.ChunkDescriptor:
     file_name = "chunk_{0}_{1}".format(y_chunk_index, x_chunk_index)
-    return elevation_chunkers.ChunkDescriptor(
+    return chunkers_data.ChunkDescriptor(
         y_chunk_index=y_chunk_index,
         x_chunk_index=x_chunk_index,
         path=pathlib.Path(dir_path) / file_name,

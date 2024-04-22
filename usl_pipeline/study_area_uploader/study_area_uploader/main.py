@@ -32,9 +32,13 @@ def main() -> None:
     study_area.create(db)
 
     storage_client = storage.Client()
-    map_chunk_bucket = storage_client.bucket(cloud_storage.MAP_CHUNKS_BUCKET)
+    study_area_chunk_bucket = storage_client.bucket(
+        cloud_storage.STUDY_AREA_CHUNKS_BUCKET
+    )
     for i, chunk in enumerate(build_chunks(args.elevation_file)):
-        map_chunk_bucket.blob(f"{args.name}/chunk_{i}.tar").upload_from_file(chunk)
+        study_area_chunk_bucket.blob(f"{args.name}/chunk_{i}.tar").upload_from_file(
+            chunk
+        )
 
 
 def build_chunks(elevation_file_path: str):
