@@ -13,11 +13,9 @@ import main
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
     # Get some random data to place in a tiff file.
-    height = 5
+    height = 2
     width = 3
-    tiff_array = numpy.random.randint(
-        low=0, high=16, size=(height, width), dtype=numpy.uint8
-    )
+    tiff_array = numpy.array([[1, 2, 3], [4, 5, 6]], dtype=numpy.uint8)
 
     # Build an in-memory tiff file and grab its bytes.
     with rasterio.io.MemoryFile() as memfile:
@@ -57,6 +55,9 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
         mock_feature_blob,
     ]
     mock_storage_client.reset_mock()
+
+    # Simulate empty elevation min & max on the study area.
+    mock_firestore_client().collection().document().get().get.side_effect = KeyError
 
     main._build_feature_matrix(
         functions_framework.CloudEvent(
@@ -105,4 +106,9 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
                 merge=True,
             ),
         ]
+    )
+    # Ensure we set the elevation min & max
+    mock_firestore_client().transaction().update.assert_called_once_with(
+        mock_firestore_client().collection().document(),
+        {"elevation_min": 1, "elevation_max": 6},
     )

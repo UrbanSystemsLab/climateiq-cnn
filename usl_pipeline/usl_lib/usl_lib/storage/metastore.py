@@ -30,13 +30,64 @@ class StudyArea:
     y_ll_corner: float
     cell_size: float
     crs: str
+    elevation_min: Optional[float] = None
+    elevation_max: Optional[float] = None
 
     def create(self, db: firestore.Client) -> None:
-        """Creates a new study area in the given DB."""
-        as_dict = dataclasses.asdict(self)
-        del as_dict["name"]
+        """Creates a new study area in the given DB. Only writes non-None attributes.
+
+        Args:
+          db: The firestore database client to use for the read.
+        """
+        as_dict = {}
+        for field in self.__dataclass_fields__:
+            if field == "name":
+                continue
+
+            value = getattr(self, field)
+            if value is not None:
+                as_dict[field] = value
 
         db.collection(STUDY_AREAS).document(self.name).create(as_dict)
+
+    @classmethod
+    def get(cls, db: firestore.Client, name: str) -> "StudyArea":
+        """Retrieve the study area with the given name.
+
+        Args:
+          db: The firestore database client to use for the read.
+          study_area_name: The study area to retrieve.
+
+        Returns:
+          A StudyArea object representing the database's contents.
+        """
+        study_area_ref = db.collection(STUDY_AREAS).document(name).get()
+        if not study_area_ref.exists:
+            raise ValueError(f'No such study area "{name}"')
+
+        return cls(name=name, **study_area_ref.to_dict())
+
+    @staticmethod
+    def update_min_max_elevation(
+        db: firestore.Client, study_area_name: str, min_: float, max_: float
+    ) -> None:
+        """Sets elevation min & max if less or greater than the current min & max.
+
+        For the given study area, transactionally updates the elevation_min and
+        elevation_max field to the given min_ and max_ values if they are less than and
+        greater than the current values.
+
+        Args:
+          db: The firestore database client to use to make the update.
+          study_area_name: The study area to update.
+          min_: The min elevation value for the study area. Will only be set if less
+                than the study area's current min.
+          max_: The max elevation value for the study area. Will only be set if less
+                than the study area's current max.
+        """
+        study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
+        transaction = db.transaction()
+        _update_study_area_min_max_elevation(transaction, study_area_ref, min_, max_)
 
 
 @dataclasses.dataclass(slots=True)
@@ -78,3 +129,32 @@ class StudyAreaChunk:
             .document(self.id_)
             .set(as_dict, merge=True)
         )
+
+
+@firestore.transactional
+def _update_study_area_min_max_elevation(
+    transaction: firestore.Transaction,
+    study_area_ref: firestore.DocumentReference,
+    min_: float,
+    max_: float,
+) -> None:
+    """Updates the study area's elevation min & max in a transaction."""
+    snapshot = study_area_ref.get(transaction=transaction)
+    update = {}
+
+    try:
+        cur_min = snapshot.get("elevation_min")
+        if min_ < cur_min:
+            update["elevation_min"] = min_
+    except KeyError:
+        update["elevation_min"] = min_
+
+    try:
+        cur_max = snapshot.get("elevation_max")
+        if max_ > cur_max:
+            update["elevation_max"] = max_
+    except KeyError:
+        update["elevation_max"] = max_
+
+    if update:
+        transaction.update(study_area_ref, update)
