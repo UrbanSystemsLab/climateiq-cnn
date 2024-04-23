@@ -23,9 +23,6 @@ def rasterize_polygons(
         background_value: Optional background mask used to fill in the raster before
             drawing polygons (default value is 0).
     """
-    if len(polygons_with_masks) == 0:
-        return None
-
     for polygon_mask in polygons_with_masks:
         if polygon_mask[1] == background_value:
             raise ValueError(
@@ -37,6 +34,9 @@ def rasterize_polygons(
     cell_size = header.cell_size
     raster_cols = header.col_count
     raster_rows = header.row_count
+
+    if len(polygons_with_masks) == 0:
+        return numpy.full((raster_rows, raster_cols), background_value, dtype=int)
 
     # This transformation is backward one mapping raster cells back to original
     # coordinates (original_x = min_x + raster_x * step, y is similar).

@@ -1,3 +1,5 @@
+import pytest
+
 from numpy import testing
 from shapely import geometry
 
@@ -5,7 +7,7 @@ from usl_lib.shared import geo_data
 from usl_lib.transformers import polygon_transformers
 
 
-def test_rasterize_polygons():
+def test_rasterize_polygons_default_background():
     header = geo_data.ElevationHeader(
         col_count=7,
         row_count=4,
@@ -25,4 +27,64 @@ def test_rasterize_polygons():
             [0, 1, 1, 0, 2, 2, 2],
             [0, 1, 1, 0, 0, 0, 0],
         ],
+    )
+
+
+def test_rasterize_polygons_custom_background():
+    header = geo_data.ElevationHeader(
+        col_count=3,
+        row_count=3,
+        x_ll_corner=0.0,
+        y_ll_corner=0.0,
+        cell_size=1.0,
+        nodata_value=0.0,
+    )
+    p1 = geometry.Polygon([(1, 0), (3, 0), (3, 2), (1, 2), (1, 0)])
+    raster = polygon_transformers.rasterize_polygons(
+        header, [(p1, 1)], background_value=9
+    )
+    testing.assert_array_equal(
+        raster,
+        [
+            [9, 9, 9],
+            [9, 1, 1],
+            [9, 1, 1],
+        ],
+    )
+
+
+def test_rasterize_polygons_no_polygons():
+    header = geo_data.ElevationHeader(
+        col_count=2,
+        row_count=2,
+        x_ll_corner=0.0,
+        y_ll_corner=0.0,
+        cell_size=1.0,
+        nodata_value=0.0,
+    )
+    raster = polygon_transformers.rasterize_polygons(header, [], background_value=9)
+    testing.assert_array_equal(
+        raster,
+        [
+            [9, 9],
+            [9, 9],
+        ],
+    )
+
+
+def test_rasterize_polygons_wrong_polygon_mask():
+    header = geo_data.ElevationHeader(
+        col_count=3,
+        row_count=3,
+        x_ll_corner=0.0,
+        y_ll_corner=0.0,
+        cell_size=1.0,
+        nodata_value=0.0,
+    )
+    p1 = geometry.Polygon([(1, 0), (3, 0), (3, 2), (1, 2), (1, 0)])
+
+    with pytest.raises(ValueError) as exc:
+        polygon_transformers.rasterize_polygons(header, [(p1, 0)])
+    assert str(exc.value) == "Polygons with background mask are not allowed: {}".format(
+        (p1, 0)
     )
