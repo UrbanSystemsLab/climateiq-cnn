@@ -7,13 +7,17 @@ from usl_lib.chunkers import chunkers_data
 from usl_lib.shared import geo_data
 from usl_lib.writers import polygon_writers
 
+"""The bounding box represented by a tuple (min-x, min-y, max-x, max-y).
+"""
+BoundingBox = Tuple[float, float, float, float]
+
 
 def _get_chunk_bounding_box(
     elevation_header: geo_data.ElevationHeader,
     chunk_size: int,
     y_chunk_index: int,
     x_chunk_index: int,
-) -> Tuple[float, float, float, float]:
+) -> BoundingBox:
     """Calculates bounding box in coordinate values corresponding to a chunk region.
 
     Args:
@@ -44,9 +48,7 @@ def _get_chunk_bounding_box(
     return chunk_min_x, chunk_min_y, chunk_max_x, chunk_max_y
 
 
-def _bbox_intersection(
-    bbox1: Tuple[float, float, float, float], bbox2: Tuple[float, float, float, float]
-) -> bool:
+def _bbox_intersection(bbox1: BoundingBox, bbox2: BoundingBox) -> bool:
     """Checks if two bounding boxes have intersection.
 
     Each bounding box is represented by a tuple (min-x, min-y, max-x, max-y).
@@ -58,9 +60,12 @@ def _bbox_intersection(
     Returns:
         Indicator of the intersection of bounding boxes.
     """
-    return max(bbox1[0], bbox2[0]) <= min(bbox1[2], bbox2[2]) and max(
-        bbox1[1], bbox2[1]
-    ) <= min(bbox1[3], bbox2[3])
+    # Intersection check is done separately over each of X- and Y-axis. Along each
+    # dimension, we require that minimum bound of one box doesn't happen to be greater
+    # than maximum bound of the other box.
+    horizontal_overlap = not (bbox1[0] > bbox2[2] or bbox2[0] > bbox1[2])
+    vertical_overlap = not (bbox1[1] > bbox2[3] or bbox2[1] > bbox1[3])
+    return horizontal_overlap and vertical_overlap
 
 
 def split_polygons_into_chunks(
@@ -78,7 +83,7 @@ def split_polygons_into_chunks(
         chunk_size: Size of each chunk in cells.
         polygon_masks: Source of polygons with associated mask values.
         output_dir_path: Path to the directory where chunk files will be stored.
-        chunk_file_name_pattern: Format pattern used to generate chink file names.
+        chunk_file_name_pattern: Format pattern used to generate chunk file names.
         support_mask_values: Optional indicator that masks should be added into output
             as additional first column.
 
@@ -87,11 +92,11 @@ def split_polygons_into_chunks(
     """
     global_col_count = elevation_header.col_count
     global_row_count = elevation_header.row_count
-    x_chunk_count = int((global_col_count + chunk_size - 1) / chunk_size)
-    y_chunk_count = int((global_row_count + chunk_size - 1) / chunk_size)
+    x_chunk_count = (global_col_count + chunk_size - 1) // chunk_size
+    y_chunk_count = (global_row_count + chunk_size - 1) // chunk_size
 
     step = elevation_header.cell_size
-    chunk_bboxes: list[list[Tuple[float, float, float, float]]] = []
+    chunk_bboxes: list[list[BoundingBox]] = []
     chunk_polygons: list[list[list[Tuple[geometry.Polygon, int]]]] = []
     for y_chunk_index in range(0, y_chunk_count):
         chunk_bboxes.append([])

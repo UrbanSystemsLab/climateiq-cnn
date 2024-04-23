@@ -28,8 +28,8 @@ def split_geotiff_into_chunks(
 
     global_col_count = elevation.header.col_count
     global_row_count = elevation.header.row_count
-    x_chunk_count = int((global_col_count + chunk_size - 1) / chunk_size)
-    y_chunk_count = int((global_row_count + chunk_size - 1) / chunk_size)
+    x_chunk_count = (global_col_count + chunk_size - 1) // chunk_size
+    y_chunk_count = (global_row_count + chunk_size - 1) // chunk_size
 
     ds = gdal.Open(str(elevation_file_path))
     chunk_descriptors: list[chunkers_data.ChunkDescriptor] = []
