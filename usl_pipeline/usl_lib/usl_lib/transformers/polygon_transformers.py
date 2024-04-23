@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy
 import numpy.typing as npt
@@ -13,7 +13,7 @@ def rasterize_polygons(
     header: geo_data.ElevationHeader,
     polygons_with_masks: list[Tuple[geometry.Polygon, int]],
     background_value: int = 0,
-) -> Optional[npt.NDArray[numpy.float64]]:
+) -> npt.NDArray[numpy.float64]:
     """Rasterize polygons to an integer raster matrix.
 
     Args:
@@ -22,6 +22,10 @@ def rasterize_polygons(
             values are used to draw and fill in polygon shape in the raster).
         background_value: Optional background mask used to fill in the raster before
             drawing polygons (default value is 0).
+
+    Returns:
+        Matrix with integer raster masks of the size corresponding to a number of rows
+        and columns in the cell grid of the study area defined by the header.
     """
     for polygon_mask in polygons_with_masks:
         if polygon_mask[1] == background_value:
