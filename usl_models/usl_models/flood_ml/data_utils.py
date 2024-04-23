@@ -18,6 +18,6 @@ def temporal_window_view(data: np.ndarray, window: int) -> np.ndarray:
         we use zero padding at the beginning of the temporal data.
     """
     B = data.shape[0]
-    padding = np.zeros([B, window - 1])
+    padding = np.zeros([B, window - 1], dtype=np.float32)
     data = np.concatenate([padding, data], axis=-1)
     return stride_tricks.sliding_window_view(data, window, axis=-1)
