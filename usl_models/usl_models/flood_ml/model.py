@@ -1,12 +1,16 @@
 """Flood model definition."""
 
-from typing import Any
+from typing import Any, TypeAlias
 
 import tensorflow as tf
 from tensorflow.keras import layers
 
 from usl_models.flood_ml import constants
 from usl_models.flood_ml import data_utils
+
+st_tensor: TypeAlias = tf.Tensor
+geo_tensor: TypeAlias = tf.Tensor
+temp_tensor: TypeAlias = tf.Tensor
 
 
 class FloodConvLSTM(tf.keras.Model):
@@ -128,9 +132,9 @@ class FloodConvLSTM(tf.keras.Model):
 
     def forward(
         self,
-        st_input: tf.Tensor,
-        geo_input: tf.Tensor,
-        temp_input: tf.Tensor,
+        st_input: st_tensor,
+        geo_input: geo_tensor,
+        temp_input: temp_tensor,
     ) -> tf.Tensor:
         """Makes a single forward pass on a batch of data.
 
@@ -175,38 +179,28 @@ class FloodConvLSTM(tf.keras.Model):
 
         return output
 
-    def call(self, inputs) -> tuple[tf.Tensor, tf.Tensor]:
+    def call(self, inputs: dict[str, tf.Tensor]) -> tuple[tf.Tensor, tf.Tensor]:
         """Runs the entire autoregressive model.
 
         Args:
             inputs: A dictionary of input tensors.
-                - "geospatial" (required): [H, W, f]
-                - "temporal" (required): [T]
-                - "spatiotemporal" (optional): a single flood map [H, W]
 
         Returns:
             A tuple (all_flood_predictions, max_flood_map) of the flood predictions and
             the max predicted flood depth at each cell over the entire storm duration.
             The maps are the same shape as the input: (H, W).
         """
+        st_input, geo_input, full_temp_input = self._validate_and_preprocess_inputs(
+            inputs
+        )
+
         # This array stores the initial flood map and the n_predictions.
+        # The initial flood map is added to align indexing between flood maps
+        # and rainfall, i.e., the current flooding conditions and rainfall at
+        # time t are stored at index t along the temporal axis.
         flood_maps = tf.TensorArray(
             tf.float32, size=self.n_predictions + 1, clear_after_read=False
         )
-
-        # TODO: Add data validation
-        geo_input = inputs["geospatial"]
-        full_temp_input = data_utils.temporal_window_view(
-            inputs["temporal"], self.params["m_rainfall"]
-        )
-        # Note: We assume that, if provided, this input is a *single* flood map.
-        # For convenience, we add this to flood_maps to align indexing between
-        # flood maps and rainfall ,i.e., the current flooding conditions and
-        # rainfall at time t are stored at index t along the temporal axis.
-        st_input = inputs.get("spatiotemporal")
-        if st_input is None:
-            st_shape = geo_input.shape[:3] + [1]
-            st_input = tf.zeros(st_shape)
         flood_maps = flood_maps.write(0, st_input)
 
         # We use 1-indexing for simplicity. Time step t represents the t-th flood
@@ -231,6 +225,39 @@ class FloodConvLSTM(tf.keras.Model):
         self.geo_cnn_output = None
 
         return (predictions, max_flood)
+
+    def _validate_and_preprocess_inputs(
+        self,
+        inputs: dict[str, tf.Tensor],
+    ) -> tuple[st_tensor, geo_tensor, temp_tensor]:
+        """Validates inputs and does all necessary preprocessing.
+
+        Args:
+            inputs: A dictionary of input tensors.
+                - "geospatial" (required): [H, W, f]
+                - "temporal" (required): [T]
+                - "spatiotemporal" (optional): a single flood map [H, W]
+
+        Returns:
+            A tuple of (spatiotemporal, geospatial, temporal) tensors.
+        """
+        if "geospatial" not in inputs:
+            raise ValueError("Missing required tensor 'geospatial'.")
+        if "temporal" not in inputs:
+            raise ValueError("Missing required tensor 'temporal'.")
+
+        geo_input = inputs["geospatial"]
+        full_temp_input = data_utils.temporal_window_view(
+            inputs["temporal"], self.params["m_rainfall"]
+        )
+
+        # We assume that, if provided, this input is a *single* flood map.
+        st_input = inputs.get("spatiotemporal")
+        if st_input is None:
+            st_shape = geo_input.shape[:3] + [1]
+            st_input = tf.zeros(st_shape)
+
+        return (st_input, geo_input, full_temp_input)
 
     def _update_temporal_inputs(
         self, flood_maps: tf.TensorArray, full_temp_input: tf.Tensor, t: int
