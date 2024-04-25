@@ -1,7 +1,9 @@
+import datetime
 import io
 import tarfile
 from unittest import mock
 
+from google.cloud import firestore
 import functions_framework
 import numpy
 import rasterio
@@ -47,7 +49,7 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
     # Create a mock blob for feature matrix we will upload.
     mock_feature_blob = mock.MagicMock()
     mock_feature_blob.name = "study_area/name.npy"
-    mock_feature_blob.bucket.name = "climateiq-study_area-feature-chunks"
+    mock_feature_blob.bucket.name = "climateiq-study-area-feature-chunks"
 
     # Return the mock blobs.
     mock_storage_client().bucket("").blob.side_effect = [
@@ -71,7 +73,7 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
         [
             mock.call().bucket("bucket"),
             mock.call().bucket().blob("study_area/name.tar"),
-            mock.call().bucket("climateiq-study_area-feature-chunks"),
+            mock.call().bucket("climateiq-study-area-feature-chunks"),
             mock.call().bucket().blob("study_area/name.npy"),
         ]
     )
@@ -100,8 +102,9 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
                 {
                     "archive_path": "gs://bucket/study_area/name.tar",
                     "feature_matrix_path": (
-                        "gs://climateiq-study_area-feature-chunks/study_area/name.npy"
+                        "gs://climateiq-study-area-feature-chunks/study_area/name.npy"
                     ),
+                    "error": firestore.DELETE_FIELD,
                 },
                 merge=True,
             ),
@@ -112,3 +115,98 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
         mock_firestore_client().collection().document(),
         {"elevation_min": 1, "elevation_max": 6},
     )
+
+
+@mock.patch.object(main, "_build_feature_matrix", autospec=True)
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_build_feature_matrix_errors(
+    mock_firestore_client,
+    mock_error_reporting_client,
+    mock_build_feature_matrix,
+):
+    """Ensure errors are reported appropriately."""
+    # Cause the cloud function to fail.
+    mock_build_feature_matrix.side_effect = RuntimeError("oh no!")
+
+    # Grab the original datetime module before we mock it so we can use it below.
+    orig_datetime = datetime.datetime
+    # We can't mock datetime.now directly, we can only mock datetime
+    # https://docs.python.org/3/library/unittest.mock-examples.html#partial-mocking
+    with mock.patch.object(main.datetime, "datetime") as mock_datetime:
+        # Use the same value for `now` as the cloud function states as its timeCreated.
+        mock_datetime.now.return_value = orig_datetime(2012, 12, 21)
+        # Use the original functions rather than mocks.
+        mock_datetime.fromisoformat.side_effect = orig_datetime.fromisoformat
+        mock_datetime.side_effect = orig_datetime
+
+        main.build_feature_matrix(
+            functions_framework.CloudEvent(
+                {"source": "test", "type": "event"},
+                data={
+                    "bucket": "bucket",
+                    "name": "study_area/name.tar",
+                    "timeCreated": "2012-12-21T01:02:00",
+                    "id": "function-id",
+                },
+            )
+        )
+
+    # Ensure we called the error reporter.
+    mock_error_reporting_client().report_exception.assert_called_once()
+
+    # Ensure we wrote the error to firestore.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("study_area"),
+            mock.call().collection().document().collection("chunks"),
+            mock.call().collection().document().collection().document("name"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document()
+            .set(
+                {"error": "oh no!"},
+                merge=True,
+            ),
+        ]
+    )
+
+
+@mock.patch.object(main, "_build_feature_matrix", autospec=True)
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_build_feature_matrix_retries(
+    mock_firestore_client,
+    mock_error_reporting_client,
+    mock_build_feature_matrix,
+):
+    """Ensure we halt on old retries."""
+    # Grab the original datetime module before we mock it so we can use it below.
+    orig_datetime = datetime.datetime
+    # We can't mock datetime.now directly, we can only mock datetime
+    # https://docs.python.org/3/library/unittest.mock-examples.html#partial-mocking
+    with mock.patch.object(main.datetime, "datetime") as mock_datetime:
+        # Use a value for `now` long after the cloud function states as its timeCreated.
+        mock_datetime.now.return_value = orig_datetime(2030, 1, 1)
+        # Use the original functions rather than mocks.
+        mock_datetime.fromisoformat.side_effect = orig_datetime.fromisoformat
+        mock_datetime.side_effect = orig_datetime
+
+        main.build_feature_matrix(
+            functions_framework.CloudEvent(
+                {"source": "test", "type": "event"},
+                data={
+                    "bucket": "bucket",
+                    "name": "study_area/name.tar",
+                    "timeCreated": "2012-12-21T01:02:00",
+                    "id": "function-id",
+                },
+            )
+        )
+
+    # Ensure we didn't try to do actual cloud function work.
+    mock_build_feature_matrix.assert_not_called()
