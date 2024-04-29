@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Iterable, Tuple
 
 import numpy
 import numpy.typing as npt
@@ -56,3 +56,22 @@ def rasterize_polygons(
     # Up-down flip is needed to correct the direction of Y-axis which should go from
     # the top to the bottom when raster is visualized.
     return numpy.flipud(raster_matrix)
+
+
+def get_bounding_box_for_boundaries(
+    boundary_polygons: Iterable[geometry.Polygon],
+) -> geo_data.BoundingBox:
+    """Calculates bounding box for polygons.
+
+    Args:
+        boundary_polygons: Sequence of polygons to iterate over.
+
+    Returns:
+        The smallest bounding box containing all the polygons.
+    """
+    bbox_list = [p.bounds for p in boundary_polygons]
+    min_x = min([bbox[0] for bbox in bbox_list])
+    max_x = max([bbox[2] for bbox in bbox_list])
+    min_y = min([bbox[1] for bbox in bbox_list])
+    max_y = max([bbox[3] for bbox in bbox_list])
+    return min_x, min_y, max_x, max_y
