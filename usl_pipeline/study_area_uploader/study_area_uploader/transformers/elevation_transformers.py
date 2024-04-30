@@ -43,12 +43,12 @@ def crop_geotiff_to_sub_area(
     # The forward transformation maps X/Y coordinates to raster column/row.
     fwd_transform = ~bck_transform
 
-    (left_col, lower_row) = fwd_transform * (
+    left_col, lower_row = fwd_transform * (
         sub_area_bounding_box[0],
         sub_area_bounding_box[1],
     )
 
-    (right_col, upper_row) = fwd_transform * (
+    right_col, upper_row = fwd_transform * (
         sub_area_bounding_box[2],
         sub_area_bounding_box[3],
     )
