@@ -12,6 +12,7 @@ _MODEL_PARAMS = {
     "lstm_dropout": 0.2,
     "lstm_recurrent_dropout": 0.2,
     "m_rainfall": 3,
+    "n_flood_maps": 3,
 }
 
 
@@ -79,6 +80,28 @@ def test_forward():
     # time slice as the flood maps. We take the first <flood_maps> values.
     temp_input = temp_input[:, :flood_maps, :]
 
-    model = flood_model.FloodConvLSTM(_MODEL_PARAMS)
+    model = flood_model.FloodConvLSTM(_MODEL_PARAMS, 1, spatial_dims=(height, width))
     prediction = model.forward(st_input, geo_input, temp_input)
     assert prediction.shape == (batch_size, height, width, 1)
+
+
+def test_model_call():
+    """Tests the model call."""
+    batch_size = 4
+    height, width = 100, 100
+    rainfall_duration = 6
+
+    fake_input = fake_flood_input_batch(
+        batch_size,
+        height=height,
+        width=width,
+        rainfall_duration=rainfall_duration,
+        include_flood_maps=False,
+    )
+
+    model = flood_model.FloodConvLSTM(
+        _MODEL_PARAMS, rainfall_duration, spatial_dims=(height, width)
+    )
+    flood_predictions, max_flood_prediction = model(fake_input)
+    assert flood_predictions.shape == (batch_size, rainfall_duration, height, width)
+    assert max_flood_prediction.shape == (batch_size, height, width)
