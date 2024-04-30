@@ -88,3 +88,17 @@ def test_rasterize_polygons_wrong_polygon_mask():
     assert str(exc.value) == "Polygons with background mask are not allowed: {}".format(
         (p1, 0)
     )
+
+
+def test_get_bounding_box_for_boundaries():
+    p1 = geometry.Polygon([(1, -10), (3, -10), (3, 4), (1, -10)])
+    p2 = geometry.Polygon([(4, 1), (7, 1), (7, 13), (4, 1)])
+
+    bounding_box_1 = polygon_transformers.get_bounding_box_for_boundaries([p1])
+    assert bounding_box_1 == (1, -10, 3, 4)
+
+    bounding_box_2 = polygon_transformers.get_bounding_box_for_boundaries([p2])
+    assert bounding_box_2 == (4, 1, 7, 13)
+
+    bounding_box_1_2 = polygon_transformers.get_bounding_box_for_boundaries([p1, p2])
+    assert bounding_box_1_2 == (1, -10, 7, 13)

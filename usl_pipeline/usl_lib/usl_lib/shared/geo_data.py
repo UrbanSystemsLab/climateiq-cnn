@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -37,3 +37,8 @@ class ElevationHeader:
 class Elevation:
     header: ElevationHeader
     data: Optional[npt.NDArray[np.float64]] = None
+
+
+"""The bounding box represented by a tuple (min-x, min-y, max-x, max-y).
+"""
+BoundingBox = Tuple[float, float, float, float]
