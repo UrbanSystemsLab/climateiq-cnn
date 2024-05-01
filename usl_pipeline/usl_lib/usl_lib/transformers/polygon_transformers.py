@@ -75,3 +75,41 @@ def get_bounding_box_for_boundaries(
     min_y = min(bbox[1] for bbox in bbox_list)
     max_y = max(bbox[3] for bbox in bbox_list)
     return min_x, min_y, max_x, max_y
+
+
+def crop_polygons_to_sub_area(
+    polygon_masks: Iterable[Tuple[geometry.Polygon, int]],
+    sub_area_bounding_box: geo_data.BoundingBox,
+) -> Iterable[Tuple[geometry.Polygon, int]]:
+    """Crops the polygon data by sub-area bounding box.
+
+    Args:
+        polygon_masks: Source of polygons with associated mask values.
+        sub_area_bounding_box: Sub-area bounding box defined in coordinate system of the
+            source elevation data.
+
+    Returns:
+        Iterator of polygon/mask tuple overlapping with sub-area bounding box.
+    """
+    x1, y1, x2, y2 = sub_area_bounding_box
+    sub_area_polygon = geometry.Polygon(
+        [(x1, y1), (x2, y1), (x2, y2), (x1, y2), (x1, y1)]
+    )
+    for polygon_mask in polygon_masks:
+        pol_bbox = polygon_mask[0].bounds
+
+        # Let's ignore polygon if it's outside the sub-area.
+        if not geo_data.bounding_box_intersection(sub_area_bounding_box, pol_bbox):
+            continue
+        if geo_data.bounding_box_nesting(sub_area_bounding_box, pol_bbox):
+            yield polygon_mask
+        else:
+            poly_or_multi = polygon_mask[0].intersection(sub_area_polygon)
+            # Intersection of 2 polygons may be either a polygon or a multi-polygon
+            if poly_or_multi.geom_type == "Polygon":
+                if not poly_or_multi.is_empty:
+                    yield poly_or_multi, polygon_mask[1]
+            elif poly_or_multi.geom_type == "MultiPolygon":
+                for sub_polygon in poly_or_multi.geoms:
+                    if not sub_polygon.is_empty:
+                        yield sub_polygon, polygon_mask[1]

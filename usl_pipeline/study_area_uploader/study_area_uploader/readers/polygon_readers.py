@@ -1,15 +1,33 @@
-from typing import Optional, Tuple
+import pathlib
+from typing import Iterable, Optional, Tuple
 
 import fiona
 import fiona.crs
 import pyproj
+from pyproj import transformer
 from shapely import geometry
 
 SHAPE_FILE_POLYGON_FEATURE_TYPE = "Polygon"
+SHAPE_FILE_MULTI_POLYGON_TYPE = "MultiPolygon"
+
+Point = Tuple[float, float]
+PointFragment = Iterable[Point]
+
+
+def _transform_point_fragment(
+    fragment: PointFragment,
+    point_transformer: Optional[transformer.Transformer],
+) -> PointFragment:
+    if point_transformer is None:
+        return fragment
+    xx, yy = point_transformer.transform(
+        [p[0] for p in fragment], [p[1] for p in fragment]
+    )
+    return zip(xx, yy)
 
 
 def read_polygons_from_shape_file(
-    file_path: str,
+    file_path: str | pathlib.Path,
     target_crs: Optional[str] = None,
     mask_value_feature_property: Optional[str] = None,
 ) -> list[Tuple[geometry.Polygon, int]]:
@@ -28,19 +46,23 @@ def read_polygons_from_shape_file(
     Returns:
          The list of tuples combining polygon with associated mask.
     """
-    layer = fiona.open(file_path)
+    layer = fiona.open(str(file_path))
     source_crs = fiona.crs.to_string(layer.crs)
-    transformer = None
+    point_transformer: Optional[transformer.Transformer] = None
     if target_crs is not None and target_crs != source_crs:
-        transformer = pyproj.Transformer.from_crs(
+        point_transformer = pyproj.Transformer.from_crs(
             source_crs, target_crs, always_xy=True
         )
-    polygons = []
+    polygons: list[Tuple[geometry.Polygon, int]] = []
     for feature in layer:
         feature_type = feature.geometry.type
         # Skipping non polygon features:
-        if feature_type != SHAPE_FILE_POLYGON_FEATURE_TYPE:
+        if (
+            feature_type != SHAPE_FILE_POLYGON_FEATURE_TYPE
+            and feature_type != SHAPE_FILE_MULTI_POLYGON_TYPE
+        ):
             continue
+        is_multi_polygon = feature_type == SHAPE_FILE_MULTI_POLYGON_TYPE
         fragments = feature.geometry.coordinates
         mask_value = 1
 
@@ -64,11 +86,25 @@ def read_polygons_from_shape_file(
                 )
 
         for fragment in fragments:
-            transformed_fragment = fragment
-            if transformer is not None:
-                xx, yy = transformer.transform(
-                    [p[0] for p in fragment], [p[1] for p in fragment]
+            if is_multi_polygon:
+                polygons.extend(
+                    [
+                        (
+                            geometry.Polygon(
+                                _transform_point_fragment(f, point_transformer)
+                            ),
+                            mask_value,
+                        )
+                        for f in fragment
+                    ]
                 )
-                transformed_fragment = zip(xx, yy)
-            polygons.append((geometry.Polygon(transformed_fragment), mask_value))
+            else:
+                polygons.append(
+                    (
+                        geometry.Polygon(
+                            _transform_point_fragment(fragment, point_transformer)
+                        ),
+                        mask_value,
+                    )
+                )
     return polygons

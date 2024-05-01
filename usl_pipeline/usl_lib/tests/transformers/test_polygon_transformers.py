@@ -102,3 +102,52 @@ def test_get_bounding_box_for_boundaries():
 
     bounding_box_1_2 = polygon_transformers.get_bounding_box_for_boundaries([p1, p2])
     assert bounding_box_1_2 == (1, -10, 7, 13)
+
+
+def bbox_polygon(bbox: geo_data.BoundingBox):
+    x1, y1, x2, y2 = bbox
+    return geometry.Polygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2), (x1, y1)])
+
+
+def test_crop_polygons_to_sub_area_simple_case():
+    p1 = bbox_polygon((0, 20, 2, 22))
+    p2 = bbox_polygon((8, 28, 10, 30))
+    p3 = bbox_polygon((4, 24, 6, 26))
+    p4 = bbox_polygon((-5, -5, 0, 0))
+    polygon_masks = [(p1, 1), (p2, 2), (p3, 3), (p4, 4)]
+
+    crop_output = list(
+        polygon_transformers.crop_polygons_to_sub_area(polygon_masks, (1, 21, 9, 29))
+    )
+
+    assert len(crop_output) == 3  # Polygon p4 was ignored since it's outside
+
+    assert crop_output[0][0].equals(bbox_polygon((1, 21, 2, 22)))
+    assert crop_output[0][1] == 1
+
+    assert crop_output[1][0].equals(bbox_polygon((8, 28, 9, 29)))
+    assert crop_output[1][1] == 2
+
+    assert crop_output[2] == (p3, 3)  # Got untouched
+
+
+def test_crop_polygons_to_sub_area_multi_polygon_case():
+    p1 = geometry.Polygon([(0, 0), (4, 2), (0, 4), (4, 6), (0, 8), (0, 0)])
+
+    crop_output = list(
+        polygon_transformers.crop_polygons_to_sub_area([(p1, 1)], (2, 0, 4, 8))
+    )
+
+    assert len(crop_output) == 2
+    assert crop_output[0][0].equals(geometry.Polygon([(2, 1), (2, 3), (4, 2), (2, 1)]))
+    assert crop_output[1][0].equals(geometry.Polygon([(2, 5), (2, 7), (4, 6), (2, 5)]))
+
+
+def test_crop_polygons_to_sub_area_empty_case():
+    p1 = geometry.Polygon([(0, 3), (3, 3), (3, 0), (0, 3)])
+
+    crop_output = list(
+        polygon_transformers.crop_polygons_to_sub_area([(p1, 1)], (0, 0, 1, 1))
+    )
+
+    assert len(crop_output) == 0
