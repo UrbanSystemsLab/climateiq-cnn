@@ -78,5 +78,5 @@ def bounding_box_nesting(outer_bbox: BoundingBox, inner_bbox: BoundingBox) -> bo
     """
     # Nesting check is done separately over each of X- and Y-axis.
     horiz_nesting = outer_bbox[0] <= inner_bbox[0] and inner_bbox[2] <= outer_bbox[2]
-    vert_overlap = outer_bbox[1] <= inner_bbox[1] and inner_bbox[3] <= outer_bbox[3]
-    return horiz_nesting and vert_overlap
+    vert_nesting = outer_bbox[1] <= inner_bbox[1] and inner_bbox[3] <= outer_bbox[3]
+    return horiz_nesting and vert_nesting
