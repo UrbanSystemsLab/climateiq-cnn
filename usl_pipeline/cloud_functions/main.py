@@ -1,10 +1,11 @@
 import dataclasses
 import datetime
+import functools
 import io
 import pathlib
 import logging
 import tarfile
-from typing import BinaryIO, IO, Optional, Tuple
+from typing import BinaryIO, Callable, IO, Optional, Tuple
 
 from google.cloud import error_reporting
 from google.cloud import firestore
@@ -16,6 +17,7 @@ import rasterio
 
 from usl_lib.readers import elevation_readers
 from usl_lib.storage import cloud_storage
+from usl_lib.storage import file_names
 from usl_lib.storage import metastore
 
 _MAX_RETRY_SECONDS = 20
@@ -34,7 +36,86 @@ class FeatureMetadata:
     elevation_max: Optional[float] = None
 
 
+def _retry_and_report_errors(
+    func: Callable[[functions_framework.CloudEvent], None]
+) -> Callable[[functions_framework.CloudEvent], None]:
+    """Decorator which adds error handling and retries to a cloud function."""
+
+    @functools.wraps(func)
+    def wrapper(cloud_event: functions_framework.CloudEvent) -> None:
+        logging.basicConfig(level=logging.WARN)
+
+        # To handle retries, check the time created and return if the event is too old.
+        # GCP retries until the function returns successfully, so the pattern is to
+        # report exceptions to have the function retried and return normally to stop
+        # retries. https://cloud.google.com/functions/docs/bestpractices/retries
+        event_time = datetime.datetime.fromisoformat(cloud_event.data["timeCreated"])
+        event_age = (
+            datetime.datetime.now(datetime.timezone.utc) - event_time
+        ).total_seconds()
+        if event_age > _MAX_RETRY_SECONDS:
+            logging.error(
+                "Dropped event id %s source %s after %s seconds",
+                cloud_event["id"],
+                cloud_event["source"],
+                _MAX_RETRY_SECONDS,
+            )
+            return
+
+        # Catch exceptions and report them with GCP error reporting.
+        try:
+            func(cloud_event)
+        except Exception as exc:  # noqa
+            # Log the exception to display in Cloud Function logs.
+            logging.exception(exc)
+            # Report the error in GCP Error Reporter.
+            error_reporting.Client().report_exception()
+            # Write the error to the metastore.
+            _write_chunk_metastore_error(cloud_event.data["name"], str(exc))
+
+    return wrapper
+
+
 @functions_framework.cloud_event
+@_retry_and_report_errors
+def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> None:
+    """Writes metadata for a study area on upload.
+
+    This function is triggered when files containing raw geo data for an entire study
+    area are uploaded to GCP. It writes an entry to the metastore for the new study
+    area. It also calculates min & max values needed for feature scaling of the relevant
+    files.
+    """
+    file_name = pathlib.PurePosixPath(cloud_event.data["name"])
+    if file_name.name == file_names.ELEVATION_TIF:
+        storage_client = storage.Client()
+        db = firestore.Client()
+
+        bucket = storage_client.bucket(cloud_event.data["bucket"])
+        blob = bucket.blob(str(file_name))
+
+        with blob.open("rb") as fd:
+            # We're only reading the header, so reading the first MB is plenty.
+            header = elevation_readers.read_from_geotiff(
+                rasterio.io.MemoryFile(fd.read(1048576)), header_only=True
+            ).header
+        # File names should be in the form <study_area_name>/<file_name>
+        study_area_name = file_name.parent.name
+
+        study_area = metastore.StudyArea(
+            name=study_area_name,
+            col_count=header.col_count,
+            row_count=header.row_count,
+            x_ll_corner=header.x_ll_corner,
+            y_ll_corner=header.y_ll_corner,
+            cell_size=header.cell_size,
+            crs=header.crs.to_string() if header.crs is not None else None,
+        )
+        study_area.set(db)
+
+
+@functions_framework.cloud_event
+@_retry_and_report_errors
 def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     """Builds a feature matrix when an archive of geo files is uploaded.
 
@@ -42,36 +123,6 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     GCP. It produces a feature matrix for the geo data and writes that feature matrix to
     another GCP bucket for eventual use in model training and prediction.
     """
-    logging.basicConfig(level=logging.WARN)
-
-    # To handle retries, check the time created and return if the event is too old.
-    # GCP retries until the function returns successfully, so the pattern is to report
-    # exceptions to have the function retried and return normally to stop retries.
-    # https://cloud.google.com/functions/docs/bestpractices/retries
-    event_time = datetime.datetime.fromisoformat(cloud_event.data["timeCreated"])
-    event_age = (
-        datetime.datetime.now(datetime.timezone.utc) - event_time
-    ).total_seconds()
-    if event_age > _MAX_RETRY_SECONDS:
-        logging.error(
-            "Dropped %s after %s seconds", cloud_event.data["id"], _MAX_RETRY_SECONDS
-        )
-        return
-
-    # Catch exceptions and report them with GCP error reporting.
-    try:
-        _build_feature_matrix(cloud_event)
-    except Exception as exc:  # noqa
-        # Log the exception to display in Cloud Function logs.
-        logging.exception(exc)
-        # Report the error in GCP Error Reporter.
-        error_reporting.Client().report_exception()
-        # Write the error to the metastore.
-        _write_chunk_metastore_error(cloud_event.data["name"], str(exc))
-
-
-def _build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
-    """Builds a feature matrix when an archive of geo files is uploaded."""
     storage_client = storage.Client()
     bucket = storage_client.bucket(cloud_event.data["bucket"])
     chunk_name = cloud_event.data["name"]
@@ -117,7 +168,7 @@ def _build_feature_matrix_from_archive(
                 continue
 
             name = pathlib.PurePosixPath(member.name).name
-            if name == "elevation.tif":
+            if name == file_names.ELEVATION_TIF:
                 return _read_elevation_features(fd)
             # TODO: handle additional archive members.
             else:

@@ -61,10 +61,14 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
     # Simulate empty elevation min & max on the study area.
     mock_firestore_client().collection().document().get().get.side_effect = KeyError
 
-    main._build_feature_matrix(
+    main.build_feature_matrix(
         functions_framework.CloudEvent(
             {"source": "test", "type": "event"},
-            data={"bucket": "bucket", "name": "study_area/name.tar"},
+            data={
+                "bucket": "bucket",
+                "name": "study_area/name.tar",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
         )
     )
 
@@ -117,17 +121,17 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
     )
 
 
-@mock.patch.object(main, "_build_feature_matrix", autospec=True)
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
 def test_build_feature_matrix_errors(
+    mock_storage_client,
     mock_firestore_client,
     mock_error_reporting_client,
-    mock_build_feature_matrix,
 ):
     """Ensure errors are reported appropriately."""
     # Cause the cloud function to fail.
-    mock_build_feature_matrix.side_effect = RuntimeError("oh no!")
+    mock_storage_client.side_effect = RuntimeError("oh no!")
 
     # Grab the original datetime module before we mock it so we can use it below.
     orig_datetime = datetime.datetime
@@ -176,13 +180,13 @@ def test_build_feature_matrix_errors(
     )
 
 
-@mock.patch.object(main, "_build_feature_matrix", autospec=True)
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
 def test_build_feature_matrix_retries(
+    mock_storage_client,
     mock_firestore_client,
     mock_error_reporting_client,
-    mock_build_feature_matrix,
 ):
     """Ensure we halt on old retries."""
     # Grab the original datetime module before we mock it so we can use it below.
@@ -209,4 +213,71 @@ def test_build_feature_matrix_retries(
         )
 
     # Ensure we didn't try to do actual cloud function work.
-    mock_build_feature_matrix.assert_not_called()
+    mock_storage_client.assert_not_called()
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+def test_write_study_area_metadata(mock_storage_client, mock_firestore_client):
+    # Get some random data to place in a tiff file.
+    height = 2
+    width = 3
+    tiff_array = numpy.array([[1, 2, 3], [4, 5, 6]], dtype=numpy.uint8)
+
+    # Build an in-memory tiff file and grab its bytes.
+    with rasterio.io.MemoryFile() as memfile:
+        with memfile.open(
+            driver="GTiff",
+            width=width,
+            height=height,
+            count=1,
+            dtype=rasterio.uint8,
+            crs=rasterio.CRS.from_epsg(32618),
+        ) as raster:
+            raster.write(tiff_array.astype(rasterio.uint8), 1)
+        tiff_bytes = io.BytesIO(memfile.read())
+
+    # Return the bytes above form the mock storage client.
+    mock_storage_client().bucket("").blob("").open.return_value = tiff_bytes
+
+    main.write_study_area_metadata(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "study_area/elevation.tif",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we worked with the right GCP paths.
+    mock_storage_client.assert_has_calls(
+        [
+            mock.call().bucket("bucket"),
+            mock.call().bucket().blob("study_area/elevation.tif"),
+        ]
+    )
+    mock_storage_client().bucket("").blob("").open.assert_called_once_with("rb")
+
+    # Ensure we wrote the firestore entry for the study area.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("study_area"),
+            mock.call()
+            .collection()
+            .document()
+            .set(
+                {
+                    "col_count": 3,
+                    "row_count": 2,
+                    "x_ll_corner": 0.0,
+                    "y_ll_corner": 2.0,
+                    "cell_size": 1.0,
+                    "crs": "EPSG:32618",
+                }
+            ),
+        ]
+    )
