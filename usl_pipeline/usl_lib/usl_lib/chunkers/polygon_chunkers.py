@@ -7,17 +7,13 @@ from usl_lib.chunkers import chunkers_data
 from usl_lib.shared import geo_data
 from usl_lib.writers import polygon_writers
 
-"""The bounding box represented by a tuple (min-x, min-y, max-x, max-y).
-"""
-BoundingBox = Tuple[float, float, float, float]
-
 
 def _get_chunk_bounding_box(
     elevation_header: geo_data.ElevationHeader,
     chunk_size: int,
     y_chunk_index: int,
     x_chunk_index: int,
-) -> BoundingBox:
+) -> geo_data.BoundingBox:
     """Calculates bounding box in coordinate values corresponding to a chunk region.
 
     Args:
@@ -45,27 +41,9 @@ def _get_chunk_bounding_box(
     chunk_row_count = min(chunk_size, global_row_count - y_chunk_index * chunk_size)
     chunk_max_x = chunk_min_x + chunk_col_count * cell_size
     chunk_min_y = chunk_max_y - chunk_row_count * cell_size
-    return chunk_min_x, chunk_min_y, chunk_max_x, chunk_max_y
-
-
-def _bbox_intersection(bbox1: BoundingBox, bbox2: BoundingBox) -> bool:
-    """Checks if two bounding boxes have intersection.
-
-    Each bounding box is represented by a tuple (min-x, min-y, max-x, max-y).
-
-    Args:
-        bbox1: Bounding box 1.
-        bbox2: Bounding box 2.
-
-    Returns:
-        Indicator of the intersection of bounding boxes.
-    """
-    # Intersection check is done separately over each of X- and Y-axis. Along each
-    # dimension, we require that minimum bound of one box doesn't happen to be greater
-    # than maximum bound of the other box.
-    horizontal_overlap = not (bbox1[0] > bbox2[2] or bbox2[0] > bbox1[2])
-    vertical_overlap = not (bbox1[1] > bbox2[3] or bbox2[1] > bbox1[3])
-    return horizontal_overlap and vertical_overlap
+    return geo_data.BoundingBox.from_tuple(
+        (chunk_min_x, chunk_min_y, chunk_max_x, chunk_max_y)
+    )
 
 
 def split_polygons_into_chunks(
@@ -96,7 +74,7 @@ def split_polygons_into_chunks(
     y_chunk_count = (global_row_count + chunk_size - 1) // chunk_size
 
     step = elevation_header.cell_size
-    chunk_bboxes: list[list[BoundingBox]] = []
+    chunk_bboxes: list[list[geo_data.BoundingBox]] = []
     chunk_polygons: list[list[list[Tuple[geometry.Polygon, int]]]] = []
     for y_chunk_index in range(0, y_chunk_count):
         chunk_bboxes.append([])
@@ -106,16 +84,21 @@ def split_polygons_into_chunks(
                 elevation_header, chunk_size, y_chunk_index, x_chunk_index
             )
             chunk_bboxes[y_chunk_index].append(
-                (bbox[0] - step, bbox[1] - step, bbox[2] + step, bbox[3] + step)
+                geo_data.BoundingBox(
+                    bbox.min_x - step,
+                    bbox.min_y - step,
+                    bbox.max_x + step,
+                    bbox.max_y + step,
+                )
             )
             chunk_polygons[y_chunk_index].append([])
 
     for polygon_mask in polygon_masks:
-        pol_bbox = polygon_mask[0].bounds
+        pol_bbox = geo_data.BoundingBox.from_tuple(polygon_mask[0].bounds)
         for y_chunk_index in range(0, y_chunk_count):
             for x_chunk_index in range(0, x_chunk_count):
                 chunk_bbox = chunk_bboxes[y_chunk_index][x_chunk_index]
-                if _bbox_intersection(chunk_bbox, pol_bbox):
+                if chunk_bbox.intersects(pol_bbox):
                     chunk_polygons[y_chunk_index][x_chunk_index].append(polygon_mask)
 
     chunk_descriptors: list[chunkers_data.ChunkDescriptor] = []
