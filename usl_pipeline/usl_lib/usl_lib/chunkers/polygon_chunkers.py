@@ -41,7 +41,9 @@ def _get_chunk_bounding_box(
     chunk_row_count = min(chunk_size, global_row_count - y_chunk_index * chunk_size)
     chunk_max_x = chunk_min_x + chunk_col_count * cell_size
     chunk_min_y = chunk_max_y - chunk_row_count * cell_size
-    return chunk_min_x, chunk_min_y, chunk_max_x, chunk_max_y
+    return geo_data.BoundingBox.from_tuple(
+        (chunk_min_x, chunk_min_y, chunk_max_x, chunk_max_y)
+    )
 
 
 def split_polygons_into_chunks(
@@ -82,16 +84,21 @@ def split_polygons_into_chunks(
                 elevation_header, chunk_size, y_chunk_index, x_chunk_index
             )
             chunk_bboxes[y_chunk_index].append(
-                (bbox[0] - step, bbox[1] - step, bbox[2] + step, bbox[3] + step)
+                geo_data.BoundingBox(
+                    bbox.min_x - step,
+                    bbox.min_y - step,
+                    bbox.max_x + step,
+                    bbox.max_y + step,
+                )
             )
             chunk_polygons[y_chunk_index].append([])
 
     for polygon_mask in polygon_masks:
-        pol_bbox = polygon_mask[0].bounds
+        pol_bbox = geo_data.BoundingBox.from_tuple(polygon_mask[0].bounds)
         for y_chunk_index in range(0, y_chunk_count):
             for x_chunk_index in range(0, x_chunk_count):
                 chunk_bbox = chunk_bboxes[y_chunk_index][x_chunk_index]
-                if geo_data.bounding_box_intersection(chunk_bbox, pol_bbox):
+                if chunk_bbox.intersects(pol_bbox):
                     chunk_polygons[y_chunk_index][x_chunk_index].append(polygon_mask)
 
     chunk_descriptors: list[chunkers_data.ChunkDescriptor] = []

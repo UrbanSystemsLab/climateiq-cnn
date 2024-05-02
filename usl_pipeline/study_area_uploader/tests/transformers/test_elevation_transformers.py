@@ -60,7 +60,7 @@ def test_crop_geotiff_to_sub_area():
 
         assert_crop_geotiff(
             input_file_path,
-            (13.0, 25.0, 15.0, 27.0),
+            geo_data.BoundingBox.from_tuple((13.0, 25.0, 15.0, 27.0)),
             geo_data.ElevationHeader(
                 col_count=2,
                 row_count=2,
@@ -75,7 +75,7 @@ def test_crop_geotiff_to_sub_area():
 
         assert_crop_geotiff(
             input_file_path,
-            (14.0, 24.0, 16.0, 26.0),
+            geo_data.BoundingBox.from_tuple((14.0, 24.0, 16.0, 26.0)),
             geo_data.ElevationHeader(
                 col_count=1,
                 row_count=1,
@@ -90,7 +90,7 @@ def test_crop_geotiff_to_sub_area():
 
         assert_crop_geotiff(
             input_file_path,
-            (14.0, 24.0, 16.0, 26.0),
+            geo_data.BoundingBox.from_tuple((14.0, 24.0, 16.0, 26.0)),
             geo_data.ElevationHeader(
                 col_count=3,
                 row_count=3,

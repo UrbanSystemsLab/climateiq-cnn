@@ -70,11 +70,12 @@ def get_bounding_box_for_boundaries(
         The smallest bounding box containing all the polygons.
     """
     bbox_list = [p.bounds for p in boundary_polygons]
-    min_x = min(bbox[0] for bbox in bbox_list)
-    max_x = max(bbox[2] for bbox in bbox_list)
-    min_y = min(bbox[1] for bbox in bbox_list)
-    max_y = max(bbox[3] for bbox in bbox_list)
-    return min_x, min_y, max_x, max_y
+    return geo_data.BoundingBox(
+        min_x=min(bbox[0] for bbox in bbox_list),
+        min_y=min(bbox[1] for bbox in bbox_list),
+        max_x=max(bbox[2] for bbox in bbox_list),
+        max_y=max(bbox[3] for bbox in bbox_list),
+    )
 
 
 def crop_polygons_to_sub_area(
@@ -91,17 +92,17 @@ def crop_polygons_to_sub_area(
     Returns:
         Iterator of polygon/mask tuple overlapping with sub-area bounding box.
     """
-    x1, y1, x2, y2 = sub_area_bounding_box
+    x1, y1, x2, y2 = sub_area_bounding_box.to_tuple()
     sub_area_polygon = geometry.Polygon(
         [(x1, y1), (x2, y1), (x2, y2), (x1, y2), (x1, y1)]
     )
     for polygon_mask in polygon_masks:
-        pol_bbox = polygon_mask[0].bounds
+        pol_bbox = geo_data.BoundingBox.from_tuple(polygon_mask[0].bounds)
 
         # Let's ignore polygon if it's outside the sub-area.
-        if not geo_data.bounding_box_intersection(sub_area_bounding_box, pol_bbox):
+        if not sub_area_bounding_box.intersects(pol_bbox):
             continue
-        if geo_data.bounding_box_nesting(sub_area_bounding_box, pol_bbox):
+        if sub_area_bounding_box.contains(pol_bbox):
             yield polygon_mask
         else:
             poly_or_multi = polygon_mask[0].intersection(sub_area_polygon)

@@ -1,3 +1,4 @@
+from enum import StrEnum
 import pathlib
 from typing import Iterable, Optional, Tuple
 
@@ -7,17 +8,20 @@ import pyproj
 from pyproj import transformer
 from shapely import geometry
 
-SHAPE_FILE_POLYGON_FEATURE_TYPE = "Polygon"
-SHAPE_FILE_MULTI_POLYGON_TYPE = "MultiPolygon"
 
-Point = Tuple[float, float]
-PointFragment = Iterable[Point]
+class _SupportedShapeFileFeatureType(StrEnum):
+    POLYGON = "Polygon"
+    MULTI_POLYGON = "MultiPolygon"
+
+
+_Point = Tuple[float, float]
+_PointFragment = Iterable[_Point]
 
 
 def _transform_point_fragment(
-    fragment: PointFragment,
+    fragment: _PointFragment,
     point_transformer: Optional[transformer.Transformer],
-) -> PointFragment:
+) -> _PointFragment:
     if point_transformer is None:
         return fragment
     xx, yy = point_transformer.transform(
@@ -57,12 +61,12 @@ def read_polygons_from_shape_file(
     for feature in layer:
         feature_type = feature.geometry.type
         # Skipping non polygon features:
-        if (
-            feature_type != SHAPE_FILE_POLYGON_FEATURE_TYPE
-            and feature_type != SHAPE_FILE_MULTI_POLYGON_TYPE
+        if feature_type not in (
+            _SupportedShapeFileFeatureType.POLYGON,
+            _SupportedShapeFileFeatureType.MULTI_POLYGON,
         ):
             continue
-        is_multi_polygon = feature_type == SHAPE_FILE_MULTI_POLYGON_TYPE
+        is_multi_polygon = feature_type == _SupportedShapeFileFeatureType.MULTI_POLYGON
         fragments = feature.geometry.coordinates
         mask_value = 1
 
@@ -88,15 +92,13 @@ def read_polygons_from_shape_file(
         for fragment in fragments:
             if is_multi_polygon:
                 polygons.extend(
-                    [
-                        (
-                            geometry.Polygon(
-                                _transform_point_fragment(f, point_transformer)
-                            ),
-                            mask_value,
-                        )
-                        for f in fragment
-                    ]
+                    (
+                        geometry.Polygon(
+                            _transform_point_fragment(f, point_transformer)
+                        ),
+                        mask_value,
+                    )
+                    for f in fragment
                 )
             else:
                 polygons.append(

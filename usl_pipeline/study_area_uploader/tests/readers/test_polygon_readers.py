@@ -1,7 +1,6 @@
 import pathlib
 import pytest
 import tempfile
-from typing import Tuple
 
 import fiona
 import numpy.testing as npt
@@ -9,11 +8,6 @@ import pyproj
 from shapely import geometry
 
 from study_area_uploader.readers import polygon_readers
-
-
-def _polygon_to_points(polygon: geometry.Polygon) -> list[Tuple[float, float]]:
-    xx, yy = polygon.exterior.coords.xy
-    return list(zip(xx, yy))
 
 
 def test_read_polygons_from_shape_file_with_transformation():

@@ -44,13 +44,13 @@ def crop_geotiff_to_sub_area(
     fwd_transform = ~bck_transform
 
     left_col, lower_row = fwd_transform * (
-        sub_area_bounding_box[0],
-        sub_area_bounding_box[1],
+        sub_area_bounding_box.min_x,
+        sub_area_bounding_box.min_y,
     )
 
     right_col, upper_row = fwd_transform * (
-        sub_area_bounding_box[2],
-        sub_area_bounding_box[3],
+        sub_area_bounding_box.max_x,
+        sub_area_bounding_box.max_y,
     )
 
     col_start = max(0, int(left_col) - border_cell_count)
