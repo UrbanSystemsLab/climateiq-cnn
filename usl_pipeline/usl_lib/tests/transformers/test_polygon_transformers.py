@@ -20,7 +20,8 @@ def test_rasterize_polygons_default_background():
     p2 = geometry.Polygon([(4, 1), (7, 1), (7, 3), (4, 3), (4, 1)])
     p3 = geometry.Polygon([(3, 3), (4, 3), (4, 4), (3, 4), (3, 3)])
     raster = polygon_transformers.rasterize_polygons(
-        header, [(p1, 1), (p2, 2), (p3, 3)])
+        header, [(p1, 1), (p2, 2), (p3, 3)]
+    )
     testing.assert_array_equal(
         raster,
         [

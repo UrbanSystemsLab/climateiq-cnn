@@ -34,7 +34,7 @@ def fill_in_soil_classes_missing_values_from_nearest_polygons(
         return []
 
     masks = [polygon_mask[1] for polygon_mask in soil_classes_polygon_masks]
-    d = {'geometry': [polygon_mask[0] for polygon_mask in soil_classes_polygon_masks]}
+    d = {"geometry": [polygon_mask[0] for polygon_mask in soil_classes_polygon_masks]}
     gdf = gpd.GeoDataFrame(d)
 
     # Prepare coordinates left-upper corner of the study area
@@ -54,7 +54,7 @@ def fill_in_soil_classes_missing_values_from_nearest_polygons(
     )
     soil_classes_corrections: list[Tuple[geometry.Polygon, int]] = []
     missing_rows, missing_cols = numpy.where(missing_soil_classes == 1)
-    for (row, col) in zip(missing_rows.tolist(), missing_cols.tolist()):
+    for row, col in zip(missing_rows.tolist(), missing_cols.tolist()):
         # Calculate corners for the cell with missing soil class
         x1 = min_x + col * cell_size
         x2 = x1 + cell_size
