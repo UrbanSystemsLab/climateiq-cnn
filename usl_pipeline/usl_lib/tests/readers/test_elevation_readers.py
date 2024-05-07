@@ -74,24 +74,22 @@ def test_load_elevation_from_geotiff_with_changed_no_data():
         )
 
 
-def prepare_test_esri_ascii_file_wrapper():
-    lines = [
-        "ncols 3",
-        "nrows 2",
-        "xllcorner 100.0",
-        "yllcorner 496.0",
-        "cellsize 2.0",
-        "NODATA_value 0.0",
-        "0.0 1.0 2.0",
-        "3.0 4.0 5.0",
-    ]
-    reader = io.BufferedReader(io.BytesIO("\n".join(lines).encode("utf-8")))
-    return io.TextIOWrapper(reader)
-
-
 def test_load_elevation_from_esri_ascii_default_no_data():
-    with prepare_test_esri_ascii_file_wrapper() as file:
-        elevation = elevation_readers.read_from_esri_ascii(file)
+    with io.StringIO(
+        "\n".join(
+            (
+                "ncols 3",
+                "nrows 2",
+                "xllcorner 100.0",
+                "yllcorner 496.0",
+                "cellsize 2.0",
+                "NODATA_value 0.0",
+                "0.0 1.0 2.0",
+                "3.0 4.0 5.0",
+            )
+        )
+    ) as esri_file:
+        elevation = elevation_readers.read_from_esri_ascii(esri_file)
         assert elevation.header == geo_data.ElevationHeader(
             col_count=3,
             row_count=2,
@@ -110,8 +108,23 @@ def test_load_elevation_from_esri_ascii_default_no_data():
 
 
 def test_load_elevation_from_esri_ascii_with_changed_no_data():
-    with prepare_test_esri_ascii_file_wrapper() as file:
-        elevation = elevation_readers.read_from_esri_ascii(file, no_data_value=-9999.0)
+    with io.StringIO(
+        "\n".join(
+            (
+                "ncols 3",
+                "nrows 2",
+                "xllcorner 100.0",
+                "yllcorner 496.0",
+                "cellsize 2.0",
+                "NODATA_value 0.0",
+                "0.0 1.0 2.0",
+                "3.0 4.0 5.0",
+            )
+        )
+    ) as esri_file:
+        elevation = elevation_readers.read_from_esri_ascii(
+            esri_file, no_data_value=-9999.0
+        )
         assert elevation.header == geo_data.ElevationHeader(
             col_count=3,
             row_count=2,
@@ -124,6 +137,41 @@ def test_load_elevation_from_esri_ascii_with_changed_no_data():
             elevation.data,
             [
                 [-9999.0, 1.0, 2.0],
+                [3.0, 4.0, 5.0],
+            ],
+        )
+
+
+def test_load_elevation_from_esri_ascii_with_missing_nodata_header():
+    """Ensures we interpret an absent NO_DATA header as a NO_DATA value of -9999."""
+    with io.StringIO(
+        "\n".join(
+            (
+                "ncols 3",
+                "nrows 2",
+                "xllcorner 100.0",
+                "yllcorner 496.0",
+                "cellsize 2.0",
+                "0.0 1.0 2.0",
+                "3.0 4.0 5.0",
+            )
+        )
+    ) as esri_file:
+        elevation = elevation_readers.read_from_esri_ascii(
+            esri_file, no_data_value=-9999.0
+        )
+        assert elevation.header == geo_data.ElevationHeader(
+            col_count=3,
+            row_count=2,
+            x_ll_corner=100.0,
+            y_ll_corner=496.0,
+            cell_size=2.0,
+            nodata_value=-9999.0,
+        )
+        testing.assert_array_equal(
+            elevation.data,
+            [
+                [0.0, 1.0, 2.0],
                 [3.0, 4.0, 5.0],
             ],
         )
