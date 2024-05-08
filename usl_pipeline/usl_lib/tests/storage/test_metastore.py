@@ -35,6 +35,37 @@ def test_study_area_create():
     )
 
 
+def test_study_area_set():
+    mock_db = mock.MagicMock()
+    study_area = metastore.StudyArea(
+        name="name",
+        col_count=2,
+        row_count=3,
+        x_ll_corner=1.0,
+        y_ll_corner=2.0,
+        cell_size=3.0,
+        crs=None,
+    )
+    study_area.set(mock_db)
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("study_areas"),
+            mock.call.collection().document("name"),
+            mock.call.collection()
+            .document()
+            .set(
+                {
+                    "col_count": 2,
+                    "row_count": 3,
+                    "x_ll_corner": 1.0,
+                    "y_ll_corner": 2.0,
+                    "cell_size": 3.0,
+                }
+            ),
+        ]
+    )
+
+
 def test_study_area_chunk_merge():
     mock_db = mock.MagicMock()
     chunk = metastore.StudyAreaChunk(

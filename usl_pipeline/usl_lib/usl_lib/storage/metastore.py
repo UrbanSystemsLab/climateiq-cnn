@@ -29,7 +29,7 @@ class StudyArea:
     x_ll_corner: float
     y_ll_corner: float
     cell_size: float
-    crs: str
+    crs: Optional[str] = None
     elevation_min: Optional[float] = None
     elevation_max: Optional[float] = None
 
@@ -39,16 +39,15 @@ class StudyArea:
         Args:
           db: The firestore database client to use for the read.
         """
-        as_dict = {}
-        for field in self.__dataclass_fields__:
-            if field == "name":
-                continue
+        db.collection(STUDY_AREAS).document(self.name).create(self._as_dict())
 
-            value = getattr(self, field)
-            if value is not None:
-                as_dict[field] = value
+    def set(self, db: firestore.Client) -> None:
+        """Creates a new study area in the given DB. Only writes non-None attributes.
 
-        db.collection(STUDY_AREAS).document(self.name).create(as_dict)
+        Args:
+          db: The firestore database client to use for the read.
+        """
+        db.collection(STUDY_AREAS).document(self.name).set(self._as_dict())
 
     @classmethod
     def get(cls, db: firestore.Client, name: str) -> "StudyArea":
@@ -88,6 +87,18 @@ class StudyArea:
         study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
         transaction = db.transaction()
         _update_study_area_min_max_elevation(transaction, study_area_ref, min_, max_)
+
+    def _as_dict(self) -> dict:
+        as_dict = {}
+        for field in self.__dataclass_fields__:
+            if field == "name":
+                continue
+
+            value = getattr(self, field)
+            if value is not None:
+                as_dict[field] = value
+
+        return as_dict
 
 
 @dataclasses.dataclass(slots=True)

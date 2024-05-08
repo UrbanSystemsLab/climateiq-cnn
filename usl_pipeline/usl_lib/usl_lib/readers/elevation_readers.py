@@ -6,6 +6,16 @@ import rasterio.features
 from usl_lib.shared import geo_data
 
 
+_ESRI_HEADER_KEYWORDS = {
+    "ncols",
+    "nrows",
+    "xllcorner",
+    "yllcorner",
+    "cellsize",
+    "nodata_value",
+}
+
+
 def read_from_geotiff(
     file: typing.BinaryIO,
     header_only: bool = False,
@@ -67,14 +77,26 @@ def read_from_esri_ascii(
     Returns:
         Elevation object.
     """
-    # read 6 header lines
+    # Read initial header lines
     header_map = {}
-    for row_index in range(6):
-        line = file.readline()
+    while True:
+        read_start = file.tell()
+        line = file.readline().rstrip()
         # split into key/value pair
         key, value = line.split(maxsplit=1)
-        header_map[key.lower()] = value
-    input_nodata = float(header_map["nodata_value"])
+        key = key.lower()
+
+        # If the file line describes a header value, record it. Otherwise, seek back to
+        # where the line began so it can be re-read in the numpy.loadtxt call below.
+        if key in _ESRI_HEADER_KEYWORDS:
+            header_map[key] = value
+        else:
+            file.seek(read_start)
+            break
+
+    # The nodata_value header is optional and defaults to -9999.
+    # https://desktop.arcgis.com/en/arcmap/latest/manage-data/raster-and-images/esri-ascii-raster-format.htm
+    input_nodata = float(header_map.get("nodata_value", -9999))
     header = geo_data.ElevationHeader(
         col_count=int(header_map["ncols"]),
         row_count=int(header_map["nrows"]),
