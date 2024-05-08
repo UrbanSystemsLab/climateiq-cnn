@@ -1,40 +1,46 @@
 import argparse
 import io
 import tarfile
+import time
 
 from google.cloud import firestore
 from google.cloud import storage
 
-from usl_lib.readers import elevation_readers
 from usl_lib.storage import cloud_storage
+from usl_lib.storage import file_names
 from usl_lib.storage import metastore
 
 
 def main() -> None:
     """Breaks the input files into chunks and uploads them to GCS."""
     args = parse_args()
+
     db = firestore.Client()
-
-    with open(args.elevation_file, "rb") as elevation_fd:
-        header = elevation_readers.read_from_geotiff(
-            elevation_fd, header_only=True
-        ).header
-
-    study_area = metastore.StudyArea(
-        name=args.name,
-        col_count=header.col_count,
-        row_count=header.row_count,
-        x_ll_corner=header.x_ll_corner,
-        y_ll_corner=header.y_ll_corner,
-        cell_size=header.cell_size,
-        crs=header.crs.to_string() if header.crs is not None else "",
-    )
-    study_area.create(db)
-
     storage_client = storage.Client()
+    study_area_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_BUCKET)
     study_area_chunk_bucket = storage_client.bucket(
         cloud_storage.STUDY_AREA_CHUNKS_BUCKET
     )
+
+    study_area_bucket.blob(
+        f"{args.name}/{file_names.ELEVATION_TIF}"
+    ).upload_from_filename(args.elevation_file)
+    retries = 0
+    while True:
+        try:
+            metastore.StudyArea.get(db, args.name)
+        except ValueError:
+            if retries > 2:
+                raise RuntimeError(
+                    "Cloud function failed to create metastore entry on study area "
+                    "upload. Check the error log for details: "
+                    "https://pantheon.corp.google.com/errors"
+                )
+            retries += 1
+            time.sleep(5)
+        else:
+            break
+
     for i, chunk in enumerate(build_chunks(args.elevation_file)):
         study_area_chunk_bucket.blob(f"{args.name}/chunk_{i}.tar").upload_from_file(
             chunk
@@ -45,7 +51,7 @@ def build_chunks(elevation_file_path: str):
     # Place-holder for the real chunking function.
     tar_fd = io.BytesIO()
     with tarfile.open(mode="w", fileobj=tar_fd) as tar:
-        tar.add(elevation_file_path, arcname="elevation.tif")
+        tar.add(elevation_file_path, arcname=file_names.ELEVATION_TIF)
     tar_fd.flush()
     tar_fd.seek(0)
     yield tar_fd
@@ -63,7 +69,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--name", help="Name to associate with the geography.", required=True
     )
-    parser.add_argument("--elevation-file", help="Tiff file containing elevation data.")
+    parser.add_argument(
+        "--elevation-file", help="Tiff file containing elevation data.", required=True
+    )
     parser.add_argument(
         "--green-areas-file", help="Shape file containing green area locations."
     )
