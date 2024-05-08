@@ -7,7 +7,7 @@ import tensorflow as tf
 from usl_models.flood_ml import constants
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
 class FloodModelParams:
     # General parameters.
     batch_size: int = 64
