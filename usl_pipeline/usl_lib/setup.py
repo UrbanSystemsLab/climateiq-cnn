@@ -6,6 +6,7 @@ setup(
     name="usl_lib",
     packages=find_packages(),
     install_requires=[
+        "geopandas",
         "google-cloud-firestore",
         "rasterio",
         "shapely",

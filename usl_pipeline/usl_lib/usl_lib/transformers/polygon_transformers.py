@@ -13,7 +13,7 @@ def rasterize_polygons(
     header: geo_data.ElevationHeader,
     polygons_with_masks: list[Tuple[geometry.Polygon, int]],
     background_value: int = 0,
-) -> npt.NDArray[numpy.float64]:
+) -> npt.NDArray[numpy.int_]:
     """Rasterize polygons to an integer raster matrix.
 
     Args:
