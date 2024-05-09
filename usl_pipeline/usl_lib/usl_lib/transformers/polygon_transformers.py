@@ -114,3 +114,19 @@ def crop_polygons_to_sub_area(
                 for sub_polygon in poly_or_multi.geoms:
                     if not sub_polygon.is_empty:
                         yield sub_polygon, polygon_mask[1]
+
+
+def intersect(
+    polygon_masks_to_process: Iterable[Tuple[geometry.Polygon, int]],
+    multi_polygon_boundaries: geometry.MultiPolygon,
+) -> Iterable[Tuple[geometry.Polygon, int]]:
+    for polygon_mask in polygon_masks_to_process:
+        poly_or_multi = polygon_mask[0].intersection(multi_polygon_boundaries)
+        # Intersection of 2 polygons may be either a polygon or a multi-polygon
+        if poly_or_multi.geom_type == "Polygon":
+            if not poly_or_multi.is_empty:
+                yield poly_or_multi, polygon_mask[1]
+        elif poly_or_multi.geom_type == "MultiPolygon":
+            for sub_polygon in poly_or_multi.geoms:
+                if not sub_polygon.is_empty:
+                    yield sub_polygon, polygon_mask[1]
