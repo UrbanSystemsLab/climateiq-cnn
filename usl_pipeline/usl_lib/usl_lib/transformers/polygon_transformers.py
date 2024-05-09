@@ -120,6 +120,16 @@ def intersect(
     polygon_masks_to_process: Iterable[Tuple[geometry.Polygon, int]],
     multi_polygon_boundaries: geometry.MultiPolygon,
 ) -> Iterable[Tuple[geometry.Polygon, int]]:
+    """Intersects polygons associated with integer masks with multi-polygon boundaries.
+
+    Args:
+        polygon_masks_to_process: Input polygons associated with integer masks that
+            intersection process should be applied to.
+        multi_polygon_boundaries: Multi-polygon area to apply on the input polygons.
+
+    Returns:
+        Polygons associated with integer masks reduced to multi-polygon boundaries.
+    """
     for polygon_mask in polygon_masks_to_process:
         poly_or_multi = polygon_mask[0].intersection(multi_polygon_boundaries)
         # Intersection of 2 polygons may be either a polygon or a multi-polygon
