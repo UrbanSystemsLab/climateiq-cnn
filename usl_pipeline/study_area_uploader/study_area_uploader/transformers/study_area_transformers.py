@@ -1,4 +1,5 @@
 import os
+import logging
 import pathlib
 from typing import Optional
 
@@ -18,6 +19,7 @@ def _transform_shape_file(
     target_crs: str,
     mask_value_feature_property: Optional[str] = None,
 ) -> None:
+    """Writes a text file representation of the polygons inside `sub_area_bbox`."""
     polygons = shape_readers.read_polygons_from_shape_file(
         input_shape_file_path,
         target_crs=target_crs,
@@ -30,7 +32,7 @@ def _transform_shape_file(
             polygon_transformers.crop_polygons_to_sub_area(polygons, sub_area_bbox)
         )
     )
-    with pathlib.Path(output_polygon_file_path).open("w") as output_polygon_file:
+    with open(output_polygon_file_path, "w") as output_polygon_file:
         polygon_writers.write_polygons_to_text_file(
             filtered_polygons,
             output_polygon_file,
@@ -92,7 +94,7 @@ def transform_study_area_files(
 
     sub_area_bbox: Optional[geo_data.BoundingBox] = None
     if sub_area_boundaries_shape_file_path is not None:
-        print("Preparing Boundaries...")
+        logging.info("Preparing Boundaries...")
         boundaries_polygons = shape_readers.read_polygons_from_shape_file(
             sub_area_boundaries_shape_file_path, target_crs=crs
         )
@@ -106,7 +108,7 @@ def transform_study_area_files(
         )
 
     if sub_area_bbox is not None:
-        print("Preparing Elevation data...")
+        logging.info("Preparing Elevation data...")
         output_elevation_file = output_dir / elevation_output_file_name
         elevation_transformers.crop_geotiff_to_sub_area(
             elevation_file_path, output_elevation_file, sub_area_bbox
@@ -115,7 +117,7 @@ def transform_study_area_files(
         output_elevation_file = pathlib.Path(elevation_file_path)
 
     if buildings_shape_file_path is not None:
-        print("Preparing Buildings...")
+        logging.info("Preparing Buildings...")
         sub_area_buildings_file = output_dir / buildings_output_file_name
         _transform_shape_file(
             buildings_shape_file_path,
@@ -125,7 +127,7 @@ def transform_study_area_files(
         )
 
     if green_areas_shape_file_path is not None:
-        print("Preparing Green Areas...")
+        logging.info("Preparing Green Areas...")
         output_green_areas_file = output_dir / green_areas_output_file_name
         _transform_shape_file(
             green_areas_shape_file_path,
@@ -135,7 +137,7 @@ def transform_study_area_files(
         )
 
     if soil_classes_shape_file_path is not None:
-        print("Preparing Soil Classes...")
+        logging.info("Preparing Soil Classes...")
         output_soil_classes_file = output_dir / soil_classes_output_file_name
         _transform_shape_file(
             soil_classes_shape_file_path,
