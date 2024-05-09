@@ -159,3 +159,34 @@ def test_crop_polygons_to_sub_area_empty_case():
     )
 
     assert len(crop_output) == 0
+
+
+def test_intersect():
+    polygon_masks = [
+        (bbox_polygon(0, 0, 10, 3), 4),  # Lower horizontal block
+        (bbox_polygon(0, 7, 10, 10), 5),  # Upper horizontal block
+        (bbox_polygon(0, 100, 10, 110), 6),  # This one won't overlap with boundaries
+    ]
+    boundaries = geometry.MultiPolygon(
+        [
+            bbox_polygon(1, 1, 2, 9),  # Left vertical block
+            bbox_polygon(8, 1, 9, 9),  # Right vertical block
+        ]
+    )
+
+    output = list(polygon_transformers.intersect(polygon_masks, boundaries))
+    assert len(output) == 4
+    assert output[0][1] == 4
+    assert output[1][1] == 4
+    # We can only check if items #0 and #1 were part of the common multi-polygon
+    # without any guarantee of an order.
+    assert geometry.MultiPolygon([output[0][0], output[1][0]]).equals(
+        geometry.MultiPolygon([bbox_polygon(1, 1, 2, 3), bbox_polygon(8, 1, 9, 3)])
+    )
+    assert output[2][1] == 5
+    assert output[3][1] == 5
+    # We can only check if items #2 and #3 were part of the common multi-polygon
+    # without any guarantee of an order.
+    assert geometry.MultiPolygon([output[2][0], output[3][0]]).equals(
+        geometry.MultiPolygon([bbox_polygon(1, 7, 2, 9), bbox_polygon(8, 7, 9, 9)])
+    )
