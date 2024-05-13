@@ -37,47 +37,81 @@ class FeatureMetadata:
 
 
 def _retry_and_report_errors(
-    func: Callable[[functions_framework.CloudEvent], None]
-) -> Callable[[functions_framework.CloudEvent], None]:
-    """Decorator which adds error handling and retries to a cloud function."""
+    error_reporter_func: Optional[
+        Callable[[functions_framework.CloudEvent, Exception], None]
+    ] = None
+) -> Callable[
+    [Callable[[functions_framework.CloudEvent], None]],
+    Callable[[functions_framework.CloudEvent], None],
+]:
+    """Adds error reporting and retry logic to a cloud function.
 
-    @functools.wraps(func)
-    def wrapper(cloud_event: functions_framework.CloudEvent) -> None:
-        logging.basicConfig(level=logging.WARN)
+    If the decorated function raises an exception, the decorator will:
+    - Log the exception to stderr, which will make the error appear in cloud function
+      logs.
+    - Log the exception to the GCP Error Reporter service.
+    - If the caller supplies an `error_reporter_func` argument, calls that function with
+      the cloud event and exception object, allowing callers to add additional custom
+      error handling logic.
 
-        # To handle retries, check the time created and return if the event is too old.
-        # GCP retries until the function returns successfully, so the pattern is to
-        # report exceptions to have the function retried and return normally to stop
-        # retries. https://cloud.google.com/functions/docs/bestpractices/retries
-        event_time = datetime.datetime.fromisoformat(cloud_event.data["timeCreated"])
-        event_age = (
-            datetime.datetime.now(datetime.timezone.utc) - event_time
-        ).total_seconds()
-        if event_age > _MAX_RETRY_SECONDS:
-            logging.error(
-                "Dropped event id %s source %s after %s seconds",
-                cloud_event["id"],
-                cloud_event["source"],
-                _MAX_RETRY_SECONDS,
+    If enough time has passed since the cloud function's initial invocation, then the
+    decorated function will return rather than attempt to do work. This is to prevent
+    retries of cloud functions from retrying indefinitely.
+
+    Args:
+      error_reporter_func: A function the caller may define to perform additional error
+        handling. The funciont accepts a CloudEvent and Exception object. It may perform
+        additional error logic, such as writing the error to the metastore.
+    """
+
+    def decorator(
+        func: Callable[[functions_framework.CloudEvent], None]
+    ) -> Callable[[functions_framework.CloudEvent], None]:
+        """Decorator which adds error handling and retries to a cloud function."""
+
+        @functools.wraps(func)
+        def wrapper(cloud_event: functions_framework.CloudEvent) -> None:
+            logging.basicConfig(level=logging.WARN)
+
+            # To handle retries, check the time created and return if the event is too
+            # old. GCP retries until the function returns successfully, so the pattern
+            # is to report exceptions to have the function retried and return normally
+            # to stop retries.
+            # https://cloud.google.com/functions/docs/bestpractices/retries
+            event_time = datetime.datetime.fromisoformat(
+                cloud_event.data["timeCreated"]
             )
-            return
+            event_age = (
+                datetime.datetime.now(datetime.timezone.utc) - event_time
+            ).total_seconds()
+            if event_age > _MAX_RETRY_SECONDS:
+                logging.error(
+                    "Dropped event id %s source %s after %s seconds",
+                    cloud_event["id"],
+                    cloud_event["source"],
+                    _MAX_RETRY_SECONDS,
+                )
+                return
 
-        # Catch exceptions and report them with GCP error reporting.
-        try:
-            func(cloud_event)
-        except Exception as exc:  # noqa
-            # Log the exception to display in Cloud Function logs.
-            logging.exception(exc)
-            # Report the error in GCP Error Reporter.
-            error_reporting.Client().report_exception()
-            # Write the error to the metastore.
-            _write_chunk_metastore_error(cloud_event.data["name"], str(exc))
+            # Catch exceptions and report them with GCP error reporting.
+            try:
+                func(cloud_event)
+            except Exception as exc:  # noqa
+                # Log the exception to display in Cloud Function logs.
+                logging.exception(exc)
+                # Report the error in GCP Error Reporter.
+                error_reporting.Client().report_exception()
+                # Perform any custom error handling.
+                if error_reporter_func is not None:
+                    error_reporter_func(cloud_event, exc)
 
-    return wrapper
+        return wrapper
+
+    return decorator
 
 
 @functions_framework.cloud_event
-@_retry_and_report_errors
+@_retry_and_report_errors()
 def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> None:
     """Writes metadata for a study area on upload.
 
@@ -115,7 +149,11 @@ def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> No
 
 
 @functions_framework.cloud_event
-@_retry_and_report_errors
+@_retry_and_report_errors(
+    lambda cloud_event, exc: _write_chunk_metastore_error(
+        cloud_event.data["name"], str(exc)
+    )
+)
 def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     """Builds a feature matrix when an archive of geo files is uploaded.
 
