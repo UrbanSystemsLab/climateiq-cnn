@@ -281,3 +281,101 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client):
             ),
         ]
     )
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_write_flood_scenario_metadata(mock_firestore_client):
+    """Ensure we sync config uploads to the metastore."""
+    main.write_flood_scenario_metadata(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "config_name/Rainfall_Data_1.txt",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we wrote the firestore entry for the config.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("city_cat_rainfall_configs"),
+            mock.call()
+            .collection()
+            .document("gs%3A%2F%2Fbucket%2Fconfig_name%2FRainfall_Data_1.txt"),
+            mock.call()
+            .collection()
+            .document()
+            .set(
+                {
+                    "parent_config_name:": "config_name",
+                    "gcs_path": "gs://bucket/config_name/Rainfall_Data_1.txt",
+                }
+            ),
+        ]
+    )
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_write_flood_scenario_metadata_ignore_non_rainfall_files(mock_firestore_client):
+    """Ensure we ignore non-rainfall config uploads."""
+    main.write_flood_scenario_metadata(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "config_name/SomethingElse.txt",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    mock_firestore_client.assert_not_called()
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_delete_flood_scenario_metadata(mock_firestore_client):
+    """Ensure we sync config uploads to the metastore."""
+    main.delete_flood_scenario_metadata(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "config_name/Rainfall_Data_1.txt",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we delete the firestore entry for the config.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("city_cat_rainfall_configs"),
+            mock.call()
+            .collection()
+            .document("gs%3A%2F%2Fbucket%2Fconfig_name%2FRainfall_Data_1.txt"),
+            mock.call().collection().document().delete(),
+        ]
+    )
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_delete_flood_scenario_metadata_ignore_non_rainfall_files(
+    mock_firestore_client,
+):
+    """Ensure we ignore non-rainfall config uploads."""
+    main.delete_flood_scenario_metadata(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "config_name/SomethingElse.txt",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    mock_firestore_client.assert_not_called()

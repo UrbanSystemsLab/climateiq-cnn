@@ -1,11 +1,13 @@
 import dataclasses
 from typing import Optional
+import urllib.parse
 
 from google.cloud import firestore
 
 
 STUDY_AREAS = "study_areas"
 CHUNKS = "chunks"
+CITY_CAT_RAINFALL_CONFIG = "city_cat_rainfall_configs"
 
 
 @dataclasses.dataclass(slots=True)
@@ -169,3 +171,27 @@ def _update_study_area_min_max_elevation(
 
     if update:
         transaction.update(study_area_ref, update)
+
+
+@dataclasses.dataclass(slots=True)
+class FloodScenarioConfig:
+    """A configuration file describing rainfall patterns for a CityCAT simulation."""
+
+    gcs_path: str
+    parent_config_name: str
+
+    def set(self, db: firestore.Client) -> None:
+        """Creates or updates an existing entry for a CityCAT configuration file."""
+        # Use the GCS path as the document ID. URL-escape the ID, as forward slashes
+        # aren't allowed in document IDs.
+        db.collection(CITY_CAT_RAINFALL_CONFIG).document(
+            urllib.parse.quote(self.gcs_path, safe=())
+        ).set(
+            {"parent_config_name:": self.parent_config_name, "gcs_path": self.gcs_path}
+        )
+
+    @staticmethod
+    def delete(db: firestore.Client, gcs_path: str) -> None:
+        db.collection(CITY_CAT_RAINFALL_CONFIG).document(
+            urllib.parse.quote(gcs_path, safe=())
+        ).delete()

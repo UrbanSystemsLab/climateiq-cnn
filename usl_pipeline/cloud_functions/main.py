@@ -20,7 +20,7 @@ from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
 
-_MAX_RETRY_SECONDS = 20
+_MAX_RETRY_SECONDS = 60 * 2
 
 
 @dataclasses.dataclass(slots=True)
@@ -116,7 +116,7 @@ def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> No
     """Writes metadata for a study area on upload.
 
     This function is triggered when files containing raw geo data for an entire study
-    area are uploaded to GCP. It writes an entry to the metastore for the new study
+    area are uploaded to GCS. It writes an entry to the metastore for the new study
     area. It also calculates min & max values needed for feature scaling of the relevant
     files.
     """
@@ -149,6 +149,46 @@ def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> No
 
 
 @functions_framework.cloud_event
+@_retry_and_report_errors()
+def write_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) -> None:
+    """Writes metadata for uploaded flood scenario config.
+
+    This function is triggered when files for rainfall configuration are uploaded to
+    GCS. It writes an entry to the metastore for the configuration.
+    """
+    file_name = pathlib.PurePosixPath(cloud_event.data["name"])
+    # Distinguish between Rainfall_Data and CityCat_Config files, the latter of which we
+    # don't need to record.
+    if file_name.name.startswith("Rainfall_Data_"):
+        db = firestore.Client()
+
+        metastore.FloodScenarioConfig(
+            gcs_path=f"gs://{cloud_event.data['bucket']}/{cloud_event.data['name']}",
+            # File names should be in the form <parent_config_name>/<file_name>
+            parent_config_name=file_name.parent.name,
+        ).set(db)
+
+
+@functions_framework.cloud_event
+@_retry_and_report_errors()
+def delete_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) -> None:
+    """Delete metadata for uploaded flood scenario config.
+
+    This function is triggered when files for rainfall configuration are deleted from
+    GCS and likewise removes them from the metastore.
+    """
+    file_name = pathlib.PurePosixPath(cloud_event.data["name"])
+    # Distinguish between Rainfall_Data and CityCat_Config files, the latter of which we
+    # don't need to record.
+    if file_name.name.startswith("Rainfall_Data_"):
+        db = firestore.Client()
+
+        metastore.FloodScenarioConfig.delete(
+            db, f"gs://{cloud_event.data['bucket']}/{cloud_event.data['name']}"
+        )
+
+
+@functions_framework.cloud_event
 @_retry_and_report_errors(
     lambda cloud_event, exc: _write_chunk_metastore_error(
         cloud_event.data["name"], str(exc)
@@ -158,8 +198,8 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     """Builds a feature matrix when an archive of geo files is uploaded.
 
     This function is triggered when archive files containing geo data are uploaded to
-    GCP. It produces a feature matrix for the geo data and writes that feature matrix to
-    another GCP bucket for eventual use in model training and prediction.
+    GCS. It produces a feature matrix for the geo data and writes that feature matrix to
+    another GCS bucket for eventual use in model training and prediction.
     """
     storage_client = storage.Client()
     bucket = storage_client.bucket(cloud_event.data["bucket"])
