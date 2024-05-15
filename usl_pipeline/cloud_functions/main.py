@@ -13,6 +13,7 @@ from google.cloud import storage
 import functions_framework
 import numpy
 from numpy.typing import NDArray
+import xarray
 import rasterio
 
 from usl_lib.readers import config_readers
@@ -289,13 +290,29 @@ def _build_feature_matrix_from_archive(
                 continue
 
             name = pathlib.PurePosixPath(member.name).name
+            # TODO: Group logic branch by path (per hazard model)
             if name == file_names.ELEVATION_TIF:
                 return _read_elevation_features(fd)
+            # Handle heat model input files (WPS)
+            elif name.startswith("met_em") and name.endswith(".nc"):
+                return _read_wps_features(fd)
             # TODO: handle additional archive members.
             else:
                 logging.warning(f"Unexpected member name: {name}")
 
     return None, FeatureMetadata()
+
+
+def _read_wps_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+    # Ignore type checker error - BytesIO inherits from expected type BufferedIOBase
+    # https://shorturl.at/lk4om
+    with xarray.open_dataset(fd) as ds:  # type: ignore
+        feature = ds.data_vars["SNOALB"].values
+        # Drop time axis - each WPS output file will correspond to single time value
+        feature = numpy.squeeze(feature, axis=0)
+
+    # TODO: Write to metastore
+    return feature, FeatureMetadata()
 
 
 def _read_elevation_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
