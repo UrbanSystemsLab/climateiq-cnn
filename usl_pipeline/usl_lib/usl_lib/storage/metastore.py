@@ -178,6 +178,7 @@ class FloodScenarioConfig:
     """A configuration file describing rainfall patterns for a CityCAT simulation."""
 
     gcs_path: str
+    as_vector_gcs_path: str
     parent_config_name: str
 
     def set(self, db: firestore.Client) -> None:
@@ -187,7 +188,11 @@ class FloodScenarioConfig:
         db.collection(CITY_CAT_RAINFALL_CONFIG).document(
             urllib.parse.quote(self.gcs_path, safe=())
         ).set(
-            {"parent_config_name:": self.parent_config_name, "gcs_path": self.gcs_path}
+            {
+                "parent_config_name:": self.parent_config_name,
+                "gcs_path": self.gcs_path,
+                "as_vector_gcs_path": self.as_vector_gcs_path,
+            }
         )
 
     @staticmethod
