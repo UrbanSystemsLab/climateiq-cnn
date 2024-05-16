@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import pathlib
 from typing import Iterable, Optional, Tuple
 
-from google.cloud.storage import bucket
+from google.cloud import storage
 from shapely import geometry
 
 from study_area_uploader.readers import polygon_readers as shape_readers
@@ -75,7 +75,7 @@ def prepare_and_upload_study_area_files(
     soil_classes_shape_file_path: Optional[str | pathlib.Path],
     soil_class_mask_feature_property: Optional[str],
     work_dir: pathlib.Path,
-    study_area_bucket: bucket.Bucket,
+    study_area_bucket: storage.Bucket,
 ) -> PreparedInputData:
     """Prepares data needed to run pipeline for flood scenarios.
 

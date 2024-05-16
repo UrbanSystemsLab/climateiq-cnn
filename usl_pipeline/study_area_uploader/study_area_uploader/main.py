@@ -7,7 +7,6 @@ import time
 
 from google.cloud import firestore
 from google.cloud import storage
-from google.cloud.storage import bucket
 
 from study_area_uploader.transformers import study_area_transformers
 from usl_lib.storage import cloud_storage
@@ -70,7 +69,7 @@ def main() -> None:
 
 def export_to_city_cat(
     prepared_inputs: study_area_transformers.PreparedInputData,
-    flood_simulation_input_bucket: bucket.Bucket,
+    flood_simulation_input_bucket: storage.Bucket,
 ):
     # Place-holder for exporting study area data as inputs for CityCat program
     pass

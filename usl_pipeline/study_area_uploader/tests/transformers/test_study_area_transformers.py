@@ -5,6 +5,7 @@ from typing import Tuple
 from unittest import mock
 
 import fiona
+from google.cloud import storage
 import numpy
 from numpy import testing
 import rasterio
@@ -144,11 +145,12 @@ def test_prepare_and_upload_study_area_files_no_boundaries_buildings_only():
             buildings_input_file_path,
             [(bbox_polygon(2, 1, 4, 3), 1)],
         )
-        study_area_bucket = mock.MagicMock()
+        study_area_bucket = mock.MagicMock(spec=storage.Bucket)
         buildings_cloud_storage_buffer = StringIO()
         buildings_cloud_storage_buffer.close = lambda: None  # Want to check content
-        buildings_blob = study_area_bucket.blob.return_value
-        buildings_blob.open.return_value = buildings_cloud_storage_buffer
+        study_area_bucket.blob.return_value.open.return_value = (
+            buildings_cloud_storage_buffer
+        )
         prepared_inputs = study_area_transformers.prepare_and_upload_study_area_files(
             "TestArea1",
             elevation_input_file_path,
@@ -214,21 +216,21 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
         # Boundaries storage file mocks
         boundaries_cloud_storage_buffer = StringIO()
         boundaries_cloud_storage_buffer.close = lambda: None  # Want to check content
-        boundaries_blob = mock.MagicMock()
+        boundaries_blob = mock.MagicMock(spec=storage.Blob)
         boundaries_blob.open.return_value = boundaries_cloud_storage_buffer
         # Green areas storage file mocks
         green_areas_cloud_storage_buffer = StringIO()
         green_areas_cloud_storage_buffer.close = lambda: None  # Want to check content
-        green_areas_blob = mock.MagicMock()
+        green_areas_blob = mock.MagicMock(spec=storage.Blob)
         green_areas_blob.open.return_value = green_areas_cloud_storage_buffer
         # Soil classes storage file mocks
         soil_classes_cloud_storage_buffer = StringIO()
         soil_classes_cloud_storage_buffer.close = lambda: None  # Want to check content
-        soil_classes_blob = mock.MagicMock()
+        soil_classes_blob = mock.MagicMock(spec=storage.Blob)
         soil_classes_blob.open.return_value = soil_classes_cloud_storage_buffer
         # Storage bucket
-        study_area_bucket = mock.MagicMock()
-        elevation_blob = mock.MagicMock()
+        study_area_bucket = mock.MagicMock(spec=storage.Bucket)
+        elevation_blob = mock.MagicMock(spec=storage.Blob)
         study_area_bucket.blob.side_effect = [
             boundaries_blob,
             elevation_blob,
