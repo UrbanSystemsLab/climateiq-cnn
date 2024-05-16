@@ -200,7 +200,14 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
         green_areas_input_file_path = work_dir / "green_areas.shp"
         prepare_shape_file(
             green_areas_input_file_path,
-            [(bbox_polygon(2, 1, 4, 3), 1)],
+            [(bbox_polygon(0, 0, 2, 2), 1)],
+        )
+        # Green areas
+        soil_classes_input_file_path = work_dir / "soil_classes.shp"
+        prepare_shape_file(
+            soil_classes_input_file_path,
+            [(bbox_polygon(0, 0, 2, 2), 99)],
+            soil_class_prop="soil_class",
         )
 
         # Mocks:
@@ -214,9 +221,20 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
         green_areas_cloud_storage_buffer.close = lambda: None  # Want to check content
         green_areas_blob = mock.MagicMock()
         green_areas_blob.open.return_value = green_areas_cloud_storage_buffer
+        # Soil classes storage file mocks
+        soil_classes_cloud_storage_buffer = StringIO()
+        soil_classes_cloud_storage_buffer.close = lambda: None  # Want to check content
+        soil_classes_blob = mock.MagicMock()
+        soil_classes_blob.open.return_value = soil_classes_cloud_storage_buffer
         # Storage bucket
         study_area_bucket = mock.MagicMock()
-        study_area_bucket.blob.side_effect = [boundaries_blob, green_areas_blob]
+        elevation_blob = mock.MagicMock()
+        study_area_bucket.blob.side_effect = [
+            boundaries_blob,
+            elevation_blob,
+            green_areas_blob,
+            soil_classes_blob,
+        ]
 
         prepared_inputs = study_area_transformers.prepare_and_upload_study_area_files(
             "TestArea1",
@@ -224,8 +242,8 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
             boundaries_input_file_path,
             None,
             green_areas_input_file_path,
-            None,
-            None,
+            soil_classes_input_file_path,
+            "soil_class",
             work_dir,
             study_area_bucket,
         )
@@ -256,23 +274,34 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
         )
         assert len(prepared_inputs.green_areas_polygons) == 1
         assert prepared_inputs.green_areas_polygons[0][0].equals(
-            bbox_polygon(0, 0, 2, 2)
+            bbox_polygon(1, 1, 2, 2)
         )
+        assert len(prepared_inputs.soil_classes_polygons) == 1
+        assert prepared_inputs.soil_classes_polygons[0][0].equals(
+            bbox_polygon(1, 1, 2, 2)
+        )
+        assert prepared_inputs.soil_classes_polygons[0][1] == 99
         assert study_area_bucket.mock_calls == [
             mock.call.blob("TestArea1/boundaries.txt"),
-            mock.call.blob().open("w"),
             mock.call.blob("TestArea1/elevation.tif"),
-            mock.call.blob().upload_from_filename(
-                str(prepared_inputs.elevation_file_path)
-            ),
             mock.call.blob("TestArea1/green_areas.txt"),
-            mock.call.blob().open("w"),
+            mock.call.blob("TestArea1/soil_classes.txt"),
         ]
+        assert boundaries_blob.mock_calls == [mock.call.open("w")]
+        assert elevation_blob.mock_calls == [
+            mock.call.upload_from_filename(str(prepared_inputs.elevation_file_path))
+        ]
+        assert green_areas_blob.mock_calls == [mock.call.open("w")]
+        assert soil_classes_blob.mock_calls == [mock.call.open("w")]
         assert (
             boundaries_cloud_storage_buffer.getvalue()
             == "1\n" + "5 1.0 1.0 3.0 3.0 1.0 1.0 3.0 3.0 1.0 1.0\n"
         )
         assert (
             green_areas_cloud_storage_buffer.getvalue()
-            == "1\n" + "5 1.0 1.0 2.0 2.0 1.0 1.0 2.0 2.0 1.0 1.0\n"
+            == "1\n" + "5 2.0 2.0 1.0 1.0 2.0 2.0 1.0 1.0 2.0 2.0\n"
+        )
+        assert (
+            soil_classes_cloud_storage_buffer.getvalue()
+            == "1\n" + "99 5 2.0 2.0 1.0 1.0 2.0 2.0 1.0 1.0 2.0 2.0\n"
         )
