@@ -101,6 +101,7 @@ def test_flood_scenario_config_set():
         gcs_path="a/b/c",
         as_vector_gcs_path="d/e/f",
         parent_config_name="parent",
+        num_rainfall_entries=5,
     ).set(mock_db)
     mock_db.assert_has_calls(
         [
@@ -113,6 +114,7 @@ def test_flood_scenario_config_set():
                     "parent_config_name:": "parent",
                     "gcs_path": "a/b/c",
                     "as_vector_gcs_path": "d/e/f",
+                    "num_rainfall_entries": 5,
                 },
             ),
         ]
