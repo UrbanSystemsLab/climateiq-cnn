@@ -8,3 +8,4 @@ MAP_WIDTH = 1000
 # Temporal parameters. May be tuned.
 N_FLOOD_MAPS = 5
 M_RAINFALL = 6
+MAX_RAINFALL_DURATION = 864  # (60 / 5) * 24 * 3
