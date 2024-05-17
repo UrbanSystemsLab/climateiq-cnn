@@ -1,7 +1,9 @@
 import typing
+from typing import Optional
 
 import numpy
 import rasterio.features
+import rasterio.io
 
 from usl_lib.shared import geo_data
 
@@ -16,11 +18,40 @@ _ESRI_HEADER_KEYWORDS = {
 }
 
 
+def read_header_from_rasterio_dataset_reader(
+    dataset_reader: rasterio.io.DatasetReader,
+    no_data_value: Optional[float] = None,
+) -> geo_data.ElevationHeader:
+    """Loading elevation header from GeoTIFF file/stream.
+
+    Args:
+        dataset_reader: RasterIO Dataset reader to load from.
+        no_data_value: Optional value to set in the returned data to indicate absence of
+            data. If not supplied, the no-data value defined in the TIFF file itself
+            will be used.
+
+    Returns:
+        Elevation header object.
+    """
+    transform = dataset_reader.transform
+    ll_corner = transform * (0, dataset_reader.height)
+    input_nodata = dataset_reader.nodata
+    return geo_data.ElevationHeader(
+        col_count=dataset_reader.width,
+        row_count=dataset_reader.height,
+        x_ll_corner=ll_corner[0],
+        y_ll_corner=ll_corner[1],
+        cell_size=transform[0],
+        nodata_value=(no_data_value if no_data_value is not None else input_nodata),
+        crs=dataset_reader.crs,
+    )
+
+
 def read_from_geotiff(
     file: typing.BinaryIO,
     header_only: bool = False,
     band: int = 1,
-    no_data_value: typing.Optional[float] = None,
+    no_data_value: Optional[float] = None,
 ) -> geo_data.Elevation:
     """Loading elevation raster data from GeoTIFF file/stream.
 
@@ -37,18 +68,8 @@ def read_from_geotiff(
         Elevation object.
     """
     with rasterio.open(file, driver="GTiff") as src:
-        transform = src.transform
-        ll_corner = transform * (0, src.height)
         input_nodata = src.nodata
-        elv_header = geo_data.ElevationHeader(
-            col_count=src.width,
-            row_count=src.height,
-            x_ll_corner=ll_corner[0],
-            y_ll_corner=ll_corner[1],
-            cell_size=transform[0],
-            nodata_value=(no_data_value if no_data_value is not None else input_nodata),
-            crs=src.crs,
-        )
+        elv_header = read_header_from_rasterio_dataset_reader(src, no_data_value)
         elv_data = None
 
         if not header_only:
@@ -62,7 +83,7 @@ def read_from_geotiff(
 def read_from_esri_ascii(
     file: typing.TextIO,
     header_only: bool = False,
-    no_data_value: typing.Optional[float] = None,
+    no_data_value: Optional[float] = None,
 ) -> geo_data.Elevation:
     """Loading elevation raster data from Esri ASCII file/stream.
 
