@@ -38,6 +38,12 @@ resource "google_storage_bucket_iam_member" "city_cat_config_reader" {
   member = "serviceAccount:${google_service_account.city_cat_config.email}"
 }
 
+resource "google_storage_bucket_iam_member" "city_cat_features_writer" {
+  bucket = google_storage_bucket.features.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.city_cat_config.email}"
+}
+
 # Give write access to error reporter.
 resource "google_project_iam_member" "city_cat_config_error_writer" {
   project = data.google_project.project.project_id
@@ -58,13 +64,13 @@ resource "google_cloudfunctions2_function" "write_citycat_config" {
     google_project_iam_member.gcs_pubsub_publishing,
   ]
 
-  name        = "write-citycat-config-metadata"
-  description = "Writes CityCAT config metadata to the metastore."
+  name        = "write-citycat-config-data"
+  description = "Writes CityCAT config artifacts."
   location    = lower(google_storage_bucket.city_cat_config.location) # The trigger must be in the same location as the bucket
 
   build_config {
     runtime     = "python311"
-    entry_point = "write_flood_scenario_metadata"
+    entry_point = "write_flood_scenario_metadata_and_features"
     source {
       storage_source {
         bucket = google_storage_bucket.source.name

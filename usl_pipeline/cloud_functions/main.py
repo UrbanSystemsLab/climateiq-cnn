@@ -5,7 +5,7 @@ import io
 import pathlib
 import logging
 import tarfile
-from typing import BinaryIO, Callable, IO, Optional, Tuple
+from typing import BinaryIO, Callable, IO, Optional, TextIO, Tuple
 
 from google.cloud import error_reporting
 from google.cloud import firestore
@@ -15,12 +15,16 @@ import numpy
 from numpy.typing import NDArray
 import rasterio
 
+from usl_lib.readers import config_readers
 from usl_lib.readers import elevation_readers
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
 
 _MAX_RETRY_SECONDS = 60 * 2
+
+# The vector is long enough to express rainfall every five minutes for up to three days.
+_RAINFALL_VECTOR_LENGTH = (60 // 5) * 24 * 3
 
 
 @dataclasses.dataclass(slots=True)
@@ -150,23 +154,55 @@ def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> No
 
 @functions_framework.cloud_event
 @_retry_and_report_errors()
-def write_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) -> None:
-    """Writes metadata for uploaded flood scenario config.
+def write_flood_scenario_metadata_and_features(
+    cloud_event: functions_framework.CloudEvent,
+) -> None:
+    """Writes metadata and features for uploaded flood scenario config.
 
     This function is triggered when files for rainfall configuration are uploaded to
-    GCS. It writes an entry to the metastore for the configuration.
+    GCS. It writes an entry to the metastore for the configuration and writes the
+    rainfall configuration as a feature vector into the GCS features bucket.
     """
     file_name = pathlib.PurePosixPath(cloud_event.data["name"])
     # Distinguish between Rainfall_Data and CityCat_Config files, the latter of which we
     # don't need to record.
     if file_name.name.startswith("Rainfall_Data_"):
+        storage_client = storage.Client()
         db = firestore.Client()
 
+        config_blob = storage_client.bucket(cloud_event.data["bucket"]).blob(
+            cloud_event.data["name"]
+        )
+        with config_blob.open("rt") as rain_fd:
+            as_vector = _rain_config_as_vector(rain_fd)
+
+        vector_blob = storage_client.bucket(cloud_storage.FEATURE_CHUNKS_BUCKET).blob(
+            f"rainfall/{file_name.with_suffix('.npy')}"
+        )
+        _write_as_npy(vector_blob, as_vector)
+
         metastore.FloodScenarioConfig(
-            gcs_path=f"gs://{cloud_event.data['bucket']}/{cloud_event.data['name']}",
+            gcs_path=f"gs://{config_blob.bucket.name}/{config_blob.name}",
+            as_vector_gcs_path=f"gs://{vector_blob.bucket.name}/{vector_blob.name}",
             # File names should be in the form <parent_config_name>/<file_name>
             parent_config_name=file_name.parent.name,
         ).set(db)
+
+
+def _rain_config_as_vector(rain_fd: TextIO) -> NDArray:
+    """Converts the rainfall config contents into a vector describing the rainfall.
+
+    Args:
+      rain_fd: The file containing the CityCAT rainfall configuration.
+
+    Returns:
+      The rainfall pattern as a numpy array.
+    """
+    entries = config_readers.read_rainfall_amounts(rain_fd)
+    return numpy.pad(
+        numpy.array(entries, dtype=numpy.float32),
+        (0, _RAINFALL_VECTOR_LENGTH - len(entries)),
+    )
 
 
 @functions_framework.cloud_event
@@ -216,14 +252,7 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
         str(feature_file_name)
     )
 
-    # Write the feature matrix in .npy format to GCS.
-    matrix_file = io.BytesIO()
-    numpy.save(matrix_file, feature_matrix)
-    # Seek to the beginning so the file can be read.
-    matrix_file.flush()
-    matrix_file.seek(0)
-    feature_blob.upload_from_file(matrix_file)
-
+    _write_as_npy(feature_blob, feature_matrix)
     _write_metastore_entry(chunk_blob, feature_blob, metadata)
 
 
@@ -339,3 +368,18 @@ def _parse_chunk_path(chunk_path: str) -> Tuple[str, str]:
     """
     as_path = pathlib.PurePosixPath(chunk_path)
     return str(as_path.parent), as_path.stem
+
+
+def _write_as_npy(blob: storage.Blob, array: NDArray) -> None:
+    """Writes `array` into the GCS `blob` in the numpy binary array format.
+
+    Args:
+      blob: The blob to write the array into.
+      array: The array to upload.
+    """
+    npy_file = io.BytesIO()
+    numpy.save(npy_file, array)
+    # Seek to the beginning so the file can be read.
+    npy_file.flush()
+    npy_file.seek(0)
+    blob.upload_from_file(npy_file)

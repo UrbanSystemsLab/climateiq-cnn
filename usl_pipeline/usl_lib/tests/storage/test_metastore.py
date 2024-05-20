@@ -99,6 +99,7 @@ def test_flood_scenario_config_set():
     mock_db = mock.MagicMock()
     metastore.FloodScenarioConfig(
         gcs_path="a/b/c",
+        as_vector_gcs_path="d/e/f",
         parent_config_name="parent",
     ).set(mock_db)
     mock_db.assert_has_calls(
@@ -111,6 +112,7 @@ def test_flood_scenario_config_set():
                 {
                     "parent_config_name:": "parent",
                     "gcs_path": "a/b/c",
+                    "as_vector_gcs_path": "d/e/f",
                 },
             ),
         ]
