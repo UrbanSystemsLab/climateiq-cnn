@@ -197,6 +197,7 @@ class FloodScenarioConfig:
 
     @staticmethod
     def delete(db: firestore.Client, gcs_path: str) -> None:
+        """Deletes the CityCAT configuration entry for the given file."""
         db.collection(CITY_CAT_RAINFALL_CONFIG).document(
             urllib.parse.quote(gcs_path, safe=())
         ).delete()
