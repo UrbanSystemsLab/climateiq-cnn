@@ -1,9 +1,11 @@
 import datetime
 import io
 import tarfile
+import textwrap
 from unittest import mock
 
 from google.cloud import firestore
+from google.cloud import storage
 import functions_framework
 import numpy
 import rasterio
@@ -281,3 +283,155 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client):
             ),
         ]
     )
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_client):
+    """Ensure we sync config uploads to the metastore."""
+    config_blob = mock.Mock(spec=storage.Blob)
+    config_blob.name = "config_name/Rainfall_Data_1.txt"
+    config_blob.bucket.name = "bucket"
+    config_blob.open.return_value = io.StringIO(
+        textwrap.dedent(
+            """\
+            * * *
+            * * * rainfall ***
+            * * *
+            13
+            * * *
+            0	0.0000000000
+            3600	0.0000019756
+            7200	0.0000019756
+            10800	0.0000019756
+            14400	0.0000039511
+            """
+        )
+    )
+
+    vector_blob = mock.Mock(spec=storage.Blob)
+    vector_blob.name = "rainfall/config_name/Rainfall_Data_1.npy"
+    vector_blob.bucket.name = "climateiq-study-area-feature-chunks"
+
+    mock_storage_client().bucket("").blob.side_effect = [config_blob, vector_blob]
+
+    main.write_flood_scenario_metadata_and_features(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "config_name/Rainfall_Data_1.txt",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we worked with the right GCP paths.
+    mock_storage_client.assert_has_calls(
+        [
+            mock.call().bucket("bucket"),
+            mock.call().bucket().blob("config_name/Rainfall_Data_1.txt"),
+            mock.call().bucket("climateiq-study-area-feature-chunks"),
+            mock.call().bucket().blob("rainfall/config_name/Rainfall_Data_1.npy"),
+        ]
+    )
+
+    config_blob.open.assert_called_once_with("rt")
+
+    # Ensure we attempted to upload a serialized array of the rainfall.
+    vector_blob.upload_from_file.assert_called_once_with(mock.ANY)
+    uploaded_array = numpy.load(vector_blob.upload_from_file.call_args[0][0])
+    numpy.testing.assert_array_almost_equal(
+        uploaded_array,
+        numpy.pad(
+            numpy.array([0.0, 0.0000019756, 0.0000019756, 0.0000019756, 0.0000039511]),
+            (0, main._RAINFALL_VECTOR_LENGTH - 5),
+        ),
+    )
+
+    # Ensure we wrote the firestore entry for the config.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("city_cat_rainfall_configs"),
+            mock.call()
+            .collection()
+            .document("gs%3A%2F%2Fbucket%2Fconfig_name%2FRainfall_Data_1.txt"),
+            mock.call()
+            .collection()
+            .document()
+            .set(
+                {
+                    "parent_config_name:": "config_name",
+                    "gcs_path": "gs://bucket/config_name/Rainfall_Data_1.txt",
+                    "as_vector_gcs_path": (
+                        "gs://climateiq-study-area-feature-chunks/"
+                        "rainfall/config_name/Rainfall_Data_1.npy"
+                    ),
+                }
+            ),
+        ]
+    )
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_write_flood_scenario_metadata_ignore_non_rainfall_files(mock_firestore_client):
+    """Ensure we ignore non-rainfall config uploads."""
+    main.write_flood_scenario_metadata_and_features(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "config_name/SomethingElse.txt",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    mock_firestore_client.assert_not_called()
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_delete_flood_scenario_metadata(mock_firestore_client):
+    """Ensure we sync config uploads to the metastore."""
+    main.delete_flood_scenario_metadata(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "config_name/Rainfall_Data_1.txt",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we delete the firestore entry for the config.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("city_cat_rainfall_configs"),
+            mock.call()
+            .collection()
+            .document("gs%3A%2F%2Fbucket%2Fconfig_name%2FRainfall_Data_1.txt"),
+            mock.call().collection().document().delete(),
+        ]
+    )
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_delete_flood_scenario_metadata_ignore_non_rainfall_files(
+    mock_firestore_client,
+):
+    """Ensure we ignore non-rainfall config uploads."""
+    main.delete_flood_scenario_metadata(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "config_name/SomethingElse.txt",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    mock_firestore_client.assert_not_called()
