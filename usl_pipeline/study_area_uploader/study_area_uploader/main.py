@@ -39,8 +39,10 @@ def main() -> None:
 
         if args.export_to_citycat:
             export_to_city_cat(
+                args,
                 prepared_inputs,
                 storage_client.bucket(cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET),
+                pathlib.Path(temp_dir),
             )
 
         # Wait till study area metadata is registered by cloud_function triggered by
@@ -68,11 +70,18 @@ def main() -> None:
 
 
 def export_to_city_cat(
+    args: argparse.Namespace,
     prepared_inputs: study_area_transformers.PreparedInputData,
     flood_simulation_input_bucket: storage.Bucket,
+    work_dir: pathlib.Path,
 ):
-    # Place-holder for exporting study area data as inputs for CityCat program
-    pass
+    study_area_transformers.prepare_and_upload_citycat_input_files(
+        args.name,
+        prepared_inputs,
+        work_dir,
+        flood_simulation_input_bucket,
+        elevation_geotiff_band=args.elevation_geotiff_band,
+    )
 
 
 def build_chunks(
@@ -136,6 +145,13 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Indicator of the execution mode where input files should be exported"
         + " to CityCat storage bucket.",
+    )
+    parser.add_argument(
+        "--elevation-geotiff-band",
+        type=int,
+        default=1,
+        help="Band index in GeoTIFF file containing elevation data (default value is"
+        + " 1)",
     )
 
     return parser.parse_args()
