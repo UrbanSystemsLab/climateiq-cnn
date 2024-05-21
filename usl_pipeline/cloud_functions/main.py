@@ -174,7 +174,7 @@ def write_flood_scenario_metadata_and_features(
             cloud_event.data["name"]
         )
         with config_blob.open("rt") as rain_fd:
-            as_vector = _rain_config_as_vector(rain_fd)
+            as_vector, length = _rain_config_as_vector(rain_fd)
 
         vector_blob = storage_client.bucket(cloud_storage.FEATURE_CHUNKS_BUCKET).blob(
             f"rainfall/{file_name.with_suffix('.npy')}"
@@ -184,25 +184,39 @@ def write_flood_scenario_metadata_and_features(
         metastore.FloodScenarioConfig(
             gcs_path=f"gs://{config_blob.bucket.name}/{config_blob.name}",
             as_vector_gcs_path=f"gs://{vector_blob.bucket.name}/{vector_blob.name}",
+            num_rainfall_entries=length,
             # File names should be in the form <parent_config_name>/<file_name>
             parent_config_name=file_name.parent.name,
         ).set(db)
 
 
-def _rain_config_as_vector(rain_fd: TextIO) -> NDArray:
+def _rain_config_as_vector(rain_fd: TextIO) -> Tuple[NDArray, int]:
     """Converts the rainfall config contents into a vector describing the rainfall.
 
     Args:
       rain_fd: The file containing the CityCAT rainfall configuration.
 
     Returns:
-      The rainfall pattern as a numpy array.
+      A tuple of (rainfall, length) where `rainfall` contains
+      the rainfall pattern as a numpy array, padded to an agreed-upon
+      length, and `length` represent the un-padded number entries in
+      the array (i.e. the length the array would be if it was not
+      padded.)
+
     """
     entries = config_readers.read_rainfall_amounts(rain_fd)
+
+    # The uploader should prevent configurations over this length.
+    if len(entries) > _RAINFALL_VECTOR_LENGTH:
+        raise ValueError(
+            f"Rainfall configuration has unexpected length {len(entries)}. "
+            f"Max allowed length is {_RAINFALL_VECTOR_LENGTH}."
+        )
+
     return numpy.pad(
         numpy.array(entries, dtype=numpy.float32),
         (0, _RAINFALL_VECTOR_LENGTH - len(entries)),
-    )
+    ), len(entries)
 
 
 @functions_framework.cloud_event
