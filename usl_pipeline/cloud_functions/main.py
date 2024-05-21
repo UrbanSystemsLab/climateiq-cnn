@@ -205,6 +205,14 @@ def _rain_config_as_vector(rain_fd: TextIO) -> Tuple[NDArray, int]:
 
     """
     entries = config_readers.read_rainfall_amounts(rain_fd)
+
+    # The uploader should prevent configurations over this length.
+    if len(entries) > _RAINFALL_VECTOR_LENGTH:
+        raise ValueError(
+            f"Rainfall configuration has unexpected length {len(entries)}. "
+            f"Max allowed length is {_RAINFALL_VECTOR_LENGTH}."
+        )
+
     return numpy.pad(
         numpy.array(entries, dtype=numpy.float32),
         (0, _RAINFALL_VECTOR_LENGTH - len(entries)),

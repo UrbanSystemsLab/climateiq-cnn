@@ -375,6 +375,46 @@ def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_clien
     )
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+def test_write_flood_scenario_metadata_rejects_too_long_rainfall(
+    mock_storage_client, mock_firestore_client, mock_error_reporting_client
+):
+    """Ensure we sync config uploads to the metastore."""
+    config_blob = mock.Mock(spec=storage.Blob)
+    config_blob.name = "config_name/Rainfall_Data_1.txt"
+    config_blob.bucket.name = "bucket"
+
+    # Create a rainfall config file with too many entries.
+    bad_config_file = io.StringIO()
+    bad_config_file.write(f"{main._RAINFALL_VECTOR_LENGTH + 3}\n")
+    bad_config_file.writelines(
+        "0   0.0000000000\n" for _ in range(main._RAINFALL_VECTOR_LENGTH + 3)
+    )
+    bad_config_file.seek(0)
+    config_blob.open.return_value = bad_config_file
+
+    vector_blob = mock.Mock(spec=storage.Blob)
+    mock_storage_client().bucket("").blob.side_effect = [config_blob, vector_blob]
+
+    main.write_flood_scenario_metadata_and_features(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "config_name/Rainfall_Data_1.txt",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we didn't try to write anything.
+    vector_blob.upload_from_file.assert_not_called()
+    mock_firestore_client().collection.assert_not_called()
+    mock_error_reporting_client().report_exception.assert_called_once()
+
+
 @mock.patch.object(main.firestore, "Client", autospec=True)
 def test_write_flood_scenario_metadata_ignore_non_rainfall_files(mock_firestore_client):
     """Ensure we ignore non-rainfall config uploads."""
