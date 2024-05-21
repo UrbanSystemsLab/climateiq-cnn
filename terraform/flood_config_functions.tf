@@ -10,6 +10,7 @@ resource "google_service_account" "city_cat_config" {
   display_name = "record-citycat-config cloud function service account"
 }
 
+# Grant permissions needed to trigger and run cloud functions.
 resource "google_project_iam_member" "city_cat_config_invoking" {
   project    = data.google_project.project.project_id
   role       = "roles/run.invoker"
