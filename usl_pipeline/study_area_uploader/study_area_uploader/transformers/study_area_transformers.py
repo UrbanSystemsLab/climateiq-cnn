@@ -6,7 +6,10 @@ from google.cloud import storage
 from shapely import geometry
 
 from study_area_uploader.readers import polygon_readers as shape_readers
-from study_area_uploader.transformers import elevation_transformers
+from study_area_uploader.transformers import (
+    elevation_transformers,
+    soil_classes_transformers,
+)
 from usl_lib.readers import elevation_readers
 from usl_lib.shared import geo_data
 from usl_lib.storage import file_names
@@ -184,3 +187,91 @@ def prepare_and_upload_study_area_files(
         green_areas_polygons,
         soil_classes_polygons,
     )
+
+
+def prepare_and_upload_citycat_input_files(
+    study_area_name: str,
+    input_data: PreparedInputData,
+    work_dir: pathlib.Path,
+    citycat_bucket: storage.Bucket,
+    elevation_geotiff_band: int = 1,
+    default_no_data_value: float = -9999.0,
+) -> None:
+    """Prepares input files for CityCat simulation.
+
+    Args:
+        study_area_name: Name of study area that is used to form file paths in cloud
+            storage bucket.
+        input_data: Data loaded from pipeline input files.
+        work_dir: A folder that can be used for transforming files.
+        citycat_bucket: Target cloud storage bucket to export CityCat files to.
+        elevation_geotiff_band: Band index in elevation GeoTIFF file.
+        default_no_data_value: Default value used in elevation data for cells where
+            elevation is not defined.
+    """
+    # Export elevation data
+    temp_elevation_buffer_file_path = work_dir / "temp_elevation_buffer.tif"
+    with citycat_bucket.blob(
+        f"{study_area_name}/{file_names.CITYCAT_ELEVATION_ASC}"
+    ).open("w") as output_file:
+        elevation_transformers.transform_geotiff_with_boundaries_to_esri_ascii(
+            input_data.elevation_file_path,
+            temp_elevation_buffer_file_path,
+            output_file,
+            band=elevation_geotiff_band,
+            no_data_value=default_no_data_value,
+            boundaries_polygons=input_data.boundaries_polygons,
+        )
+
+    boundaries_multipolygon: Optional[geometry.MultiPolygon] = None
+    if input_data.boundaries_polygons is not None:
+        boundaries_multipolygon = geometry.MultiPolygon(
+            [p[0] for p in input_data.boundaries_polygons]
+        )
+
+    # Export buildings
+    if input_data.buildings_polygons is not None:
+        buildings_polygons = input_data.buildings_polygons
+        if boundaries_multipolygon is not None:
+            buildings_polygons = list(
+                polygon_transformers.intersect(
+                    buildings_polygons, boundaries_multipolygon
+                )
+            )
+        with citycat_bucket.blob(
+            f"{study_area_name}/{file_names.CITYCAT_BUILDINGS_TXT}"
+        ).open("w") as output_file:
+            polygon_writers.write_polygons_to_text_file(buildings_polygons, output_file)
+
+    # Export gree areas
+    if input_data.green_areas_polygons is not None:
+        green_areas_polygons = input_data.green_areas_polygons
+        if boundaries_multipolygon is not None:
+            green_areas_polygons = list(
+                polygon_transformers.intersect(
+                    green_areas_polygons, boundaries_multipolygon
+                )
+            )
+        export_mask_values = False
+        # If there are soil-class regions we need to use them as green areas:
+        if input_data.soil_classes_polygons is not None:
+            with open(input_data.elevation_file_path, "rb") as input_file:
+                elevation_header = elevation_readers.read_from_geotiff(
+                    input_file, header_only=True
+                ).header
+            green_areas_polygons = (
+                soil_classes_transformers.transform_soil_classes_as_green_areas(
+                    elevation_header,
+                    green_areas_polygons,
+                    input_data.soil_classes_polygons,
+                )
+            )
+            export_mask_values = True
+        with citycat_bucket.blob(
+            f"{study_area_name}/{file_names.CITYCAT_GREEN_AREAS_TXT}"
+        ).open("w") as output_file:
+            polygon_writers.write_polygons_to_text_file(
+                green_areas_polygons,
+                output_file,
+                support_mask_values=export_mask_values,
+            )
