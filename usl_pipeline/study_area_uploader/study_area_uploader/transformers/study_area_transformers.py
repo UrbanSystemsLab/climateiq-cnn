@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 import pathlib
 from typing import Iterable, Optional, Tuple
 
@@ -34,6 +35,7 @@ def transform_shape_file(
     target_crs: str,
     mask_value_feature_property: Optional[str] = None,
     skip_zero_masks: bool = True,
+    log_details: bool = False,
 ) -> Iterable[Tuple[geometry.Polygon, int]]:
     """Reads, filters and transforms polygons from shape-file with optional cropping.
 
@@ -46,6 +48,7 @@ def transform_shape_file(
             In case this property is not defined by the caller, mask value 1 is used.
         skip_zero_masks: Indicator that polygons associated with 0 masks should be
             filtered out (only has effect when mask_value_feature_property is defined).
+        log_details: Indicator that details of intermediate steps should be logged.
 
     Returns:
         Iterator of polygons with associated masks.
@@ -64,7 +67,8 @@ def transform_shape_file(
         polygons_iterator
         if sub_area_bounding_box is None
         else polygon_transformers.crop_polygons_to_sub_area(
-            polygons_iterator, sub_area_bounding_box
+            polygons_iterator, sub_area_bounding_box,
+            log_details=log_details
         )
     )
 
@@ -79,6 +83,7 @@ def prepare_and_upload_study_area_files(
     soil_class_mask_feature_property: Optional[str],
     work_dir: pathlib.Path,
     study_area_bucket: storage.Bucket,
+    log_details: bool = False,
 ) -> PreparedInputData:
     """Prepares data needed to run pipeline for flood scenarios.
 
@@ -96,6 +101,7 @@ def prepare_and_upload_study_area_files(
             file that defines soil class values.
         work_dir: A folder that can be used for transforming files.
         study_area_bucket: Target cloud storage bucket to export study area files to.
+        log_details: Indicator that details of intermediate steps should be logged.
 
     Returns:
         Prepared input data that can be exported to CityCat or be passed to chunker.
@@ -118,6 +124,8 @@ def prepare_and_upload_study_area_files(
             boundaries_shape_file_path, target_crs=crs
         )
         # Write boundaries to study area bucket
+        if log_details:
+            logging.info("Preparing study area boundaries...")
         with study_area_bucket.blob(
             f"{study_area_name}/{file_names.BOUNDARIES_TXT}"
         ).open("w") as output_file:
@@ -129,6 +137,8 @@ def prepare_and_upload_study_area_files(
             p[0] for p in boundaries_polygons
         )
         # Crop elevation data
+        if log_details:
+            logging.info("Cropping study area elevation data...")
         output_elevation_file_path = work_dir / file_names.ELEVATION_TIF
         elevation_transformers.crop_geotiff_to_sub_area(
             elevation_file_path, str(output_elevation_file_path), sub_area_bounding_box
@@ -140,19 +150,27 @@ def prepare_and_upload_study_area_files(
     ).upload_from_filename(str(output_elevation_file_path))
 
     # Read polygon files
+    if log_details:
+        logging.info("Preparing study area buildings data...")
     if buildings_shape_file_path is not None:
         buildings_polygons = list(
-            transform_shape_file(buildings_shape_file_path, sub_area_bounding_box, crs)
+            transform_shape_file(
+                buildings_shape_file_path, sub_area_bounding_box, crs,
+                log_details=log_details
+            )
         )
         # Write buildings to study area bucket
         with study_area_bucket.blob(
             f"{study_area_name}/{file_names.BUILDINGS_TXT}"
         ).open("w") as output_file:
             polygon_writers.write_polygons_to_text_file(buildings_polygons, output_file)
+    if log_details:
+        logging.info("Preparing study area green areas data...")
     if green_areas_shape_file_path is not None:
         green_areas_polygons = list(
             transform_shape_file(
-                green_areas_shape_file_path, sub_area_bounding_box, crs
+                green_areas_shape_file_path, sub_area_bounding_box, crs,
+                log_details=log_details
             )
         )
         # Write green areas to study area bucket
@@ -164,12 +182,15 @@ def prepare_and_upload_study_area_files(
             )
         # Soil information is only used when green area data is defined.
         if soil_classes_shape_file_path is not None:
+            if log_details:
+                logging.info("Preparing study area soil classes data...")
             soil_classes_polygons = list(
                 transform_shape_file(
                     soil_classes_shape_file_path,
                     sub_area_bounding_box,
                     crs,
                     mask_value_feature_property=soil_class_mask_feature_property,
+                    log_details=log_details
                 )
             )
             # Write soil classes to study area bucket
@@ -196,6 +217,7 @@ def prepare_and_upload_citycat_input_files(
     citycat_bucket: storage.Bucket,
     elevation_geotiff_band: int = 1,
     default_no_data_value: float = -9999.0,
+    log_details: bool = False
 ) -> None:
     """Prepares input files for CityCat simulation.
 
@@ -208,8 +230,11 @@ def prepare_and_upload_citycat_input_files(
         elevation_geotiff_band: Band index in elevation GeoTIFF file.
         default_no_data_value: Default value used in elevation data for cells where
             elevation is not defined.
+        log_details: Indicates that details of intermediate steps should be logged.
     """
     # Export elevation data
+    if log_details:
+        logging.info("Exporting elevation data...")
     temp_elevation_buffer_file_path = work_dir / "temp_elevation_buffer.tif"
     with citycat_bucket.blob(
         f"{study_area_name}/{file_names.CITYCAT_ELEVATION_ASC}"
@@ -230,12 +255,14 @@ def prepare_and_upload_citycat_input_files(
         )
 
     # Export buildings
+    if log_details:
+        logging.info("Exporting buildings data...")
     if input_data.buildings_polygons is not None:
         buildings_polygons = input_data.buildings_polygons
         if boundaries_multipolygon is not None:
             buildings_polygons = list(
                 polygon_transformers.intersect(
-                    buildings_polygons, boundaries_multipolygon
+                    buildings_polygons, boundaries_multipolygon, log_details=True
                 )
             )
         with citycat_bucket.blob(
@@ -244,12 +271,14 @@ def prepare_and_upload_citycat_input_files(
             polygon_writers.write_polygons_to_text_file(buildings_polygons, output_file)
 
     # Export gree areas
+    if log_details:
+        logging.info("Exporting green area data...")
     if input_data.green_areas_polygons is not None:
         green_areas_polygons = input_data.green_areas_polygons
         if boundaries_multipolygon is not None:
             green_areas_polygons = list(
                 polygon_transformers.intersect(
-                    green_areas_polygons, boundaries_multipolygon
+                    green_areas_polygons, boundaries_multipolygon, log_details=True
                 )
             )
         export_mask_values = False
@@ -264,6 +293,7 @@ def prepare_and_upload_citycat_input_files(
                     elevation_header,
                     green_areas_polygons,
                     input_data.soil_classes_polygons,
+                    log_details=log_details,
                 )
             )
             export_mask_values = True
