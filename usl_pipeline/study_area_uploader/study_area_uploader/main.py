@@ -35,6 +35,7 @@ def main() -> None:
             args.soil_type_mask_feature_property,
             pathlib.Path(temp_dir),
             study_area_bucket,
+            log_details=args.log_details,
         )
 
         if args.export_to_citycat:
@@ -81,6 +82,7 @@ def export_to_city_cat(
         work_dir,
         flood_simulation_input_bucket,
         elevation_geotiff_band=args.elevation_geotiff_band,
+        log_details=args.log_details,
     )
 
 
@@ -152,6 +154,12 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Band index in GeoTIFF file containing elevation data (default value is"
         + " 1)",
+    )
+    parser.add_argument(
+        "--log-details",
+        type=bool,
+        default=False,
+        help="Indicates that details of processing steps should be logged",
     )
 
     return parser.parse_args()

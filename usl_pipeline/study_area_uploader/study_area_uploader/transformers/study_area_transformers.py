@@ -237,7 +237,7 @@ def prepare_and_upload_citycat_input_files(
     """
     # Export elevation data
     if log_details:
-        logging.info("Exporting elevation data...")
+        logging.info("Exporting elevation data to CityCat...")
     temp_elevation_buffer_file_path = work_dir / "temp_elevation_buffer.tif"
     with citycat_bucket.blob(
         f"{study_area_name}/{file_names.CITYCAT_ELEVATION_ASC}"
@@ -259,7 +259,7 @@ def prepare_and_upload_citycat_input_files(
 
     # Export buildings
     if log_details:
-        logging.info("Exporting buildings data...")
+        logging.info("Preparing for exporting buildings data to CityCat...")
     if input_data.buildings_polygons is not None:
         buildings_polygons = input_data.buildings_polygons
         if boundaries_multipolygon is not None:
@@ -268,6 +268,8 @@ def prepare_and_upload_citycat_input_files(
                     buildings_polygons, boundaries_multipolygon, log_details=True
                 )
             )
+        if log_details:
+            logging.info("Exporting buildings data to CityCat...")
         with citycat_bucket.blob(
             f"{study_area_name}/{file_names.CITYCAT_BUILDINGS_TXT}"
         ).open("w") as output_file:
@@ -275,7 +277,7 @@ def prepare_and_upload_citycat_input_files(
 
     # Export gree areas
     if log_details:
-        logging.info("Exporting green area data...")
+        logging.info("Preparing for exporting green area data to CityCat...")
     if input_data.green_areas_polygons is not None:
         green_areas_polygons = input_data.green_areas_polygons
         if boundaries_multipolygon is not None:
@@ -300,6 +302,8 @@ def prepare_and_upload_citycat_input_files(
                 )
             )
             export_mask_values = True
+        if log_details:
+            logging.info("Exporting green area data to CityCat...")
         with citycat_bucket.blob(
             f"{study_area_name}/{file_names.CITYCAT_GREEN_AREAS_TXT}"
         ).open("w") as output_file:
