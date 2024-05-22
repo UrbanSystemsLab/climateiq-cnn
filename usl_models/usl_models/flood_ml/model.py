@@ -1,5 +1,6 @@
 """Flood model definition."""
 
+import dataclasses
 from typing import TypeAlias
 
 import tensorflow as tf
@@ -12,6 +13,7 @@ from usl_models.flood_ml import model_params
 st_tensor: TypeAlias = tf.Tensor
 geo_tensor: TypeAlias = tf.Tensor
 temp_tensor: TypeAlias = tf.Tensor
+FloodModelData: TypeAlias = data_utils.FloodModelData
 FloodModelParams: TypeAlias = model_params.FloodModelParams
 
 
@@ -48,71 +50,113 @@ class FloodModel:
         )
         return model
 
-    def _validate_and_preprocess_inputs(
+    def _validate_and_preprocess_data(
         self,
-        inputs: dict[str, tf.Tensor],
-    ) -> dict[str, tf.Tensor]:
-        """Validates inputs and does all necessary preprocessing.
+        data: FloodModelData,
+        training=True,
+    ) -> FloodModelData:
+        """Validates model data and does all necessary preprocessing.
 
         Args:
-            inputs: A dictionary of input tensors.
-                - "geospatial" (required): [H, W, f]
-                - "temporal" (required): [T]
-                - "spatiotemporal" (optional): a single flood map [H, W]
+            data: A FloodModelData object. Labels are required for training.
+            training: Whether data is used for model training. If True, labels
+                will be validated.
 
         Returns:
-            A dictionary of processed input tensors.
+            A processed FloodModelData object.
         """
-        if "geospatial" not in inputs:
-            raise ValueError("Missing required tensor 'geospatial'.")
-        if "temporal" not in inputs:
-            raise ValueError("Missing required tensor 'temporal'.")
+        if training:
+            # Labels are required for training.
+            if data.labels is None:
+                raise ValueError("Labels must be provided during model training.")
 
-        geo_input = inputs["geospatial"]
-        full_temp_input = data_utils.temporal_window_view(
-            inputs["temporal"], self._model_params.m_rainfall
-        )
+            # Labels must match the storm duration.
+            expected_label_shape = list(data.labels.shape)
+            expected_label_shape[1] = data.storm_duration
+            assert data.labels.shape[1] == data.storm_duration, (
+                "Provided labels are inconsistent with storm duration. "
+                f"Labels are expected to have shape {expected_label_shape}. "
+                f"Actual shape: {data.labels.shape}."
+            )
+
+        # Check whether the temporal data is already windowed. If it is, checks
+        # the expected shape. Otherwise, create the window view.
+        if tf.rank(data.temporal) == 3:  # windowed: (B, T_max, m)
+            assert data.temporal.shape[-1] == self._model_params.m_rainfall, (
+                "Mismatch between the temporal data window size "
+                f"({data.temporal.shape[-1]}) and the expected window size "
+                f"(m = {self._model_params.m_rainfall})."
+            )
+        else:
+            full_temp_input = data_utils.temporal_window_view(
+                data.temporal, self._model_params.m_rainfall
+            )
+            data = dataclasses.replace(data, temporal=full_temp_input)
 
         # We assume that, if provided, this input is a *single* flood map.
-        st_input = inputs.get("spatiotemporal")
+        st_input = data.spatiotemporal
         if st_input is None:
-            st_shape = geo_input.shape[:3] + [1]
+            st_shape = data.geospatial.shape[:3] + [1]
             st_input = tf.zeros(st_shape)
 
-        return {
-            "geospatial": geo_input,
-            "temporal": full_temp_input,
-            "spatiotemporal": st_input,
-        }
+        data = dataclasses.replace(data, spatiotemporal=st_input)
+        return data
 
-    def train(
-        self,
-        train_data: dict[str, tf.Tensor],
-        train_labels: tf.Tensor,
-        n_predictions=1,
-    ) -> tf.keras.callbacks.History:
-        """Trains the model.
+    def _model_fit(self, data: FloodModelData) -> tf.keras.callbacks.History:
+        """Fits the model on a single batch of FloodModelData.
 
         Args:
-            train_data: A dictionary of training inputs.
-            train_labels: A tensor of labels on which to fit the model.
-            n_predictions: The number of predictions to make, synonymous with
-                the storm duration.
+            data: A FloodModelData object.
 
-        Returns:
-            A History object containing the record of training and, if applicable,
-            validation loss and metrics.
+        Returns: A History object containing the training and validation loss
+            and metrics.
         """
-        train_inputs = self._validate_and_preprocess_inputs(train_data)
-        self._model.set_n_predictions(n_predictions)
+        inputs = {
+            "spatiotemporal": data.spatiotemporal,
+            "geospatial": data.geospatial,
+            "temporal": data.temporal,
+        }
+        self._model.set_n_predictions(data.storm_duration)
         history = self._model.fit(
-            train_inputs,
-            train_labels,
+            inputs,
+            data.labels,
             batch_size=self._model_params.batch_size,
             epochs=self._model_params.epochs,
             validation_split=0.2,
         )
         return history
+
+    def train(
+        self,
+        data: list[FloodModelData],
+    ) -> list[tf.keras.callbacks.History]:
+        """Trains the model.
+
+        The internal flood model architecture is restricted to a single storm
+        duration for each training run. In order to train on varying storm durations,
+        the model must be trained incrementally via several `fit` calls.
+        This function provides a wrapper around the incremental training logic,
+        allowing the user to pass in data for multiple storm durations at once
+        via a list of FloodModelData objects.
+
+        Each FloodModelData instance is associated with a single storm duration.
+        In other words, data for different storm durations must be passed in as
+        separate FloodModelData objects.
+
+        Args:
+            data: A list of FloodModelData objects. Labels are required for training.
+
+        Returns: A list of History objects containing the record of training and,
+            if applicable, validation loss and metrics.
+        """
+        model_history = []
+        processed = [self._validate_and_preprocess_data(x, training=True) for x in data]
+
+        for x in processed:
+            history = self._model_fit(x)
+            model_history.append(history)
+
+        return model_history
 
 
 ###############################################################################
