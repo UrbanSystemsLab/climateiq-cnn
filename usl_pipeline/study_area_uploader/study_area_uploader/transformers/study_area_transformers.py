@@ -48,7 +48,7 @@ def transform_shape_file(
             In case this property is not defined by the caller, mask value 1 is used.
         skip_zero_masks: Indicator that polygons associated with 0 masks should be
             filtered out (only has effect when mask_value_feature_property is defined).
-        log_details: Indicator that details of intermediate steps should be logged.
+        log_details: Indicates that details of intermediate steps should be logged.
 
     Returns:
         Iterator of polygons with associated masks.
@@ -67,8 +67,7 @@ def transform_shape_file(
         polygons_iterator
         if sub_area_bounding_box is None
         else polygon_transformers.crop_polygons_to_sub_area(
-            polygons_iterator, sub_area_bounding_box,
-            log_details=log_details
+            polygons_iterator, sub_area_bounding_box, log_details=log_details
         )
     )
 
@@ -101,7 +100,7 @@ def prepare_and_upload_study_area_files(
             file that defines soil class values.
         work_dir: A folder that can be used for transforming files.
         study_area_bucket: Target cloud storage bucket to export study area files to.
-        log_details: Indicator that details of intermediate steps should be logged.
+        log_details: Indicates that details of intermediate steps should be logged.
 
     Returns:
         Prepared input data that can be exported to CityCat or be passed to chunker.
@@ -155,8 +154,10 @@ def prepare_and_upload_study_area_files(
     if buildings_shape_file_path is not None:
         buildings_polygons = list(
             transform_shape_file(
-                buildings_shape_file_path, sub_area_bounding_box, crs,
-                log_details=log_details
+                buildings_shape_file_path,
+                sub_area_bounding_box,
+                crs,
+                log_details=log_details,
             )
         )
         # Write buildings to study area bucket
@@ -169,8 +170,10 @@ def prepare_and_upload_study_area_files(
     if green_areas_shape_file_path is not None:
         green_areas_polygons = list(
             transform_shape_file(
-                green_areas_shape_file_path, sub_area_bounding_box, crs,
-                log_details=log_details
+                green_areas_shape_file_path,
+                sub_area_bounding_box,
+                crs,
+                log_details=log_details,
             )
         )
         # Write green areas to study area bucket
@@ -190,7 +193,7 @@ def prepare_and_upload_study_area_files(
                     sub_area_bounding_box,
                     crs,
                     mask_value_feature_property=soil_class_mask_feature_property,
-                    log_details=log_details
+                    log_details=log_details,
                 )
             )
             # Write soil classes to study area bucket
@@ -217,7 +220,7 @@ def prepare_and_upload_citycat_input_files(
     citycat_bucket: storage.Bucket,
     elevation_geotiff_band: int = 1,
     default_no_data_value: float = -9999.0,
-    log_details: bool = False
+    log_details: bool = False,
 ) -> None:
     """Prepares input files for CityCat simulation.
 

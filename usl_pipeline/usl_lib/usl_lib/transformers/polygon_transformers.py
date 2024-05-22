@@ -158,4 +158,4 @@ def intersect(
         if log_details and processing_count % 1000 == 0:
             logging.info("  - %s polygons are intersected so far", processing_count)
     if log_details:
-        logging.info(f"  - %s polygons were intersected", processing_count)
+        logging.info("  - %s polygons were intersected", processing_count)

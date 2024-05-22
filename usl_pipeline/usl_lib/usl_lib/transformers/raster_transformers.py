@@ -27,7 +27,7 @@ def fill_in_soil_classes_missing_values_from_nearest_polygons(
             cell (0 means missing soil class).
         soil_classes_polygon_masks: List of tuples containing polygons with associated
             soil classes.
-        log_details: Indicator that details of intermediate steps should be logged.
+        log_details: Indicates that details of intermediate steps should be logged.
 
     Returns:
         The list of tuples containing polygons with associated soil classes for the

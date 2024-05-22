@@ -32,7 +32,7 @@ def transform_soil_classes_as_green_areas(
     if log_details:
         logging.info("Starting reconstruction of green areas based on soil classes")
         logging.info(
-            f"Intersecting %s soil class polygons with green areas",
+            "Intersecting %s soil class polygons with green areas",
             len(soil_classes_polygons),
         )
     existing_soil_class_polygons = []
