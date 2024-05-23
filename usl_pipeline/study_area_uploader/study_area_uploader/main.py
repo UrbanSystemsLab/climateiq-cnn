@@ -1,5 +1,6 @@
 import argparse
 import io
+import logging
 import pathlib
 import tarfile
 import tempfile
@@ -17,6 +18,10 @@ from usl_lib.storage import metastore
 def main() -> None:
     """Breaks the input files into chunks and uploads them to GCS."""
     args = parse_args()
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO)
+    else:
+        logging.basicConfig(level=logging.ERROR)
 
     db = firestore.Client()
     storage_client = storage.Client()
@@ -35,7 +40,6 @@ def main() -> None:
             args.soil_type_mask_feature_property,
             pathlib.Path(temp_dir),
             study_area_bucket,
-            log_details=args.log_details,
         )
 
         if args.export_to_citycat:
@@ -82,7 +86,6 @@ def export_to_city_cat(
         work_dir,
         flood_simulation_input_bucket,
         elevation_geotiff_band=args.elevation_geotiff_band,
-        log_details=args.log_details,
     )
 
 
@@ -156,10 +159,11 @@ def parse_args() -> argparse.Namespace:
         + " 1)",
     )
     parser.add_argument(
-        "--log-details",
+        "--verbose",
         type=bool,
         default=False,
-        help="Indicates that details of processing steps should be logged",
+        help="Indicates that more details of processing steps should be printed to the"
+        + "console (INFO logging level instead of default ERROR one)",
     )
 
     return parser.parse_args()

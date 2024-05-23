@@ -82,7 +82,6 @@ def get_bounding_box_for_boundaries(
 def crop_polygons_to_sub_area(
     polygon_masks: Iterable[Tuple[geometry.Polygon, int]],
     sub_area_bounding_box: geo_data.BoundingBox,
-    log_details: bool = False,
 ) -> Iterable[Tuple[geometry.Polygon, int]]:
     """Crops the polygon data by sub-area bounding box.
 
@@ -90,7 +89,6 @@ def crop_polygons_to_sub_area(
         polygon_masks: Source of polygons with associated mask values.
         sub_area_bounding_box: Sub-area bounding box defined in coordinate system of the
             source elevation data.
-        log_details: Indicates that details of intermediate steps should be logged.
 
     Returns:
         Iterator of polygon/mask tuple overlapping with sub-area bounding box.
@@ -120,17 +118,15 @@ def crop_polygons_to_sub_area(
                         yield sub_polygon, polygon_mask[1]
 
         processed_count = processed_count + 1
-        if log_details and processed_count % 10000 == 0:
+        if processed_count % 10000 == 0:
             logging.info("  - %s polygons are cropped so far", processed_count)
 
-    if log_details:
-        logging.info("  - %s polygons were cropped", processed_count)
+    logging.info("  - %s polygons were cropped", processed_count)
 
 
 def intersect(
     polygon_masks_to_process: Iterable[Tuple[geometry.Polygon, int]],
     multi_polygon_boundaries: geometry.MultiPolygon,
-    log_details: bool = False,
 ) -> Iterable[Tuple[geometry.Polygon, int]]:
     """Intersects polygons associated with integer masks with multi-polygon boundaries.
 
@@ -138,7 +134,6 @@ def intersect(
         polygon_masks_to_process: Input polygons associated with integer masks that
             intersection process should be applied to.
         multi_polygon_boundaries: Multi-polygon area to apply on the input polygons.
-        log_details: Indicates that details of intermediate steps should be logged.
 
     Returns:
         Polygons associated with integer masks reduced to multi-polygon boundaries.
@@ -155,7 +150,6 @@ def intersect(
                 if not sub_polygon.is_empty:
                     yield sub_polygon, polygon_mask[1]
         processing_count = processing_count + 1
-        if log_details and processing_count % 1000 == 0:
+        if processing_count % 1000 == 0:
             logging.info("  - %s polygons are intersected so far", processing_count)
-    if log_details:
-        logging.info("  - %s polygons were intersected", processing_count)
+    logging.info("  - %s polygons were intersected", processing_count)
