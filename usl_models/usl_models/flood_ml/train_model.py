@@ -56,4 +56,7 @@ def train_model(
     # Train the model
     model_history = model.train(data_generator.get_next_batch())
 
+    # save the model 
+    model.save(model_dir)
+
     return model_history
