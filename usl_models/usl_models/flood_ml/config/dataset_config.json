@@ -1,0 +1,5 @@
+{
+    "firestore_collection": "collection_name",
+    "firestore_document": "document_name"
+}
+  

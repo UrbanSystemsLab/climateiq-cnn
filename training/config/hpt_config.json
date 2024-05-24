@@ -1,0 +1,46 @@
+{
+    "image_name": "usl-flood-model",
+    "version": "latest",
+    "project_id": "climateiq-test",
+    "repo_name": "REPO_NAME",
+    "region": "us-central1",
+    "staging_bucket_name": "BUCKET_NAME",
+    "docker_base_image": "us.gcr.io/deeplearning-platform-release/tf2-cpu.2-3",
+    "image_url": "us-docker.pkg.dev/$project_id/$repo_name/$image_name:$version",
+    "hyperparameter_tuning_job_display_name": "usl-flood-model-hpt",
+    "training_job_display_name": "usl-flood-model-training",
+    "study_areas": "A,B,C",
+    "worker_pool_specs": [
+        {
+            "machine_spec": {
+                "machine_type": "n1-highmem-16",
+                "accelerator_type": "NVIDIA_TESLA_T4",
+                "accelerator_count": 1
+            },
+            "replica_count": 1,
+            "container_spec": {
+                "image_uri": "$image_url"
+            }
+        },
+        {
+            "machine_spec": {
+                "machine_type": "n1-highmem-16",
+                "accelerator_type": "NVIDIA_TESLA_T4",
+                "accelerator_count": 1
+            },
+            "replica_count": 2,
+            "container_spec": {
+                "image_uri": "$image_url"
+            }
+        },
+        {
+            "machine_spec": {
+                "machine_type": "n1-highcpu-16"
+            },
+            "replica_count": 1,
+            "container_spec": {
+                "image_uri": "us-docker.pkg.dev/vertex-ai-restricted/training/reductionserver:latest"
+            }
+        }
+    ]
+}
