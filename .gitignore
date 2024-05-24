@@ -3,3 +3,30 @@ dist
 __pycache__
 *.egg-info
 venv
+
+# macOS system files
+.DS_Store
+training/.DS_Store
+usl_models/.DS_Store
+usl_models/usl_models/.DS_Store
+usl_models/usl_models/flood_ml/.DS_Store
+
+# VS Code settings
+.vscode/settings.json
+
+# Ignore Python compiled files
+*.pyc
+__pycache__/
+
+# Ignore environment and package files
+*.env
+*.venv
+env/
+venv/
+ENV/
+VENV/
+.env
+
+# Ignore other unnecessary files
+.vscode/
+
