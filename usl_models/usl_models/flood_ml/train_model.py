@@ -3,6 +3,26 @@ import tensorflow as tf
 from usl_models.flood_ml.model import FloodModel, FloodModelParams
 from usl_models.flood_ml.dataset import IncrementalTrainDataGenerator
 
+"""
+THis is a method that is used to train the flood model. This method is called from Docker container by the Vertex hyperparameter tuning job.
+
+Args:
+    model_dir: The GCS path where the model will be saved.
+
+    The hyperparameters: 
+        batch_size: The batch size.
+        lstm_units: The number of units in the LSTM layer.
+        lstm_kernel_size: The kernel size for the LSTM layer.
+        lstm_dropout: The dropout rate for the LSTM layer.
+        lstm_recurrent_dropout: The recurrent dropout rate for the LSTM layer.
+        learning_rate: The learning rate.
+        epochs: The number of epochs.
+
+Returns:
+    A list of Keras history objects.
+
+"""
+
 
 def train_model(
     model_dir: str,

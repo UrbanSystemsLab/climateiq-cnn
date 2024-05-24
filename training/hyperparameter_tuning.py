@@ -6,6 +6,34 @@ from dynaconf import Dynaconf
 
 import tensorflow as tf
 
+"""
+This class contains methods for training and deploying a model to Vertex AI
+using hyperparameter tuning.
+Args:
+    model_dir: The directory where the model is stored.
+    package_path: The path to the Python package to be deployed.
+    config_file: The path to the config file containing the hyperparameter
+    tuning parameters.
+    
+Output:
+    The Vertex AI hyperparameter tuning job.
+
+Config file: 
+    This class uses configurations from a config file. The config file contains:
+    project_id: The project ID.
+    location: The location of the Vertex AI instance.
+    staging_bucket_name: The name of the staging bucket.
+    docker_base_image: The base image for the Docker container.
+    image_name: The name of the Docker image.
+    bucket_name: The name of the bucket where the model is stored.
+    training_job_display_name: The display name of the training job.
+    hyperparameter_tuning_job_display_name: The display name of the hyperparameter
+    tuning job.
+    study_areas: The study areas for the hyperparameter tuning job.
+    worker_pool_specs: The worker pool specs for the hyperparameter tuning job.
+
+"""
+
 
 class VertexAIHyperparameterTuning:
     def __init__(self, model_dir, package_path, config_file="config/hpt_config.json"):
