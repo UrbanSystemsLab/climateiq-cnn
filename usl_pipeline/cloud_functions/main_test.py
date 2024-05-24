@@ -354,18 +354,16 @@ def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_clien
         [
             mock.call(),
             mock.call().collection("city_cat_rainfall_configs"),
-            mock.call()
-            .collection()
-            .document("gs%3A%2F%2Fbucket%2Fconfig_name%2FRainfall_Data_1.txt"),
+            mock.call().collection().document("config_name%2FRainfall_Data_1.txt"),
             mock.call()
             .collection()
             .document()
             .set(
                 {
                     "parent_config_name:": "config_name",
-                    "gcs_path": "gs://bucket/config_name/Rainfall_Data_1.txt",
+                    "gcs_uri": "gs://bucket/config_name/Rainfall_Data_1.txt",
                     "num_rainfall_entries": 5,
-                    "as_vector_gcs_path": (
+                    "as_vector_gcs_uri": (
                         "gs://climateiq-study-area-feature-chunks/"
                         "rainfall/config_name/Rainfall_Data_1.npy"
                     ),
@@ -451,9 +449,7 @@ def test_delete_flood_scenario_metadata(mock_firestore_client):
         [
             mock.call(),
             mock.call().collection("city_cat_rainfall_configs"),
-            mock.call()
-            .collection()
-            .document("gs%3A%2F%2Fbucket%2Fconfig_name%2FRainfall_Data_1.txt"),
+            mock.call().collection().document("config_name%2FRainfall_Data_1.txt"),
             mock.call().collection().document().delete(),
         ]
     )

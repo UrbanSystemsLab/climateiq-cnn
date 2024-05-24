@@ -1,11 +1,14 @@
 import dataclasses
 import datetime
 import functools
+import itertools
 import io
 import pathlib
 import logging
+import re
 import tarfile
-from typing import BinaryIO, Callable, IO, Optional, TextIO, Tuple
+from typing import BinaryIO, Callable, Dict, IO, Optional, Sequence, TextIO, Tuple
+import zipfile
 
 from google.cloud import error_reporting
 from google.cloud import firestore
@@ -15,8 +18,11 @@ import numpy
 from numpy.typing import NDArray
 import rasterio
 
+from usl_lib.chunkers import raster_chunkers
+from usl_lib.readers import simulation_readers
 from usl_lib.readers import config_readers
 from usl_lib.readers import elevation_readers
+from usl_lib.shared import geo_data
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
@@ -182,41 +188,12 @@ def write_flood_scenario_metadata_and_features(
         _write_as_npy(vector_blob, as_vector)
 
         metastore.FloodScenarioConfig(
-            gcs_path=f"gs://{config_blob.bucket.name}/{config_blob.name}",
-            as_vector_gcs_path=f"gs://{vector_blob.bucket.name}/{vector_blob.name}",
+            gcs_uri=f"gs://{config_blob.bucket.name}/{config_blob.name}",
+            as_vector_gcs_uri=f"gs://{vector_blob.bucket.name}/{vector_blob.name}",
             num_rainfall_entries=length,
             # File names should be in the form <parent_config_name>/<file_name>
             parent_config_name=file_name.parent.name,
-        ).set(db)
-
-
-def _rain_config_as_vector(rain_fd: TextIO) -> Tuple[NDArray, int]:
-    """Converts the rainfall config contents into a vector describing the rainfall.
-
-    Args:
-      rain_fd: The file containing the CityCAT rainfall configuration.
-
-    Returns:
-      A tuple of (rainfall, length) where `rainfall` contains
-      the rainfall pattern as a numpy array, padded to an agreed-upon
-      length, and `length` represent the un-padded number entries in
-      the array (i.e. the length the array would be if it was not
-      padded.)
-
-    """
-    entries = config_readers.read_rainfall_amounts(rain_fd)
-
-    # The uploader should prevent configurations over this length.
-    if len(entries) > _RAINFALL_VECTOR_LENGTH:
-        raise ValueError(
-            f"Rainfall configuration has unexpected length {len(entries)}. "
-            f"Max allowed length is {_RAINFALL_VECTOR_LENGTH}."
-        )
-
-    return numpy.pad(
-        numpy.array(entries, dtype=numpy.float32),
-        (0, _RAINFALL_VECTOR_LENGTH - len(entries)),
-    ), len(entries)
+        ).set(db, config_blob.name)
 
 
 @functions_framework.cloud_event
@@ -233,9 +210,7 @@ def delete_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) 
     if file_name.name.startswith("Rainfall_Data_"):
         db = firestore.Client()
 
-        metastore.FloodScenarioConfig.delete(
-            db, f"gs://{cloud_event.data['bucket']}/{cloud_event.data['name']}"
-        )
+        metastore.FloodScenarioConfig.delete(db, cloud_event.data["name"])
 
 
 @functions_framework.cloud_event
@@ -268,6 +243,98 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 
     _write_as_npy(feature_blob, feature_matrix)
     _write_metastore_entry(chunk_blob, feature_blob, metadata)
+
+
+@functions_framework.cloud_event
+@_retry_and_report_errors()
+def process_citycat_outputs(cloud_event: functions_framework.CloudEvent) -> None:
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(cloud_event.data["bucket"])
+    blob = bucket.blob(cloud_event.data["name"])
+
+    db = firestore.Client()
+    path = pathlib.PurePosixPath(cloud_event.data["name"])
+    study_area_name = path.parts[0]
+    header = metastore.StudyArea.get(db, study_area_name).as_header()
+
+    config_name = pathlib.PurePosixPath(*path.parts[1:-1])
+    timesteps = metastore.FloodScenarioConfig.get(config_name).num_rainfall_entries
+
+    labels_bucket = storage_client.bucket(cloud_storage.LABEL_CHUNKS_BUCKET)
+    with blob.open("rb") as fd:
+        _write_outputs(labels_bucket, path, fd, header)
+
+
+def _write_outputs(
+    labels_bucket: storage.Bucket,
+    city_cat_results_path: pathlib.PurePosixPath,
+    city_cat_results_zip: BinaryIO,
+    header: geo_data.ElevationHeader,
+):
+    buf_prefix = city_cat_results_path.parent / "buffers"
+    parts: Dict[Tuple[int, int], storage.Blob] = {}
+    with zipfile.ZipFile(city_cat_results_zip) as timesteps:
+        names = [path for path in timesteps.namelist() if path.endswith(".rsl")]
+        names.sort(key=_timestep_number_from_rsl_path)
+        for i, name in enumerate(names):
+            print(f"{datetime.datetime.now()} processing {name}")
+            with timesteps.open(name) as timestep:
+                depths = simulation_readers.read_city_cat_result_as_raster(
+                    timestep, header
+                )
+                print(f"{datetime.datetime.now()} read {name}")
+                for x_index, y_index, chunk in raster_chunkers.split_raster_into_chunks(
+                    1000, depths
+                ):
+                    print(
+                        f"{datetime.datetime.now()} processing chunk {x_index} {y_index}"
+                    )
+                    key = (x_index, y_index)
+                    part_blob = labels_bucket.blob(
+                        str(buf_prefix / f"{i}_{x_index}_{y_index}.npy")
+                    )
+
+                    print(
+                        f"{datetime.datetime.now()} writing chunk {x_index} {y_index}"
+                    )
+                    with part_blob.open("wb") as chunk_file:
+                        numpy.save(chunk_file, chunk)
+
+                    print(f"{datetime.datetime.now()} wrote chunk {x_index} {y_index}")
+                    parts.setdefault(key, []).append(part_blob)
+
+    for (x_index, y_index), chunk_parts in parts.items():
+        print(f"{datetime.datetime.now()} collapsing chunk {x_index}_{y_index}")
+        part_arrays = []
+        for part_blob in chunk_parts:
+            with part_blob.open("rb") as fd:
+                part_arrays.append(numpy.load(fd))
+
+        full_chunk = numpy.dstack(part_arrays)
+        with labels_bucket.blob(
+            city_cat_results_path.parent / f"label_chunk_{x_index}_{y_index}.npy"
+        ).open("wb") as fd:
+            numpy.save(fd, full_chunk)
+
+    labels_bucket.delete_blobs(itertools.chain.from_iterable(parts.keys()))
+
+
+def _create_buffer_for(
+    bucket: storage.Bucket, prefix: pathlib.PurePosixPath, index: Tuple[int, int]
+) -> TextIO:
+    return bucket.open(str(prefix / str(index)), "wt")
+
+
+def _timestep_number_from_rsl_path(rsl_path: str) -> int:
+    # The files have paths like R11_C1_T0_0min.rsl, R11_C1_T1_5min.rsl
+    # We want to extract the _T0_, _T1_ aspects of the paths.
+    time_step_num = re.search("R11_C1_T(\d+)", rsl_path)
+    if time_step_num is None:
+        raise ValueError(
+            f"Unexpected path {rsl_path} expect path of the form R11_C1_T<n>_"
+        )
+
+    return int(time_step_num.group(1))
 
 
 def _build_feature_matrix_from_archive(
@@ -397,3 +464,48 @@ def _write_as_npy(blob: storage.Blob, array: NDArray) -> None:
     npy_file.flush()
     npy_file.seek(0)
     blob.upload_from_file(npy_file)
+
+
+def _rain_config_as_vector(rain_fd: TextIO) -> Tuple[NDArray, int]:
+    """Converts the rainfall config contents into a vector describing the rainfall.
+
+    Args:
+      rain_fd: The file containing the CityCAT rainfall configuration.
+
+    Returns:
+      A tuple of (rainfall, length) where `rainfall` contains
+      the rainfall pattern as a numpy array, padded to an agreed-upon
+      length, and `length` represent the un-padded number entries in
+      the array (i.e. the length the array would be if it was not
+      padded.)
+
+    """
+    entries = config_readers.read_rainfall_amounts(rain_fd)
+
+    # The uploader should prevent configurations over this length.
+    if len(entries) > _RAINFALL_VECTOR_LENGTH:
+        raise ValueError(
+            f"Rainfall configuration has unexpected length {len(entries)}. "
+            f"Max allowed length is {_RAINFALL_VECTOR_LENGTH}."
+        )
+
+    return numpy.pad(
+        numpy.array(entries, dtype=numpy.float32),
+        (0, _RAINFALL_VECTOR_LENGTH - len(entries)),
+    ), len(entries)
+
+
+# storage_client = storage.Client()
+# labels_bucket = storage_client.bucket(cloud_storage.LABEL_CHUNKS_BUCKET)
+# header = elevation_readers.read_from_esri_ascii(
+#     open("/home/waltaskew/studyarea_1/inputs/Domain_DEM.asc"), header_only=True
+# ).header
+# blob = storage_client.bucket("citycat-output-test").blob(
+#     "studyarea_1/R11C1_StudyArea1.zip"
+# )
+# _write_outputs(
+#     labels_bucket,
+#     pathlib.PurePosixPath("studyarea_1/R11C1_StudyArea1.zip"),
+#     blob.open("rb"),
+#     header,
+# )

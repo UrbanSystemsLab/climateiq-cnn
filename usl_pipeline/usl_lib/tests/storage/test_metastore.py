@@ -98,22 +98,22 @@ def test_study_area_chunk_merge():
 def test_flood_scenario_config_set():
     mock_db = mock.MagicMock()
     metastore.FloodScenarioConfig(
-        gcs_path="a/b/c",
-        as_vector_gcs_path="d/e/f",
+        gcs_uri="a/b/c",
+        as_vector_gcs_uri="d/e/f",
         parent_config_name="parent",
         num_rainfall_entries=5,
-    ).set(mock_db)
+    ).set(mock_db, "b/c")
     mock_db.assert_has_calls(
         [
             mock.call.collection("city_cat_rainfall_configs"),
-            mock.call.collection().document("a%2Fb%2Fc"),
+            mock.call.collection().document("b%2Fc"),
             mock.call.collection()
             .document()
             .set(
                 {
                     "parent_config_name:": "parent",
-                    "gcs_path": "a/b/c",
-                    "as_vector_gcs_path": "d/e/f",
+                    "gcs_uri": "a/b/c",
+                    "as_vector_gcs_uri": "d/e/f",
                     "num_rainfall_entries": 5,
                 },
             ),

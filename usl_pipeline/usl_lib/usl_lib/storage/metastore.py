@@ -3,6 +3,9 @@ from typing import Optional
 import urllib.parse
 
 from google.cloud import firestore
+import rasterio
+
+from usl_lib.shared import geo_data
 
 
 STUDY_AREAS = "study_areas"
@@ -34,6 +37,18 @@ class StudyArea:
     crs: Optional[str] = None
     elevation_min: Optional[float] = None
     elevation_max: Optional[float] = None
+
+    def as_header(self) -> geo_data.ElevationHeader:
+        """Represents the study area as a header describing a raster space."""
+        return geo_data.ElevationHeader(
+            col_count=self.col_count,
+            row_count=self.row_count,
+            x_ll_corner=self.x_ll_corner,
+            y_ll_corner=self.y_ll_corner,
+            cell_size=self.cell_size,
+            nodata_value=-9999.0,
+            crs=rasterio.CRS.from_string(self.crs) if self.crs is not None else None,
+        )
 
     def create(self, db: firestore.Client) -> None:
         """Creates a new study area in the given DB. Only writes non-None attributes.
@@ -177,29 +192,43 @@ def _update_study_area_min_max_elevation(
 class FloodScenarioConfig:
     """A configuration file describing rainfall patterns for a CityCAT simulation."""
 
-    gcs_path: str
-    as_vector_gcs_path: str
+    gcs_uri: str
+    as_vector_gcs_uri: str
     parent_config_name: str
     num_rainfall_entries: int
 
-    def set(self, db: firestore.Client) -> None:
+    def set(self, db: firestore.Client, name: str) -> None:
         """Creates or updates an existing entry for a CityCAT configuration file."""
         # Use the GCS path as the document ID. URL-escape the ID, as forward slashes
         # aren't allowed in document IDs.
         db.collection(CITY_CAT_RAINFALL_CONFIG).document(
-            urllib.parse.quote(self.gcs_path, safe=())
+            urllib.parse.quote(name, safe=())
         ).set(
             {
                 "parent_config_name:": self.parent_config_name,
-                "gcs_path": self.gcs_path,
-                "as_vector_gcs_path": self.as_vector_gcs_path,
+                "gcs_uri": self.gcs_uri,
+                "as_vector_gcs_uri": self.as_vector_gcs_uri,
                 "num_rainfall_entries": self.num_rainfall_entries,
             }
         )
 
     @staticmethod
-    def delete(db: firestore.Client, gcs_path: str) -> None:
+    def delete(db: firestore.Client, name: str) -> None:
         """Deletes the CityCAT configuration entry for the given file."""
         db.collection(CITY_CAT_RAINFALL_CONFIG).document(
-            urllib.parse.quote(gcs_path, safe=())
+            urllib.parse.quote(name, safe=())
         ).delete()
+
+    @classmethod
+    def get(cls, db: firestore.Client, name: str) -> "FloodScenarioConfig":
+        """Retrieve the flood config with the given name."""
+        ref = (
+            db.collection(CITY_CAT_RAINFALL_CONFIG)
+            .document(urllib.parse.quote(name, safe=()))
+            .get()
+        )
+
+        if not ref.exists:
+            raise ValueError(f'No such flood config "{name}"')
+
+        return cls(**ref.to_dict())
