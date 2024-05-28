@@ -150,6 +150,7 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Indicator of the execution mode where input files should be exported"
         + " to CityCat storage bucket.",
+        action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(
         "--elevation-geotiff-band",
@@ -164,6 +165,7 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Indicates that more details of processing steps should be printed to the"
         + "console (INFO logging level instead of default ERROR one)",
+        action=argparse.BooleanOptionalAction,
     )
 
     return parser.parse_args()
