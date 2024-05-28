@@ -1,5 +1,6 @@
 import argparse
 import io
+import logging
 import pathlib
 import tarfile
 import tempfile
@@ -17,6 +18,10 @@ from usl_lib.storage import metastore
 def main() -> None:
     """Breaks the input files into chunks and uploads them to GCS."""
     args = parse_args()
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO)
+    else:
+        logging.basicConfig(level=logging.ERROR)
 
     db = firestore.Client()
     storage_client = storage.Client()
@@ -147,6 +152,7 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Indicator of the execution mode where input files should be exported"
         + " to CityCat storage bucket.",
+        action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(
         "--elevation-geotiff-band",
@@ -154,6 +160,14 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Band index in GeoTIFF file containing elevation data (default value is"
         + " 1)",
+    )
+    parser.add_argument(
+        "--verbose",
+        type=bool,
+        default=False,
+        help="Indicates that more details of processing steps should be printed to the"
+        + "console (INFO logging level instead of default ERROR one)",
+        action=argparse.BooleanOptionalAction,
     )
 
     return parser.parse_args()

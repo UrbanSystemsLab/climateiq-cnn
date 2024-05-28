@@ -37,18 +37,8 @@ def crop_geotiff_to_sub_area(
             input_file, header_only=True
         ).header
 
-    # This transformation is backward one mapping raster cells back to original
-    # coordinates (original_x = min_x + raster_x * step, y is similar).
-    bck_transform = rasterio.Affine(
-        header.cell_size,
-        0,
-        header.x_ll_corner,
-        0,
-        -header.cell_size,
-        header.y_ll_corner + header.row_count * header.cell_size,
-    )
     # The forward transformation maps X/Y coordinates to raster column/row.
-    fwd_transform = ~bck_transform
+    fwd_transform = header.forward_transform()
 
     left_col, lower_row = fwd_transform * (
         sub_area_bounding_box.min_x,

@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
-from rasterio import CRS
+import rasterio
 
 
 @dataclass
@@ -30,10 +30,25 @@ class ElevationHeader:
     y_ll_corner: float
     cell_size: float
     nodata_value: float
-    crs: Optional[CRS] = None
+    crs: Optional[rasterio.CRS] = None
+
+    def back_transform(self) -> rasterio.Affine:
+        """Creates an affine converting raster indices to X/Y coordinates."""
+        return rasterio.Affine(
+            self.cell_size,
+            0,
+            self.x_ll_corner,
+            0,
+            -self.cell_size,
+            self.y_ll_corner + self.row_count * self.cell_size,
+        )
+
+    def forward_transform(self) -> rasterio.Affine:
+        """Creates an affine converting X/Y coordinates to raster indices."""
+        return ~self.back_transform()
 
 
-@dataclass
+@dataclass(slots=True)
 class Elevation:
     header: ElevationHeader
     data: Optional[npt.NDArray[np.float64]] = None

@@ -1,3 +1,4 @@
+import logging
 from typing import Iterable, Tuple
 
 import numpy
@@ -96,6 +97,7 @@ def crop_polygons_to_sub_area(
     sub_area_polygon = geometry.Polygon(
         [(x1, y1), (x2, y1), (x2, y2), (x1, y2), (x1, y1)]
     )
+    processed_count = 0
     for polygon_mask in polygon_masks:
         pol_bbox = geo_data.BoundingBox.from_tuple(polygon_mask[0].bounds)
 
@@ -115,6 +117,12 @@ def crop_polygons_to_sub_area(
                     if not sub_polygon.is_empty:
                         yield sub_polygon, polygon_mask[1]
 
+        processed_count = processed_count + 1
+        if processed_count % 10000 == 0:
+            logging.info("  - %s polygons are cropped so far", processed_count)
+
+    logging.info("  - %s polygons were cropped", processed_count)
+
 
 def intersect(
     polygon_masks_to_process: Iterable[Tuple[geometry.Polygon, int]],
@@ -130,6 +138,7 @@ def intersect(
     Returns:
         Polygons associated with integer masks reduced to multi-polygon boundaries.
     """
+    processing_count = 0
     for polygon_mask in polygon_masks_to_process:
         poly_or_multi = polygon_mask[0].intersection(multi_polygon_boundaries)
         # Intersection of 2 polygons may be either a polygon or a multi-polygon
@@ -140,3 +149,7 @@ def intersect(
             for sub_polygon in poly_or_multi.geoms:
                 if not sub_polygon.is_empty:
                     yield sub_polygon, polygon_mask[1]
+        processing_count = processing_count + 1
+        if processing_count % 1000 == 0:
+            logging.info("  - %s polygons are intersected so far", processing_count)
+    logging.info("  - %s polygons were intersected", processing_count)
