@@ -85,8 +85,10 @@ def export_to_city_cat(
 
 
 def build_chunks(
+    args: argparse.Namespace,
     prepared_inputs: study_area_transformers.PreparedInputData,
-    work_dir: str,
+    study_area_chunk_bucket: storage.Bucket,
+    work_dir: pathlib.Path,
 ):
     # Place-holder for the real chunking function.
     tar_fd = io.BytesIO()

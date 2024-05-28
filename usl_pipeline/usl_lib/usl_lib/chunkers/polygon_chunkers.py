@@ -52,7 +52,8 @@ def split_polygons_into_chunks(
     polygon_masks: Iterable[Tuple[geometry.Polygon, int]],
     output_dir_path: str | pathlib.Path,
     chunk_file_name_pattern: str = "chunk_{y}_{x}",
-    support_mask_values=False,
+    support_mask_values: bool = False,
+    chunk_additional_border_cells: int = 0
 ) -> list[chunkers_data.ChunkDescriptor]:
     """Writes polygon chunk files based on source with polygons and chunk structure.
 
@@ -64,6 +65,8 @@ def split_polygons_into_chunks(
         chunk_file_name_pattern: Format pattern used to generate chunk file names.
         support_mask_values: Optional indicator that masks should be added into output
             as additional first column.
+        chunk_additional_border_cells: Number of cells that the chunk area is extended
+            by in all 4 sides (up, down, left, right).
 
     Returns:
         List of descriptors for produced chunk files.
@@ -85,10 +88,10 @@ def split_polygons_into_chunks(
             )
             chunk_bboxes[y_chunk_index].append(
                 geo_data.BoundingBox(
-                    bbox.min_x - step,
-                    bbox.min_y - step,
-                    bbox.max_x + step,
-                    bbox.max_y + step,
+                    bbox.min_x - step - chunk_additional_border_cells,
+                    bbox.min_y - step - chunk_additional_border_cells,
+                    bbox.max_x + step + chunk_additional_border_cells,
+                    bbox.max_y + step + chunk_additional_border_cells,
                 )
             )
             chunk_polygons[y_chunk_index].append([])
