@@ -1,7 +1,7 @@
 # Create a bucket for the original, un-processed files describing a study area geography.
 resource "google_storage_bucket" "study_areas" {
   name     = "${var.bucket_prefix}climateiq-study-areas"
-  location = "us-west1"
+  location = var.bucket_region
 }
 
 # Create a service account used by the function and Eventarc trigger
