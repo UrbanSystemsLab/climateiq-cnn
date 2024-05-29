@@ -1,6 +1,6 @@
 # Create buckets for storing raw files, file chunks and processed feature matrix chunks.
 resource "google_storage_bucket" "city_cat_config" {
-  name     = "${var.bucket_prefix}climateiq-citycat-config"
+  name     = "${var.bucket_prefix}climateiq-flood-simulation-config"
   location = var.bucket_region
 }
 
