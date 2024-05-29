@@ -10,7 +10,7 @@ data "archive_file" "source" {
 
 resource "google_storage_bucket" "source" {
   name     = "${var.bucket_prefix}climateiq-cloud-functions"
-  location = "us-west1"
+  location = var.bucket_region
 }
 
 resource "google_storage_bucket_object" "source" {
@@ -24,7 +24,7 @@ resource "google_storage_bucket_object" "source" {
 # https://firebase.google.com/docs/firestore/manage-databases#the_default_database
 resource "google_firestore_database" "database" {
   name        = "(default)"
-  location_id = "us-west1"
+  location_id = var.bucket_region
   type        = "FIRESTORE_NATIVE"
 }
 

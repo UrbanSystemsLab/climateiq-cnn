@@ -1,11 +1,11 @@
 resource "google_storage_bucket" "chunks" {
   name     = "${var.bucket_prefix}climateiq-study-area-chunks"
-  location = "us-west1"
+  location = var.bucket_region
 }
 
 resource "google_storage_bucket" "features" {
   name     = "${var.bucket_prefix}climateiq-study-area-feature-chunks"
-  location = "us-west1"
+  location = var.bucket_region
 }
 
 # Create a service account used by the function and Eventarc trigger

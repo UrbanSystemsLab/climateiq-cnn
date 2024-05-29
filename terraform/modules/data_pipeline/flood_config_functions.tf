@@ -1,7 +1,7 @@
 # Create buckets for storing raw files, file chunks and processed feature matrix chunks.
 resource "google_storage_bucket" "city_cat_config" {
   name     = "${var.bucket_prefix}climateiq-citycat-config"
-  location = "us-west1"
+  location = var.bucket_region
 }
 
 # Create a service account used by the function and Eventarc trigger
