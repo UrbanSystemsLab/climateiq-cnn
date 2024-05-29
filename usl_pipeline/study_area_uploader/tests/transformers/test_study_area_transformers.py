@@ -377,6 +377,77 @@ def test_prepare_and_upload_citycat_input_files_no_boundaries_buildings_only():
         )
 
 
+def test_prepare_and_upload_citycat_input_files_with_boundaries_and_green_areas():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        work_dir = pathlib.Path(temp_dir)
+
+        # Input data:
+        elevation_input_file_path = work_dir / "input_elevation.tif"
+        prepare_elevation_data(
+            elevation_input_file_path,
+            [
+                [0.0, 1.0, 2.0, 3.0, 4.0],
+                [5.0, 6.0, 7.0, 8.0, 9.0],
+                [10.0, 11.0, 12.0, 13.0, 14.0],
+                [15.0, 16.0, 17.0, 18.0, 19.0],
+                [20.0, 21.0, 22.0, 23.0, 24.0],
+            ],
+        )
+        boundaries_polygons = [
+            (geometry.Polygon([(0, 2.5), (2.5, 5), (5, 2.5), (2.5, 0), (0, 2.5)]), 1)
+        ]
+        green_areas_polygons = [(bbox_polygon(0, 0, 5, 3), 1)]
+
+        # Mocks:
+        elevation_cloud_storage_buffer = StringIO()
+        elevation_cloud_storage_buffer.close = lambda: None  # Want to check content
+        elevation_blob = mock.MagicMock(spec=storage.Blob)
+        elevation_blob.open.return_value = elevation_cloud_storage_buffer
+        green_areas_cloud_storage_buffer = StringIO()
+        green_areas_cloud_storage_buffer.close = lambda: None  # Want to check content
+        green_areas_blob = mock.MagicMock(spec=storage.Blob)
+        green_areas_blob.open.return_value = green_areas_cloud_storage_buffer
+        # Storage bucket
+        citycat_bucket = mock.MagicMock(spec=storage.Bucket)
+        citycat_bucket.blob.side_effect = [elevation_blob, green_areas_blob]
+
+        # Execute the code:
+        study_area_transformers.prepare_and_upload_citycat_input_files(
+            "TestArea1",
+            study_area_transformers.PreparedInputData(
+                elevation_file_path=elevation_input_file_path,
+                boundaries_polygons=boundaries_polygons,
+                buildings_polygons=None,
+                green_areas_polygons=green_areas_polygons,
+                soil_classes_polygons=None,
+            ),
+            work_dir,
+            citycat_bucket,
+            default_no_data_value=-1.0,
+        )
+
+        assert citycat_bucket.mock_calls == [
+            mock.call.blob("TestArea1/Domain_DEM.asc"),
+            mock.call.blob("TestArea1/GreenAreas.txt"),
+        ]
+        assert elevation_cloud_storage_buffer.getvalue() == (
+            "ncols 5\n"
+            + "nrows 5\n"
+            + "xllcorner 0.0\n"
+            + "yllcorner 0.0\n"
+            + "cellsize 1.0\n"
+            + "NODATA_value -1.0\n"
+            + "-1.0 -1.0 2.0 -1.0 -1.0\n"
+            + "-1.0 6.0 7.0 8.0 -1.0\n"
+            + "10.0 11.0 12.0 13.0 14.0\n"
+            + "-1.0 16.0 17.0 18.0 -1.0\n"
+            + "-1.0 -1.0 22.0 -1.0 -1.0\n"
+        )
+        assert green_areas_cloud_storage_buffer.getvalue() == (
+            "1\n6 4.5 5.0 2.5 0.0 0.5 4.5 3.0 2.5 0.0 2.5 3.0 3.0\n"
+        )
+
+
 def test_prepare_and_upload_citycat_input_files_with_boundaries_green_areas_and_soil():
     with tempfile.TemporaryDirectory() as temp_dir:
         work_dir = pathlib.Path(temp_dir)
@@ -432,7 +503,7 @@ def test_prepare_and_upload_citycat_input_files_with_boundaries_green_areas_and_
 
         assert citycat_bucket.mock_calls == [
             mock.call.blob("TestArea1/Domain_DEM.asc"),
-            mock.call.blob("TestArea1/GreenAreas.txt"),
+            mock.call.blob("TestArea1/Spatial_GreenAreas.txt"),
         ]
         assert elevation_cloud_storage_buffer.getvalue() == (
             "ncols 5\n"
