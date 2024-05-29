@@ -1,4 +1,5 @@
 import io
+import logging
 import pathlib
 import tarfile
 from typing import Optional, Tuple
@@ -38,6 +39,7 @@ def _chunk_polygons_if_present(
     Returns:
         The optional path to the output folder with chunk files.
     """
+    logging.info("Preparing %s chunks...", object_type_name)
     chunks_dir = None
     if polygon_masks is not None:
         chunks_dir = work_dir / f"{object_type_name}_chunks"
@@ -53,10 +55,11 @@ def _chunk_polygons_if_present(
 def _add_chunk_to_tar_if_present(
     chunks_dir: Optional[pathlib.Path],
     chunk_file_name: str,
+    tar_entry_file_name: str,
     tar: tarfile.TarFile,
 ):
     if chunks_dir is not None:
-        tar.add(str(chunks_dir / chunk_file_name), arcname=file_names.BOUNDARIES_TXT)
+        tar.add(str(chunks_dir / chunk_file_name), arcname=tar_entry_file_name)
 
 
 def build_and_upload_chunks(
@@ -66,6 +69,7 @@ def build_and_upload_chunks(
     study_area_chunk_bucket: storage.Bucket,
     chunk_size: int = 1000,
 ):
+    logging.info("Preparing elevation chunks...")
     elevation_chunks_dir = work_dir / "elevation_chunks"
     elevation_chunks_dir.mkdir(parents=True, exist_ok=True)
     elevation_chunk_descriptors = elevation_chunkers.split_geotiff_into_chunks(
@@ -95,22 +99,25 @@ def build_and_upload_chunks(
         y_chunk_index = elevation_chunk_descriptor.y_chunk_index
         x_chunk_index = elevation_chunk_descriptor.x_chunk_index
         chunk_file_name = f"chunk_{y_chunk_index}_{x_chunk_index}"
+        logging.info("Exporting %s...", chunk_file_name)
         tar_fd = io.BytesIO()
         with tarfile.open(mode="w", fileobj=tar_fd) as tar:
             tar.add(
                 str(elevation_chunk_descriptor.path), arcname=file_names.ELEVATION_TIF
             )
             _add_chunk_to_tar_if_present(
-                boundaries_chunks_dir, chunk_file_name, file_names.BOUNDARIES_TXT
+                boundaries_chunks_dir, chunk_file_name, file_names.BOUNDARIES_TXT, tar,
             )
             _add_chunk_to_tar_if_present(
-                buildings_chunks_dir, chunk_file_name, file_names.BUILDINGS_TXT
+                buildings_chunks_dir, chunk_file_name, file_names.BUILDINGS_TXT, tar,
             )
             _add_chunk_to_tar_if_present(
-                green_areas_chunks_dir, chunk_file_name, file_names.GREEN_AREAS_TXT
+                green_areas_chunks_dir, chunk_file_name, file_names.GREEN_AREAS_TXT,
+                tar,
             )
             _add_chunk_to_tar_if_present(
-                soil_classes_chunks_dir, chunk_file_name, file_names.SOIL_CLASSES_TXT
+                soil_classes_chunks_dir, chunk_file_name, file_names.SOIL_CLASSES_TXT,
+                tar,
             )
         tar_fd.flush()
         tar_fd.seek(0)
