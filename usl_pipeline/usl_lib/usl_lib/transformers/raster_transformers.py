@@ -1,5 +1,5 @@
 import logging
-from typing import Tuple
+from typing import Dict, Tuple
 
 import numpy
 import numpy.typing as npt
@@ -36,6 +36,19 @@ def fill_in_soil_classes_missing_values_from_nearest_polygons(
     logging.info("Doing gap-filling for raster cells with missing soil classes...")
 
     masks = [polygon_mask[1] for polygon_mask in soil_classes_polygon_masks]
+
+    # Checking stats:
+    mask_unique_values = set(masks)
+    for mask_value in mask_unique_values:
+        soil_classes_for_mask = numpy.where(
+            (green_areas_raster == 1) & (soil_classes_raster == mask_value)
+        )
+        logging.info(
+            "  - Stats: %s green area cells for soil class [%s] were detected",
+            len(soil_classes_for_mask[0]),
+            mask_value,
+        )
+
     d = {"geometry": [polygon_mask[0] for polygon_mask in soil_classes_polygon_masks]}
     gdf = gpd.GeoDataFrame(d)
 
@@ -51,6 +64,7 @@ def fill_in_soil_classes_missing_values_from_nearest_polygons(
     missing_rows, missing_cols = numpy.where(missing_soil_classes)
     logging.info("  - %s missing soil class cells were detected...", len(missing_rows))
     processed_cells = 0
+    added_soil_class_counts: Dict[int, int] = {}
     for row, col in zip(missing_rows, missing_cols):
         # Calculate corners for the cell with missing soil class
         x1 = min_x + col * cell_size
@@ -66,10 +80,15 @@ def fill_in_soil_classes_missing_values_from_nearest_polygons(
                 [(x1, y1), (x2, y1), (x2, y2), (x1, y2), (x1, y1)]
             )
             soil_classes_corrections.append((point_polygon, nearest_soil_class))
+            prev_count = added_soil_class_counts.get(nearest_soil_class, 0)
+            added_soil_class_counts[nearest_soil_class] = prev_count + 1
         processed_cells = processed_cells + 1
         if processed_cells % 1000 == 0:
             logging.info("  - %s missing cells are filled in so far", processed_cells)
 
     logging.info("  - %s missing cells were filled in", processed_cells)
+    logging.info(
+        "  - filled-in cell counts by soil-class values: %s", added_soil_class_counts
+    )
 
     return soil_classes_corrections
