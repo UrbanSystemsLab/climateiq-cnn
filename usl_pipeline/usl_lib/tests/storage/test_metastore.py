@@ -93,3 +93,41 @@ def test_study_area_chunk_merge():
             ),
         ]
     )
+
+
+def test_flood_scenario_config_set():
+    mock_db = mock.MagicMock()
+    metastore.FloodScenarioConfig(
+        gcs_path="a/b/c",
+        as_vector_gcs_path="d/e/f",
+        parent_config_name="parent",
+        num_rainfall_entries=5,
+    ).set(mock_db)
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("city_cat_rainfall_configs"),
+            mock.call.collection().document("a%2Fb%2Fc"),
+            mock.call.collection()
+            .document()
+            .set(
+                {
+                    "parent_config_name:": "parent",
+                    "gcs_path": "a/b/c",
+                    "as_vector_gcs_path": "d/e/f",
+                    "num_rainfall_entries": 5,
+                },
+            ),
+        ]
+    )
+
+
+def test_flood_scenario_config_delete():
+    mock_db = mock.MagicMock()
+    metastore.FloodScenarioConfig.delete(mock_db, "a/b/c")
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("city_cat_rainfall_configs"),
+            mock.call.collection().document("a%2Fb%2Fc"),
+            mock.call.collection().document().delete(),
+        ]
+    )
