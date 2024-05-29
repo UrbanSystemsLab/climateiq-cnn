@@ -1,6 +1,6 @@
 # Create a bucket for the original, un-processed files describing a study area geography.
 resource "google_storage_bucket" "study_areas" {
-  name     = "climateiq-study-areas"
+  name     = "${var.bucket_prefix}climateiq-study-areas"
   location = "us-west1"
 }
 
