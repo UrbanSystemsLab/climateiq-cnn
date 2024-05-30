@@ -176,4 +176,12 @@ def parse_args() -> argparse.Namespace:
         nargs="*",
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # Validation of CLI arguments
+    if args.soil_type_file and not args.non_green_area_soil_classes:
+        parser.error(
+            "--non_green_area_soil_classes required if --soil_type_file present"
+        )
+
+    return args
