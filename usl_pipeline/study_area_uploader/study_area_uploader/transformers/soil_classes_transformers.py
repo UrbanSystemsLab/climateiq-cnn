@@ -20,6 +20,15 @@ def transform_soil_classes_as_green_areas(
     raster where soil classes information is missing, the value is assigned from the
     nearest neighbor soil class polygon.
 
+    Here are formal steps of the algorithm:
+      - Exclude from soil class polygons all parts of regions that are outside green
+        areas, also filter out polygons with non-green soil classes, and report them as
+        polygons to the output;
+      - Classify soil classes for all raster cells from green areas that weren't covered
+        by any soil classes (including non-green ones) using nearest neighbor approach
+        looking for nearest non-green soil class polygons, and report them as 1-cell
+        polygons to the output in addition to the previous item.
+
     Args:
         elevation_header: The source of coordinate system and study area region info.
         green_areas_polygons: List of tuples with green area polygons.

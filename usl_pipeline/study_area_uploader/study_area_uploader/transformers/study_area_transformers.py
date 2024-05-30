@@ -17,7 +17,8 @@ from usl_lib.storage import file_names
 from usl_lib.transformers import polygon_transformers
 from usl_lib.writers import polygon_writers
 
-"""Default soil class value that is recognized a non-green area."""
+
+# Default soil class value that is recognized a non-green area.
 DEFAULT_NON_GREEN_AREA_SOIL_CLASS: int = -9999
 
 
