@@ -67,9 +67,6 @@ resource "google_cloudfunctions2_function" "study_area_write" {
   build_config {
     runtime     = "python311"
     entry_point = "write_study_area_metadata"
-    environment_variables = {
-      BUCKET_PREFIX = var.bucket_prefix
-    }
     source {
       storage_source {
         bucket = google_storage_bucket.source.name
@@ -82,6 +79,9 @@ resource "google_cloudfunctions2_function" "study_area_write" {
     available_memory      = "256M"
     timeout_seconds       = 60
     service_account_email = google_service_account.study_area_writer.email
+    environment_variables = {
+      BUCKET_PREFIX = var.bucket_prefix
+    }
   }
 
   event_trigger {

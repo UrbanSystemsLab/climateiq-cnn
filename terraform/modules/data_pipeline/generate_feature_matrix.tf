@@ -76,9 +76,6 @@ resource "google_cloudfunctions2_function" "chunk_writes" {
   build_config {
     runtime     = "python311"
     entry_point = "build_feature_matrix"
-    environment_variables = {
-      BUCKET_PREFIX = var.bucket_prefix
-    }
     source {
       storage_source {
         bucket = google_storage_bucket.source.name
@@ -91,6 +88,9 @@ resource "google_cloudfunctions2_function" "chunk_writes" {
     available_memory      = "256M"
     timeout_seconds       = 60
     service_account_email = google_service_account.generate_feature_matrix.email
+    environment_variables = {
+      BUCKET_PREFIX = var.bucket_prefix
+    }
   }
 
   event_trigger {

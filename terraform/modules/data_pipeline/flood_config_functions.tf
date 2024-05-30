@@ -72,9 +72,6 @@ resource "google_cloudfunctions2_function" "write_citycat_config" {
   build_config {
     runtime     = "python311"
     entry_point = "write_flood_scenario_metadata_and_features"
-    environment_variables = {
-      BUCKET_PREFIX = var.bucket_prefix
-    }
     source {
       storage_source {
         bucket = google_storage_bucket.source.name
@@ -87,6 +84,9 @@ resource "google_cloudfunctions2_function" "write_citycat_config" {
     available_memory      = "256Mi"
     timeout_seconds       = 60
     service_account_email = google_service_account.city_cat_config.email
+    environment_variables = {
+      BUCKET_PREFIX = var.bucket_prefix
+    }
   }
 
   event_trigger {
@@ -121,9 +121,6 @@ resource "google_cloudfunctions2_function" "delete_citycat_config" {
   build_config {
     runtime     = "python311"
     entry_point = "delete_flood_scenario_metadata"
-    environment_variables = {
-      BUCKET_PREFIX = var.bucket_prefix
-    }
     source {
       storage_source {
         bucket = google_storage_bucket.source.name
@@ -136,6 +133,9 @@ resource "google_cloudfunctions2_function" "delete_citycat_config" {
     available_memory      = "256Mi"
     timeout_seconds       = 60
     service_account_email = google_service_account.city_cat_config.email
+    environment_variables = {
+      BUCKET_PREFIX = var.bucket_prefix
+    }
   }
 
   event_trigger {
