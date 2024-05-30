@@ -40,6 +40,7 @@ def main() -> None:
             args.soil_type_mask_feature_property,
             pathlib.Path(temp_dir),
             study_area_bucket,
+            input_non_green_area_soil_classes=set(args.non_green_area_soil_classes),
         )
 
         if args.export_to_citycat:
@@ -169,5 +170,20 @@ def parse_args() -> argparse.Namespace:
         + "console (INFO logging level instead of default ERROR one)",
         action=argparse.BooleanOptionalAction,
     )
+    parser.add_argument(
+        "--non-green-area-soil-classes",
+        type=int,
+        default=[],
+        help="Optional list of soil classes that cannot be treated as green areas",
+        nargs="*",
+    )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # Validation of CLI arguments
+    if args.soil_type_file and not args.non_green_area_soil_classes:
+        parser.error(
+            "--non_green_area_soil_classes required if --soil_type_file present"
+        )
+
+    return args
