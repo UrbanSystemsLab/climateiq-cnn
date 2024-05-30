@@ -38,10 +38,10 @@ resource "google_project_iam_member" "labels_artifactregistry_reader" {
   depends_on = [google_project_iam_member.event_receiving]
 }
 
-# Give read access to the raw citycat bucket.
+# Give read & write access to the raw citycat bucket.
 resource "google_storage_bucket_iam_member" "labels_reader" {
   bucket = google_storage_bucket.raw_labels.name
-  role   = "roles/storage.objectViewer"
+  role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.labels.email}"
 }
 
@@ -89,8 +89,11 @@ resource "google_cloudfunctions2_function" "labels_processor" {
 
   service_config {
     available_memory      = "2Gi"
-    timeout_seconds       = 60
+    timeout_seconds       = 540
     service_account_email = google_service_account.labels.email
+    environment_variables = {
+      BUCKET_PREFIX = var.bucket_prefix
+    }
   }
 
   event_trigger {

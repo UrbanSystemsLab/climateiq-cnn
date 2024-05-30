@@ -1,4 +1,5 @@
 import dataclasses
+import enum
 from typing import Optional
 import urllib.parse
 
@@ -9,8 +10,12 @@ from usl_lib.shared import geo_data
 
 
 STUDY_AREAS = "study_areas"
-CHUNKS = "chunks"
+STUDY_AREA_CHUNKS = "chunks"
+
 CITY_CAT_RAINFALL_CONFIG = "city_cat_rainfall_configs"
+
+SIMULATIONS = "simulations"
+SIMULATION_LABEL_CHUNKS = "label_chunks"
 
 
 @dataclasses.dataclass(slots=True)
@@ -56,7 +61,7 @@ class StudyArea:
         Args:
           db: The firestore database client to use for the read.
         """
-        db.collection(STUDY_AREAS).document(self.name).create(self._as_dict())
+        self.get_ref(db, self.name).create(self._as_dict())
 
     def set(self, db: firestore.Client) -> None:
         """Creates a new study area in the given DB. Only writes non-None attributes.
@@ -64,7 +69,7 @@ class StudyArea:
         Args:
           db: The firestore database client to use for the read.
         """
-        db.collection(STUDY_AREAS).document(self.name).set(self._as_dict())
+        self.get_ref(db, self.name).set(self._as_dict())
 
     @classmethod
     def get(cls, db: firestore.Client, name: str) -> "StudyArea":
@@ -77,11 +82,16 @@ class StudyArea:
         Returns:
           A StudyArea object representing the database's contents.
         """
-        study_area_ref = db.collection(STUDY_AREAS).document(name).get()
-        if not study_area_ref.exists:
+        ref = cls.get_ref(db, name).get()
+        if not ref.exists:
             raise ValueError(f'No such study area "{name}"')
 
-        return cls(name=name, **study_area_ref.to_dict())
+        return cls(name=name, **ref.to_dict())
+
+    @staticmethod
+    def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
+        """Retrieve a Firestore reference to the study area with the given name."""
+        return db.collection(STUDY_AREAS).document(name)
 
     @staticmethod
     def update_min_max_elevation(
@@ -153,7 +163,7 @@ class StudyAreaChunk:
         (
             db.collection(STUDY_AREAS)
             .document(study_area_name)
-            .collection(CHUNKS)
+            .collection(STUDY_AREA_CHUNKS)
             .document(self.id_)
             .set(as_dict, merge=True)
         )
@@ -201,34 +211,105 @@ class FloodScenarioConfig:
         """Creates or updates an existing entry for a CityCAT configuration file."""
         # Use the GCS path as the document ID. URL-escape the ID, as forward slashes
         # aren't allowed in document IDs.
-        db.collection(CITY_CAT_RAINFALL_CONFIG).document(
-            urllib.parse.quote(name, safe=())
-        ).set(
+        self.get_ref(db, name).set(
             {
-                "parent_config_name:": self.parent_config_name,
+                "parent_config_name": self.parent_config_name,
                 "gcs_uri": self.gcs_uri,
                 "as_vector_gcs_uri": self.as_vector_gcs_uri,
                 "num_rainfall_entries": self.num_rainfall_entries,
             }
         )
 
-    @staticmethod
-    def delete(db: firestore.Client, name: str) -> None:
+    @classmethod
+    def delete(cls, db: firestore.Client, name: str) -> None:
         """Deletes the CityCAT configuration entry for the given file."""
-        db.collection(CITY_CAT_RAINFALL_CONFIG).document(
-            urllib.parse.quote(name, safe=())
-        ).delete()
+        cls.get_ref(db, name).delete()
 
     @classmethod
     def get(cls, db: firestore.Client, name: str) -> "FloodScenarioConfig":
         """Retrieve the flood config with the given name."""
-        ref = (
-            db.collection(CITY_CAT_RAINFALL_CONFIG)
-            .document(urllib.parse.quote(name, safe=()))
-            .get()
-        )
-
+        ref = cls.get_ref(db, name).get()
         if not ref.exists:
             raise ValueError(f'No such flood config "{name}"')
 
         return cls(**ref.to_dict())
+
+    @staticmethod
+    def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
+        return db.collection(CITY_CAT_RAINFALL_CONFIG).document(
+            urllib.parse.quote(name, safe=())
+        )
+
+
+class SimulationType(enum.StrEnum):
+    CITY_CAT = "CityCAT"
+
+
+@dataclasses.dataclass(slots=True)
+class Simulation:
+    """A simulation run against a study area given some configuration.
+
+    Attributes:
+        gcs_prefix_uri: GCS URI of the prefix under which simulation results are stored.
+        simulation_type: The type of simulation (e.g. CityCAT, WRF.)
+        study_area: The study area the simulation ran against.
+        configuration: The configuration used to run the simulation.
+    """
+
+    gcs_prefix_uri: str
+    simulation_type: SimulationType
+    study_area: firestore.DocumentReference
+    configuration: firestore.DocumentReference
+
+    def set(self, db: firestore.Client) -> None:
+        """Creates a simulation in the given DB."""
+        assert (
+            self.study_area.get().exists
+        ), f"No such study area exists: {self.study_area.id}"
+
+        assert (
+            self.configuration.get().exists
+        ), f"No such configuration exists: {self.configuration.id}"
+
+        as_dict = {
+            "gcs_prefix_uri": self.gcs_prefix_uri,
+            "simulation_type": str(self.simulation_type),
+            "study_area": self.study_area,
+            "configuration": self.configuration,
+        }
+        self.get_ref(
+            db,
+            urllib.parse.unquote(self.study_area.id),
+            urllib.parse.unquote(self.configuration.id),
+        ).set(as_dict)
+
+    @staticmethod
+    def get_ref(
+        db: firestore.Client, study_area_name: str, config_path: str
+    ) -> firestore.DocumentReference:
+        """Retrieves a reference for the simulation for the given study are & config."""
+        return db.collection(SIMULATIONS).document(
+            urllib.parse.quote(f"{study_area_name}-{config_path}", safe=())
+        )
+
+
+@dataclasses.dataclass(slots=True)
+class SimulationLabelChunk:
+    """A chunk of a simulation result formatted as tensor for ML.
+
+    Attributes:
+        gcs_uri: The full GCS uri to the location of the chunk.
+        x_index: The x index of the chunk relative to other chunks in the simulation.
+        y_index: The y index of the chunk relative to other chunks in the simulation.
+    """
+
+    gcs_uri: str
+    x_index: int
+    y_index: int
+
+    def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
+        """Adds the label chunk to the given simulation."""
+        id_ = f"{self.x_index}_{self.y_index}"
+        Simulation.get_ref(db, study_area_name, config_path).collection(
+            SIMULATION_LABEL_CHUNKS
+        ).document(id_).set(dataclasses.asdict(self))

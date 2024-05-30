@@ -111,7 +111,7 @@ def test_flood_scenario_config_set():
             .document()
             .set(
                 {
-                    "parent_config_name:": "parent",
+                    "parent_config_name": "parent",
                     "gcs_uri": "a/b/c",
                     "as_vector_gcs_uri": "d/e/f",
                     "num_rainfall_entries": 5,

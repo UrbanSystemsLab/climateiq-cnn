@@ -1,15 +1,14 @@
 import dataclasses
 import datetime
 import functools
-import itertools
 import io
 import pathlib
 import logging
 import re
 import tarfile
-from typing import BinaryIO, Callable, Dict, IO, Optional, Sequence, TextIO, Tuple
-import zipfile
+from typing import BinaryIO, Callable, IO, Optional, TextIO, Tuple
 
+from google.api_core import exceptions
 from google.cloud import error_reporting
 from google.cloud import firestore
 from google.cloud import storage
@@ -22,7 +21,6 @@ from usl_lib.chunkers import raster_chunkers
 from usl_lib.readers import simulation_readers
 from usl_lib.readers import config_readers
 from usl_lib.readers import elevation_readers
-from usl_lib.shared import geo_data
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
@@ -81,13 +79,23 @@ def _retry_and_report_errors(
 
         @functools.wraps(func)
         def wrapper(cloud_event: functions_framework.CloudEvent) -> None:
-            logging.basicConfig(level=logging.WARN)
+            logging.basicConfig(level=logging.INFO)
+
+            # Utilities like `gcloud storage cp` create temporary files for parallel
+            # uploads and then combine the chunks in one final write. We want to avoid
+            # the intermediary chunk writes.
+            if cloud_event.data.get("name", "").startswith(
+                "gcloud/tmp/parallel_composite_uploads"
+            ):
+                logging.debug("Skipping tmp upload file %s", cloud_event.data["name"])
+                return
 
             # To handle retries, check the time created and return if the event is too
             # old. GCP retries until the function returns successfully, so the pattern
             # is to report exceptions to have the function retried and return normally
             # to stop retries.
             # https://cloud.google.com/functions/docs/bestpractices/retries
+            cloud_event.data["timeCreated"]
             event_time = datetime.datetime.fromisoformat(
                 cloud_event.data["timeCreated"]
             )
@@ -196,6 +204,35 @@ def write_flood_scenario_metadata_and_features(
         ).set(db, config_blob.name)
 
 
+def _rain_config_as_vector(rain_fd: TextIO) -> Tuple[NDArray, int]:
+    """Converts the rainfall config contents into a vector describing the rainfall.
+
+    Args:
+      rain_fd: The file containing the CityCAT rainfall configuration.
+
+    Returns:
+      A tuple of (rainfall, length) where `rainfall` contains
+      the rainfall pattern as a numpy array, padded to an agreed-upon
+      length, and `length` represent the un-padded number entries in
+      the array (i.e. the length the array would be if it was not
+      padded.)
+
+    """
+    entries = config_readers.read_rainfall_amounts(rain_fd)
+
+    # The uploader should prevent configurations over this length.
+    if len(entries) > _RAINFALL_VECTOR_LENGTH:
+        raise ValueError(
+            f"Rainfall configuration has unexpected length {len(entries)}. "
+            f"Max allowed length is {_RAINFALL_VECTOR_LENGTH}."
+        )
+
+    return numpy.pad(
+        numpy.array(entries, dtype=numpy.float32),
+        (0, _RAINFALL_VECTOR_LENGTH - len(entries)),
+    ), len(entries)
+
+
 @functions_framework.cloud_event
 @_retry_and_report_errors()
 def delete_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) -> None:
@@ -248,93 +285,196 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 @functions_framework.cloud_event
 @_retry_and_report_errors()
 def process_citycat_outputs(cloud_event: functions_framework.CloudEvent) -> None:
+    """Creates training labels as CityCAT result files are uploaded.
+
+    CityCAT creates one .rsl file for each time step in the simulation, representing
+    simulated flood heights for that timestep. For each timestep's .rsl file:
+    - Rasterize the output file and break it into chunks, as we do with features. The
+      labels need to be chunked identically to the features.
+    - Write each chunk as a numpy matrix for the timestep into paths like
+      <x_chunk_index>_<y_chunk_index>/<timestep_number>.npy
+
+    This same function will then be triggered for each chunk upload. For each chunk:
+    - Look up the expected number of timesteps in the metastore associated with this
+      simulation's rainfall configuration.
+    - Check to see if corresponding chunks for the same <x_chunk_index> and
+      <y_chunk_index> have been uploaded for all expected timesteps.
+    - If chunks for all timesteps are present, collapse them and write the resulting
+      combined tensor into the labels bucket.
+    - If not, return and let another chunk upload trigger the above collapsing logic.
+    """
     storage_client = storage.Client()
     bucket = storage_client.bucket(cloud_event.data["bucket"])
     blob = bucket.blob(cloud_event.data["name"])
+    blob_path = pathlib.PurePosixPath(cloud_event.data["name"])
 
+    if blob_path.suffix == ".rsl":
+        _write_city_cat_output_chunks(blob, blob_path)
+    elif blob_path.suffix == ".npy":
+        _collapse_city_cat_output_chunks(
+            blob, blob_path, storage_client.bucket(cloud_storage.LABEL_CHUNKS_BUCKET)
+        )
+    else:
+        logging.error("Unexpected file %s", blob_path)
+
+
+def _write_city_cat_output_chunks(
+    blob: storage.Blob, blob_path: pathlib.PurePosixPath
+) -> None:
+    """Writes each chunk of the CityCAT result file for further processing.
+
+    Breaks the given CityCAT .rsl result file for one timestep into chunks and writes
+    them into GCS as numpy arrays. Writing these arrays re-triggers the
+    `process_citycat_outputs` cloud function, which will then call
+    `_collapse_city_cat_output_chunks` to collapse the chunks for each timestep.
+
+    See the documentation for process_citycat_outputs for more details.
+
+    Args:
+      blob: The blob containing the CityCAT .rsl result file.
+      blob_path: The path to the blob within its bucket.
+    """
+    # CityCAT output file paths are of the form:
+    # <study_area_name>/<config/path>/R11_C1_T<x>_y>min.rsl
+    study_area_name = blob_path.parts[0]
+    config_path = str(pathlib.PurePosixPath(*blob_path.parts[1:-1]))
+    logging.info(
+        "Processing file %s for study area %s simulation config %s",
+        blob,
+        study_area_name,
+        config_path,
+    )
+
+    # Enter the simulation in our metastore.
     db = firestore.Client()
-    path = pathlib.PurePosixPath(cloud_event.data["name"])
-    study_area_name = path.parts[0]
+    metastore.Simulation(
+        gcs_prefix_uri=f"gs://{blob.bucket.name}/{blob_path.parent}",
+        simulation_type=metastore.SimulationType.CITY_CAT,
+        study_area=metastore.StudyArea.get_ref(db, study_area_name),
+        configuration=metastore.FloodScenarioConfig.get_ref(db, config_path),
+    ).set(db)
+
+    # Retrieve geography information for the study area to rasterize CityCAT results.
     header = metastore.StudyArea.get(db, study_area_name).as_header()
 
-    config_name = pathlib.PurePosixPath(*path.parts[1:-1])
-    timesteps = metastore.FloodScenarioConfig.get(config_name).num_rainfall_entries
+    chunk_prefix = pathlib.PurePosixPath("chunks") / blob_path.parent
+    timestep = _timestep_number_from_rsl_path(blob_path.name)
+    logging.info(
+        "Writing chunks of %s for timestep %s to prefix %s",
+        blob,
+        timestep,
+        chunk_prefix,
+    )
 
-    labels_bucket = storage_client.bucket(cloud_storage.LABEL_CHUNKS_BUCKET)
-    with blob.open("rb") as fd:
-        _write_outputs(labels_bucket, path, fd, header)
+    with blob.open("rt") as citycat_result:
+        depths = simulation_readers.read_city_cat_result_as_raster(
+            citycat_result, header
+        )
+    logging.info("%s loaded, now being chunked.", blob)
 
+    for x_index, y_index, chunk in raster_chunkers.split_raster_into_chunks(
+        1000, depths
+    ):
+        # Write chunks to paths like <x_index>_<y_index>/<timestep>.npy so that chunks
+        # at every timestep for the same location can be found under the same
+        # <x_index>_<y_index>/ prefix
+        chunk_name = chunk_prefix / f"{x_index}_{y_index}" / f"{timestep}.npy"
+        with blob.bucket.blob(str(chunk_name)).open("wb") as chunk_file:
+            numpy.save(chunk_file, chunk)
 
-def _write_outputs(
-    labels_bucket: storage.Bucket,
-    city_cat_results_path: pathlib.PurePosixPath,
-    city_cat_results_zip: BinaryIO,
-    header: geo_data.ElevationHeader,
-):
-    buf_prefix = city_cat_results_path.parent / "buffers"
-    parts: Dict[Tuple[int, int], storage.Blob] = {}
-    with zipfile.ZipFile(city_cat_results_zip) as timesteps:
-        names = [path for path in timesteps.namelist() if path.endswith(".rsl")]
-        names.sort(key=_timestep_number_from_rsl_path)
-        for i, name in enumerate(names):
-            print(f"{datetime.datetime.now()} processing {name}")
-            with timesteps.open(name) as timestep:
-                depths = simulation_readers.read_city_cat_result_as_raster(
-                    timestep, header
-                )
-                print(f"{datetime.datetime.now()} read {name}")
-                for x_index, y_index, chunk in raster_chunkers.split_raster_into_chunks(
-                    1000, depths
-                ):
-                    print(
-                        f"{datetime.datetime.now()} processing chunk {x_index} {y_index}"
-                    )
-                    key = (x_index, y_index)
-                    part_blob = labels_bucket.blob(
-                        str(buf_prefix / f"{i}_{x_index}_{y_index}.npy")
-                    )
-
-                    print(
-                        f"{datetime.datetime.now()} writing chunk {x_index} {y_index}"
-                    )
-                    with part_blob.open("wb") as chunk_file:
-                        numpy.save(chunk_file, chunk)
-
-                    print(f"{datetime.datetime.now()} wrote chunk {x_index} {y_index}")
-                    parts.setdefault(key, []).append(part_blob)
-
-    for (x_index, y_index), chunk_parts in parts.items():
-        print(f"{datetime.datetime.now()} collapsing chunk {x_index}_{y_index}")
-        part_arrays = []
-        for part_blob in chunk_parts:
-            with part_blob.open("rb") as fd:
-                part_arrays.append(numpy.load(fd))
-
-        full_chunk = numpy.dstack(part_arrays)
-        with labels_bucket.blob(
-            city_cat_results_path.parent / f"label_chunk_{x_index}_{y_index}.npy"
-        ).open("wb") as fd:
-            numpy.save(fd, full_chunk)
-
-    labels_bucket.delete_blobs(itertools.chain.from_iterable(parts.keys()))
+    logging.info("Processed all chunks for file %s", blob)
 
 
-def _create_buffer_for(
-    bucket: storage.Bucket, prefix: pathlib.PurePosixPath, index: Tuple[int, int]
-) -> TextIO:
-    return bucket.open(str(prefix / str(index)), "wt")
+def _collapse_city_cat_output_chunks(
+    blob: storage.Blob, blob_path: pathlib.PurePosixPath, labels_bucket: storage.Bucket
+) -> None:
+    """Collects chunks for all timesteps at the same region and writes them as labels.
+
+    When a chunk file is uploaded, see if other chunks for the same region have been
+    uploaded for all timesteps. If so, collapse them into a single 3D tensor and write
+    them into the labels bucket.
+
+    See the documentation for process_citycat_outputs for more details.
+
+    Args:
+      blob: The blob containing the chunk .npy file.
+      blob_path: The path to the blob within its bucket.
+      labels_bucket: The bucket in which to write the label tensor.
+    """
+    # Chunks are of the form
+    # chunks/<study_area_name>/<config/path>/<x_index>_<y_index>/<timestep>.npy
+    study_area_name = blob_path.parts[1]
+    config_path = str(pathlib.PurePosixPath(*blob_path.parts[2:-2]))
+    x_index, y_index = blob_path.parts[-2].split("_")
+    logging.info("Processing chunk %s for config %s", blob, config_path)
+
+    # Retrieve the number of timesteps configured for this result file's simulation.
+    db = firestore.Client()
+    timesteps = metastore.FloodScenarioConfig.get(db, config_path).num_rainfall_entries
+
+    # See if a file is present in GCS for each timestep.
+    expected_names = set(
+        str(blob_path.with_stem(str(timestep))) for timestep in range(timesteps)
+    )
+    timestep_blobs = list(blob.bucket.list_blobs(prefix=str(blob_path.parent)))
+    timestep_blob_names = set(b.name for b in timestep_blobs)
+    if not expected_names.issubset(timestep_blob_names):
+        logging.info(
+            "Chunks for some timesteps missing, halting. Expected %s got %s.",
+            expected_names,
+            timestep_blob_names,
+        )
+        return
+
+    # Sort the blobs by their timestep number so we assemble them in order.
+    timestep_blobs.sort(key=lambda b: int(pathlib.PurePosixPath(b.name).stem))
+    chunk_timestep_parts = []
+    for ts_blob in timestep_blobs:
+        try:
+            with ts_blob.open("rb") as fd:
+                chunk_timestep_parts.append(numpy.load(fd))
+        except exceptions.NotFound:
+            # Another invocation of this function has collapsed the chunks while this
+            # invocation was running.
+            logging.info("Chunk deletion in process, halting.")
+            return
+
+    # Stack the matrices at each timestep together and write them to the labels bucket.
+    full_chunk = numpy.dstack(chunk_timestep_parts)
+    label_path = pathlib.PurePosixPath(*blob_path.parts[1:-1]).with_suffix(".npy")
+    with labels_bucket.blob(str(label_path)).open("wb") as fd:
+        numpy.save(fd, full_chunk)
+        logging.info("Wrote full chunk after processing %s.", blob)
+
+    # Delete the chunks now that we're done with them.
+    for ts_blob in timestep_blobs:
+        try:
+            ts_blob.delete()
+        except exceptions.NotFound:
+            # Another invocation of this function has collapsed the chunks while this
+            # invocation was running.
+            continue
+
+    metastore.SimulationLabelChunk(
+        gcs_uri=f"gs://{labels_bucket.name}/{label_path}",
+        x_index=x_index,
+        y_index=y_index,
+    ).set(db, study_area_name, config_path)
+
+    logging.info(
+        "Deleted timestep chunks %s after processing %s.", timestep_blobs, blob
+    )
 
 
-def _timestep_number_from_rsl_path(rsl_path: str) -> int:
-    # The files have paths like R11_C1_T0_0min.rsl, R11_C1_T1_5min.rsl
-    # We want to extract the _T0_, _T1_ aspects of the paths.
-    time_step_num = re.search("R11_C1_T(\d+)", rsl_path)
+def _timestep_number_from_rsl_path(rsl_path: str) -> str:
+    """Extracts the timestep number x from paths like R11_C1_T<x>_<y>min.rsl."""
+    time_step_num = re.search(r"R11_C1_T(\d+)", rsl_path)
     if time_step_num is None:
         raise ValueError(
-            f"Unexpected path {rsl_path} expect path of the form R11_C1_T<n>_"
+            f"Unexpected path {rsl_path} expected path of the form R11_C1_T<n>_"
         )
 
-    return int(time_step_num.group(1))
+    return time_step_num.group(1)
 
 
 def _build_feature_matrix_from_archive(
@@ -464,48 +604,3 @@ def _write_as_npy(blob: storage.Blob, array: NDArray) -> None:
     npy_file.flush()
     npy_file.seek(0)
     blob.upload_from_file(npy_file)
-
-
-def _rain_config_as_vector(rain_fd: TextIO) -> Tuple[NDArray, int]:
-    """Converts the rainfall config contents into a vector describing the rainfall.
-
-    Args:
-      rain_fd: The file containing the CityCAT rainfall configuration.
-
-    Returns:
-      A tuple of (rainfall, length) where `rainfall` contains
-      the rainfall pattern as a numpy array, padded to an agreed-upon
-      length, and `length` represent the un-padded number entries in
-      the array (i.e. the length the array would be if it was not
-      padded.)
-
-    """
-    entries = config_readers.read_rainfall_amounts(rain_fd)
-
-    # The uploader should prevent configurations over this length.
-    if len(entries) > _RAINFALL_VECTOR_LENGTH:
-        raise ValueError(
-            f"Rainfall configuration has unexpected length {len(entries)}. "
-            f"Max allowed length is {_RAINFALL_VECTOR_LENGTH}."
-        )
-
-    return numpy.pad(
-        numpy.array(entries, dtype=numpy.float32),
-        (0, _RAINFALL_VECTOR_LENGTH - len(entries)),
-    ), len(entries)
-
-
-# storage_client = storage.Client()
-# labels_bucket = storage_client.bucket(cloud_storage.LABEL_CHUNKS_BUCKET)
-# header = elevation_readers.read_from_esri_ascii(
-#     open("/home/waltaskew/studyarea_1/inputs/Domain_DEM.asc"), header_only=True
-# ).header
-# blob = storage_client.bucket("citycat-output-test").blob(
-#     "studyarea_1/R11C1_StudyArea1.zip"
-# )
-# _write_outputs(
-#     labels_bucket,
-#     pathlib.PurePosixPath("studyarea_1/R11C1_StudyArea1.zip"),
-#     blob.open("rb"),
-#     header,
-# )
