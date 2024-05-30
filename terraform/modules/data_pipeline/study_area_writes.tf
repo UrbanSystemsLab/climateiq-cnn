@@ -1,7 +1,7 @@
 # Create a bucket for the original, un-processed files describing a study area geography.
 resource "google_storage_bucket" "study_areas" {
-  name     = "climateiq-study-areas"
-  location = "us-west1"
+  name     = "${var.bucket_prefix}climateiq-study-areas"
+  location = var.bucket_region
 }
 
 # Create a service account used by the function and Eventarc trigger
@@ -79,6 +79,9 @@ resource "google_cloudfunctions2_function" "study_area_write" {
     available_memory      = "256M"
     timeout_seconds       = 60
     service_account_email = google_service_account.study_area_writer.email
+    environment_variables = {
+      BUCKET_PREFIX = var.bucket_prefix
+    }
   }
 
   event_trigger {
