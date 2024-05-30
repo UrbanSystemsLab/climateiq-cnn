@@ -127,6 +127,7 @@ def crop_polygons_to_sub_area(
 def intersect(
     polygon_masks_to_process: Iterable[Tuple[geometry.Polygon, int]],
     multi_polygon_boundaries: geometry.MultiPolygon,
+    skip_logging: bool = False,
 ) -> Iterable[Tuple[geometry.Polygon, int]]:
     """Intersects polygons associated with integer masks with multi-polygon boundaries.
 
@@ -134,6 +135,7 @@ def intersect(
         polygon_masks_to_process: Input polygons associated with integer masks that
             intersection process should be applied to.
         multi_polygon_boundaries: Multi-polygon area to apply on the input polygons.
+        skip_logging: Optional indicator that logging should be skipped.
 
     Returns:
         Polygons associated with integer masks reduced to multi-polygon boundaries.
@@ -150,6 +152,7 @@ def intersect(
                 if not sub_polygon.is_empty:
                     yield sub_polygon, polygon_mask[1]
         processing_count = processing_count + 1
-        if processing_count % 1000 == 0:
+        if processing_count % 1000 == 0 and not skip_logging:
             logging.info("  - %s polygons are intersected so far", processing_count)
-    logging.info("  - %s polygons were intersected", processing_count)
+    if not skip_logging:
+        logging.info("  - %s polygons were intersected", processing_count)
