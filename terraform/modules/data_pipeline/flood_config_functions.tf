@@ -1,7 +1,7 @@
 # Create buckets for storing raw files, file chunks and processed feature matrix chunks.
 resource "google_storage_bucket" "city_cat_config" {
-  name     = "climateiq-citycat-config"
-  location = "us-west1"
+  name     = "${var.bucket_prefix}climateiq-flood-simulation-config"
+  location = var.bucket_region
 }
 
 # Create a service account used by the function and Eventarc trigger
@@ -10,6 +10,7 @@ resource "google_service_account" "city_cat_config" {
   display_name = "record-citycat-config cloud function service account"
 }
 
+# Grant permissions needed to trigger and run cloud functions.
 resource "google_project_iam_member" "city_cat_config_invoking" {
   project    = data.google_project.project.project_id
   role       = "roles/run.invoker"
@@ -83,6 +84,9 @@ resource "google_cloudfunctions2_function" "write_citycat_config" {
     available_memory      = "256Mi"
     timeout_seconds       = 60
     service_account_email = google_service_account.city_cat_config.email
+    environment_variables = {
+      BUCKET_PREFIX = var.bucket_prefix
+    }
   }
 
   event_trigger {
@@ -129,6 +133,9 @@ resource "google_cloudfunctions2_function" "delete_citycat_config" {
     available_memory      = "256Mi"
     timeout_seconds       = 60
     service_account_email = google_service_account.city_cat_config.email
+    environment_variables = {
+      BUCKET_PREFIX = var.bucket_prefix
+    }
   }
 
   event_trigger {

@@ -263,6 +263,7 @@ def prepare_and_upload_citycat_input_files(
                 )
             )
         export_mask_values = False
+        green_areas_file_name = file_names.CITYCAT_GREEN_AREAS_TXT
         # If there are soil-class regions we need to use them as green areas:
         if input_data.soil_classes_polygons is not None:
             with open(input_data.elevation_file_path, "rb") as input_file:
@@ -277,10 +278,11 @@ def prepare_and_upload_citycat_input_files(
                 )
             )
             export_mask_values = True
+            green_areas_file_name = file_names.CITYCAT_SPATIAL_GREEN_AREAS_TXT
         logging.info("Exporting green area data to CityCat...")
-        with citycat_bucket.blob(
-            f"{study_area_name}/{file_names.CITYCAT_GREEN_AREAS_TXT}"
-        ).open("w") as output_file:
+        with citycat_bucket.blob(f"{study_area_name}/{green_areas_file_name}").open(
+            "w"
+        ) as output_file:
             polygon_writers.write_polygons_to_text_file(
                 green_areas_polygons,
                 output_file,
