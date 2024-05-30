@@ -97,7 +97,6 @@ def prepare_and_upload_study_area_files(
     work_dir: pathlib.Path,
     study_area_bucket: storage.Bucket,
     input_non_green_area_soil_classes: set[int] = set(),
-    output_non_green_area_soil_class: int = DEFAULT_NON_GREEN_AREA_SOIL_CLASS,
 ) -> PreparedInputData:
     """Prepares data needed to run pipeline for flood scenarios.
 
@@ -116,10 +115,8 @@ def prepare_and_upload_study_area_files(
         work_dir: A folder that can be used for transforming files.
         study_area_bucket: Target cloud storage bucket to export study area files to.
         input_non_green_area_soil_classes: Optional set of soil class values that will
-            be substituted by output_non_green_area_soil_class for unification of data
-            requirements.
-        output_non_green_area_soil_class: Optional special soil class that will be used
-            to indicate non-green area soil class polygons in the output.
+            be substituted by default non-green-area soil class for the unification of
+            subsequent pipeline processing.
 
     Returns:
         Prepared input data that can be exported to CityCat or be passed to chunker.
@@ -206,7 +203,7 @@ def prepare_and_upload_study_area_files(
                     _update_mask_if_needed(
                         polygon_mask,
                         input_non_green_area_soil_classes,
-                        output_non_green_area_soil_class,
+                        DEFAULT_NON_GREEN_AREA_SOIL_CLASS,
                     )
                     for polygon_mask in soil_classes_polygons
                 ]
@@ -234,7 +231,6 @@ def prepare_and_upload_citycat_input_files(
     citycat_bucket: storage.Bucket,
     elevation_geotiff_band: int = 1,
     default_no_data_value: float = -9999.0,
-    non_green_area_soil_classes: set[int] = {DEFAULT_NON_GREEN_AREA_SOIL_CLASS},
 ) -> None:
     """Prepares input files for CityCat simulation.
 
@@ -247,8 +243,6 @@ def prepare_and_upload_citycat_input_files(
         elevation_geotiff_band: Band index in elevation GeoTIFF file.
         default_no_data_value: Default value used in elevation data for cells where
             elevation is not defined.
-        non_green_area_soil_classes: Optional set of soil class values that should be
-            excluded from green areas.
     """
     # Export elevation data
     logging.info("Exporting elevation data to CityCat...")
@@ -310,7 +304,7 @@ def prepare_and_upload_citycat_input_files(
                     elevation_header,
                     green_areas_polygons,
                     input_data.soil_classes_polygons,
-                    non_green_area_soil_classes=non_green_area_soil_classes,
+                    non_green_area_soil_classes={DEFAULT_NON_GREEN_AREA_SOIL_CLASS},
                 )
             )
             export_mask_values = True

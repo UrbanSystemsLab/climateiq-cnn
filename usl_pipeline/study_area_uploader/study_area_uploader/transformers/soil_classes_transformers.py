@@ -40,18 +40,18 @@ def transform_soil_classes_as_green_areas(
         Corrected soil classes that can be used as green areas.
     """
     logging.info("Starting reconstruction of green areas based on soil classes")
-    soil_classes_polygons_non_green_excluded = [
+    green_area_soil_classes_polygons = [
         p for p in soil_classes_polygons if p[1] not in non_green_area_soil_classes
     ]
     logging.info(
         "Intersecting %s soil class polygons with green areas",
-        len(soil_classes_polygons_non_green_excluded),
+        len(green_area_soil_classes_polygons),
     )
     existing_soil_class_polygons = []
     for p in green_areas_polygons:
         existing_soil_class_polygons.extend(
             polygon_transformers.intersect(
-                soil_classes_polygons_non_green_excluded,
+                green_area_soil_classes_polygons,
                 geometry.MultiPolygon([p[0]]),
                 skip_logging=True,
             )
@@ -67,8 +67,9 @@ def transform_soil_classes_as_green_areas(
     )
     logging.info("Soil classes raster is getting created...")
     # Raster for soil classes is made based on soil_classes_polygons that might include
-    # non-green area polygons. This is done specifically so that the cells of those
-    # non-green classes wouldn't be gap-filled.
+    # non-green area polygons. This is to avoid creating cells inside the green spaces
+    # with missing soil values, which would be interpolated, when we need to leave them
+    # as their non-green-area soil type.
     soil_classes_raster = polygon_transformers.rasterize_polygons(
         elevation_header, soil_classes_polygons
     )
@@ -79,7 +80,7 @@ def transform_soil_classes_as_green_areas(
             elevation_header,
             green_areas_raster,
             soil_classes_raster,
-            soil_classes_polygons_non_green_excluded,
+            green_area_soil_classes_polygons,
         )
     )
     logging.info("Green areas reconstruction based on soil classes is done.")
