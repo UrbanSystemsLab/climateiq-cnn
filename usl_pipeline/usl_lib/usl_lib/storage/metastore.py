@@ -3,10 +3,14 @@ from typing import Optional
 import urllib.parse
 
 from google.cloud import firestore
+import rasterio
+
+from usl_lib.shared import geo_data
 
 
 STUDY_AREAS = "study_areas"
-CHUNKS = "chunks"
+STUDY_AREA_CHUNKS = "chunks"
+
 CITY_CAT_RAINFALL_CONFIG = "city_cat_rainfall_configs"
 
 
@@ -35,21 +39,35 @@ class StudyArea:
     elevation_min: Optional[float] = None
     elevation_max: Optional[float] = None
 
+    def as_header(self) -> geo_data.ElevationHeader:
+        """Represents the study area as a header describing a raster space."""
+        return geo_data.ElevationHeader(
+            col_count=self.col_count,
+            row_count=self.row_count,
+            x_ll_corner=self.x_ll_corner,
+            y_ll_corner=self.y_ll_corner,
+            cell_size=self.cell_size,
+            nodata_value=-9999.0,
+            crs=rasterio.CRS.from_string(self.crs) if self.crs is not None else None,
+        )
+
     def create(self, db: firestore.Client) -> None:
         """Creates a new study area in the given DB. Only writes non-None attributes.
 
         Args:
           db: The firestore database client to use for the read.
         """
-        db.collection(STUDY_AREAS).document(self.name).create(self._as_dict())
+        self.get_ref(db, self.name).create(self._as_dict())
 
     def set(self, db: firestore.Client) -> None:
-        """Creates a new study area in the given DB. Only writes non-None attributes.
+        """Creates or updates a new study area in the given DB.
+
+        Only writes non-None attributes.
 
         Args:
           db: The firestore database client to use for the read.
         """
-        db.collection(STUDY_AREAS).document(self.name).set(self._as_dict())
+        self.get_ref(db, self.name).set(self._as_dict())
 
     @classmethod
     def get(cls, db: firestore.Client, name: str) -> "StudyArea":
@@ -62,11 +80,16 @@ class StudyArea:
         Returns:
           A StudyArea object representing the database's contents.
         """
-        study_area_ref = db.collection(STUDY_AREAS).document(name).get()
-        if not study_area_ref.exists:
+        ref = cls.get_ref(db, name).get()
+        if not ref.exists:
             raise ValueError(f'No such study area "{name}"')
 
-        return cls(name=name, **study_area_ref.to_dict())
+        return cls(name=name, **ref.to_dict())
+
+    @staticmethod
+    def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
+        """Retrieve a Firestore reference to the study area with the given name."""
+        return db.collection(STUDY_AREAS).document(name)
 
     @staticmethod
     def update_min_max_elevation(
@@ -138,7 +161,7 @@ class StudyAreaChunk:
         (
             db.collection(STUDY_AREAS)
             .document(study_area_name)
-            .collection(CHUNKS)
+            .collection(STUDY_AREA_CHUNKS)
             .document(self.id_)
             .set(as_dict, merge=True)
         )
@@ -175,31 +198,53 @@ def _update_study_area_min_max_elevation(
 
 @dataclasses.dataclass(slots=True)
 class FloodScenarioConfig:
-    """A configuration file describing rainfall patterns for a CityCAT simulation."""
+    """A configuration file describing rainfall patterns for a CityCAT simulation.
 
-    gcs_path: str
-    as_vector_gcs_path: str
+    Attributes:
+        name: A human-readable name of the study area. Must be unique.
+        gcs_uri: The GCS location of the configuration file.
+        as_vector_gcs_uri: The GCS location of the configuration file formatted as a
+                           numpy vector for input to ML.
+        parent_config_name: The grouping containing this and other configurations which
+                            are run together in batches of simulations.
+        rainfall_duration: The number of rainfall timesteps in the configuration.
+    """
+
+    name: str
+    gcs_uri: str
+    as_vector_gcs_uri: str
     parent_config_name: str
     rainfall_duration: int
 
     def set(self, db: firestore.Client) -> None:
         """Creates or updates an existing entry for a CityCAT configuration file."""
-        # Use the GCS path as the document ID. URL-escape the ID, as forward slashes
-        # aren't allowed in document IDs.
-        db.collection(CITY_CAT_RAINFALL_CONFIG).document(
-            urllib.parse.quote(self.gcs_path, safe=())
-        ).set(
+        self.get_ref(db, self.name).set(
             {
-                "parent_config_name:": self.parent_config_name,
-                "gcs_path": self.gcs_path,
-                "as_vector_gcs_path": self.as_vector_gcs_path,
+                "parent_config_name": self.parent_config_name,
+                "gcs_uri": self.gcs_uri,
+                "as_vector_gcs_uri": self.as_vector_gcs_uri,
                 "rainfall_duration": self.rainfall_duration,
             }
         )
 
-    @staticmethod
-    def delete(db: firestore.Client, gcs_path: str) -> None:
+    @classmethod
+    def delete(cls, db: firestore.Client, name: str) -> None:
         """Deletes the CityCAT configuration entry for the given file."""
-        db.collection(CITY_CAT_RAINFALL_CONFIG).document(
-            urllib.parse.quote(gcs_path, safe=())
-        ).delete()
+        cls.get_ref(db, name).delete()
+
+    @classmethod
+    def get(cls, db: firestore.Client, name: str) -> "FloodScenarioConfig":
+        """Retrieve the flood config with the given name."""
+        ref = cls.get_ref(db, name).get()
+        if not ref.exists:
+            raise ValueError(f'No such flood config "{name}"')
+
+        return cls(name=name, **ref.to_dict())
+
+    @staticmethod
+    def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
+        """Retrieve a Firestore reference to the flood config with the given name."""
+        # Escape the name to avoid characters not allowed in IDs such as slashes.
+        return db.collection(CITY_CAT_RAINFALL_CONFIG).document(
+            urllib.parse.quote(name, safe=())
+        )

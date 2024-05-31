@@ -1,5 +1,8 @@
 from unittest import mock
 
+import rasterio
+
+from usl_lib.shared import geo_data
 from usl_lib.storage import metastore
 
 
@@ -95,25 +98,48 @@ def test_study_area_chunk_merge():
     )
 
 
+def test_study_area_as_header():
+    """Ensures the StudyArea as_header method works."""
+    study_area = metastore.StudyArea(
+        name="name",
+        col_count=2,
+        row_count=3,
+        x_ll_corner=1.0,
+        y_ll_corner=2.0,
+        cell_size=3.0,
+        crs="EPSG:3005",
+    )
+    assert study_area.as_header() == geo_data.ElevationHeader(
+        col_count=2,
+        row_count=3,
+        x_ll_corner=1.0,
+        y_ll_corner=2.0,
+        cell_size=3.0,
+        nodata_value=-9999.0,
+        crs=rasterio.CRS.from_string("EPSG:3005"),
+    )
+
+
 def test_flood_scenario_config_set():
     mock_db = mock.MagicMock()
     metastore.FloodScenarioConfig(
-        gcs_path="a/b/c",
-        as_vector_gcs_path="d/e/f",
+        name="b/c",
+        gcs_uri="a/b/c",
+        as_vector_gcs_uri="d/e/f",
         parent_config_name="parent",
         rainfall_duration=5,
     ).set(mock_db)
     mock_db.assert_has_calls(
         [
             mock.call.collection("city_cat_rainfall_configs"),
-            mock.call.collection().document("a%2Fb%2Fc"),
+            mock.call.collection().document("b%2Fc"),
             mock.call.collection()
             .document()
             .set(
                 {
-                    "parent_config_name:": "parent",
-                    "gcs_path": "a/b/c",
-                    "as_vector_gcs_path": "d/e/f",
+                    "parent_config_name": "parent",
+                    "gcs_uri": "a/b/c",
+                    "as_vector_gcs_uri": "d/e/f",
                     "rainfall_duration": 5,
                 },
             ),
