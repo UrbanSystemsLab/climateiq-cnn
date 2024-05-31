@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Optional
+import enum
+from typing import Iterable, Optional
 import urllib.parse
 
 from google.cloud import firestore
@@ -12,6 +13,9 @@ STUDY_AREAS = "study_areas"
 STUDY_AREA_CHUNKS = "chunks"
 
 CITY_CAT_RAINFALL_CONFIG = "city_cat_rainfall_configs"
+
+SIMULATIONS = "simulations"
+SIMULATION_LABEL_CHUNKS = "label_chunks"
 
 
 @dataclasses.dataclass(slots=True)
@@ -248,3 +252,104 @@ class FloodScenarioConfig:
         return db.collection(CITY_CAT_RAINFALL_CONFIG).document(
             urllib.parse.quote(name, safe=())
         )
+
+
+class SimulationType(enum.StrEnum):
+    CITY_CAT = "CityCAT"
+
+
+@dataclasses.dataclass(slots=True)
+class Simulation:
+    """A simulation run against a study area given some configuration.
+
+    Attributes:
+        gcs_prefix_uri: GCS URI of the prefix under which simulation results are stored.
+        simulation_type: The type of simulation (e.g. CityCAT, WRF.)
+        study_area: The study area the simulation ran against.
+        configuration: The configuration used to run the simulation.
+    """
+
+    gcs_prefix_uri: str
+    simulation_type: SimulationType
+    study_area: firestore.DocumentReference
+    configuration: firestore.DocumentReference
+
+    def set(self, db: firestore.Client) -> None:
+        """Creates a simulation in the given DB."""
+        if not self.study_area.get().exists:
+            raise ValueError(f"No such study area exists: {self.study_area.id}")
+
+        if not self.configuration.get().exists:
+            raise ValueError(f"No such configuration exists: {self.configuration.id}")
+
+        as_dict = {
+            "gcs_prefix_uri": self.gcs_prefix_uri,
+            "simulation_type": str(self.simulation_type),
+            "study_area": self.study_area,
+            "configuration": self.configuration,
+        }
+        self.get_ref(
+            db,
+            urllib.parse.unquote(self.study_area.id),
+            urllib.parse.unquote(self.configuration.id),
+        ).set(as_dict)
+
+    @classmethod
+    def get(
+        cls, db: firestore.Client, study_area_name: str, config_path: str
+    ) -> "Simulation":
+        """Retrieve the simulation for the given study area and simulation config."""
+        ref = cls.get_ref(db, study_area_name, config_path).get()
+        if not ref.exists:
+            raise ValueError(f"No such simulation for {study_area_name} {config_path}")
+        return Simulation(**ref.to_dict())
+
+    @staticmethod
+    def get_ref(
+        db: firestore.Client, study_area_name: str, config_path: str
+    ) -> firestore.DocumentReference:
+        """Retrieves a reference for the simulation for the given study are & config."""
+        return db.collection(SIMULATIONS).document(
+            urllib.parse.quote(f"{study_area_name}-{config_path}", safe=())
+        )
+
+
+@dataclasses.dataclass(slots=True)
+class SimulationLabelChunk:
+    """A chunk of a simulation result formatted as tensor for ML.
+
+    Attributes:
+        gcs_uri: The full GCS uri to the location of the chunk.
+        x_index: The x index of the chunk relative to other chunks in the simulation.
+        y_index: The y index of the chunk relative to other chunks in the simulation.
+    """
+
+    gcs_uri: str
+    x_index: int
+    y_index: int
+
+    def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
+        """Adds the label chunk to the given simulation."""
+        id_ = f"{self.x_index}_{self.y_index}"
+        Simulation.get_ref(db, study_area_name, config_path).collection(
+            SIMULATION_LABEL_CHUNKS
+        ).document(id_).set(dataclasses.asdict(self))
+
+    @classmethod
+    def list_chunks(
+        cls, db: firestore.Client, study_area_name: str, config_path: str
+    ) -> Iterable["SimulationLabelChunk"]:
+        """Retrieves all label chunks for the given simulation.
+
+        Args:
+          study_area_name: The name of the study area on which the simulation was run.
+          config_path: The configuration used to run the simulation.
+
+        Yields:
+          Each label chunk produced by the given simulation.
+        """
+        ref = Simulation.get_ref(db, study_area_name, config_path).collection(
+            SIMULATION_LABEL_CHUNKS
+        )
+        for chunk_ref in ref.list_documents():
+            yield cls(**chunk_ref.get().to_dict())
