@@ -3,3 +3,9 @@ dist
 __pycache__
 *.egg-info
 venv
+
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+terraform/modules/data_pipeline/files/
