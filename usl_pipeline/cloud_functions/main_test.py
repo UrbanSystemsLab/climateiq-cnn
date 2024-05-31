@@ -1,9 +1,11 @@
 import datetime
 import io
+import pathlib
 import tarfile
 import textwrap
 from unittest import mock
 
+from google.api_core import exceptions
 from google.cloud import firestore
 from google.cloud import storage
 import functions_framework
@@ -775,3 +777,331 @@ def test_retry_decorator_error_timeout(mock_error_reporter):
 
     mock_func.assert_not_called()
     mock_error_reporter.assert_not_called()
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_write_city_cat_output_chunks(mock_firestore_client):
+    """Ensures we write the correct chunks to GCS."""
+    # Create a fake .rsl file simulation result to read.
+    blob_path = pathlib.PurePosixPath(
+        "study_area_name/config_group/config_name.txt/R11_C1_T2_10min.rsl"
+    )
+    mock_blob = mock.MagicMock(spec=storage.Blob)
+    mock_blob.name = str(blob_path)
+    mock_blob.bucket.name = "sim-bucket"
+    mock_blob.open.return_value = io.StringIO(
+        textwrap.dedent(
+            """\
+            XCen YCen Depth Vx Vy T_300.000_sec
+            0 1 0.001 0.000 0.000
+            1 2 0.002 0.000 0.000
+            2 3 0.003 0.000 0.000
+            2 1 0.004 0.000 0.000
+    """
+        )
+    )
+    # The above will rasterize to
+    # array([[0.   , 0.   , 0.   ],
+    #        [0.   , 0.   , 0.003],
+    #        [0.   , 0.002, 0.   ],
+    #        [0.001, 0.   , 0.004]])
+
+    # Return a study area geography from the mock firestore client.
+    mock_firestore_client().collection().document().get().to_dict.return_value = {
+        "col_count": 3,
+        "row_count": 4,
+        "x_ll_corner": 0,
+        "y_ll_corner": 0,
+        "cell_size": 1.0,
+    }
+
+    # Have the blob return IO objects so we can capture what was written to them.
+    # Empty their close method so we can read them later.
+    buffers = (io.BytesIO(), io.BytesIO())
+    for buf in buffers:
+        buf.close = lambda: None
+    mock_blob.bucket.blob().open.side_effect = buffers
+
+    mock_blob.reset_mock()
+    mock_firestore_client.reset_mock()
+    main._write_city_cat_output_chunks(mock_blob, blob_path, chunk_size=3)
+
+    # Ensure we wrote the two expected chunks.
+    for buf in buffers:
+        buf.seek(0)
+    numpy.testing.assert_array_almost_equal(
+        numpy.load(buffers[0]),
+        numpy.array([[0, 0, 0], [0, 0, 0.003], [0, 0.002, 0]], dtype=numpy.float32),
+    )
+    numpy.testing.assert_array_almost_equal(
+        numpy.load(buffers[1]),
+        numpy.array([[0.001, 0, 0.004], [0, 0, 0], [0, 0, 0]], dtype=numpy.float32),
+    )
+
+    # Ensure we wrote the chunks to the expected paths.
+    mock_blob.assert_has_calls(
+        [
+            mock.call.bucket.blob(
+                "chunks/study_area_name/config_group/config_name.txt/0_0/2.npy"
+            ),
+            mock.call.bucket.blob().open("wb"),
+            mock.call.bucket.blob(
+                "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+            ),
+            mock.call.bucket.blob().open("wb"),
+        ]
+    )
+
+    # Ensure we created a metastore entry for the simulation run.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("study_area_name"),
+            mock.call().collection("city_cat_rainfall_configs"),
+            mock.call().collection().document("config_group%2Fconfig_name.txt"),
+        ]
+    )
+    mock_firestore_client().collection().document().set.assert_called_once_with(
+        {
+            "gcs_prefix_uri": (
+                "gs://sim-bucket/study_area_name/config_group/config_name.txt"
+            ),
+            "simulation_type": "CityCAT",
+            "study_area": mock_firestore_client().collection().document(),
+            "configuration": mock_firestore_client().collection().document(),
+        }
+    )
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_collapse_city_cat_output_chunks(mock_firestore_client):
+    """Ensures we write the correct chunks to GCS."""
+    # Have firestore return a three-timestep configuration.
+    mock_firestore_client().collection().document().get().to_dict.return_value = {
+        "gcs_uri": "gs://config-bucket/config/file.txt",
+        "as_vector_gcs_uri": "gs://label-bucket/config/file.npy",
+        "parent_config_name": "config",
+        "rainfall_duration": 3,
+    }
+
+    # Create a blob for the file triggering the cloud function run.
+    blob_path = pathlib.PurePosixPath(
+        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+    mock_blob = mock.MagicMock(spec=storage.Blob)
+    mock_blob.name = str(blob_path)
+    mock_blob.bucket.name = "sim-bucket"
+
+    # Have list blobs return paths for the three expected timesteps
+    mock_blob.bucket.list_blobs.return_value = [
+        mock.MagicMock(spec=storage.Blob),
+        mock.MagicMock(spec=storage.Blob),
+        mock.MagicMock(spec=storage.Blob),
+    ]
+
+    # Set the names and read values of the above blobs.
+    buf_t1 = io.BytesIO()
+    numpy.save(buf_t1, numpy.array([[1, 1], [1, 1]]))
+    buf_t1.seek(0)
+    mock_blob.bucket.list_blobs.return_value[0].name = (
+        "chunks/study_area_name/config_group/config_name.txt/0_1/1.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[0].open.return_value = buf_t1
+
+    buf_t0 = io.BytesIO()
+    numpy.save(buf_t0, numpy.array([[0, 0], [0, 0]]))
+    buf_t0.seek(0)
+    mock_blob.bucket.list_blobs.return_value[1].name = (
+        "chunks/study_area_name/config_group/config_name.txt/0_1/0.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[1].open.return_value = buf_t0
+
+    buf_t2 = io.BytesIO()
+    numpy.save(buf_t2, numpy.array([[2, 2], [2, 2]]))
+    buf_t2.seek(0)
+    mock_blob.bucket.list_blobs.return_value[2].name = (
+        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[2].open.return_value = buf_t2
+
+    # Create a mock labels bucket.
+    # Have the blob return IO objects so we can capture what was written to them.
+    # Empty their close method so we can read them later.
+    mock_labels_bucket = mock.MagicMock(spec=storage.Bucket)
+    mock_labels_bucket.name = "labels"
+    labels_buf = io.BytesIO()
+    labels_buf.close = lambda: None
+    mock_labels_bucket.blob().open.return_value = labels_buf
+
+    mock_blob.reset_mock()
+    mock_labels_bucket.reset_mock()
+    main._collapse_city_cat_output_chunks(mock_blob, blob_path, mock_labels_bucket)
+
+    # Ensure we checked the right prefix.
+    mock_blob.bucket.list_blobs.assert_called_once_with(
+        prefix="chunks/study_area_name/config_group/config_name.txt/0_1/"
+    )
+    # Ensure we wrote to the correct labels path.
+    mock_labels_bucket.blob.assert_called_once_with(
+        "study_area_name/config_group/config_name.txt/0_1.npy"
+    )
+    # Ensure we wrote the correct array to the labels bucket.
+    labels_buf.seek(0)
+    numpy.testing.assert_array_equal(
+        numpy.load(labels_buf),
+        numpy.array([[[0, 1, 2], [0, 1, 2]], [[0, 1, 2], [0, 1, 2]]]),
+    )
+    # Ensure we created a metastore entry for the chunk.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call().collection("simulations"),
+            mock.call()
+            .collection()
+            .document("study_area_name-config_group%2Fconfig_name.txt"),
+            mock.call().collection().document().collection("label_chunks"),
+            mock.call().collection().document().collection().document("0_1"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document()
+            .set(
+                {
+                    "gcs_uri": (
+                        "gs://labels/study_area_name/"
+                        "config_group/config_name.txt/0_1.npy"
+                    ),
+                    "x_index": 0,
+                    "y_index": 1,
+                }
+            ),
+        ]
+    )
+    # Ensure we deleted all the intermediary chunks.
+    for blob in mock_blob.bucket.list_blobs.return_value:
+        blob.delete.assert_called_once()
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_collapse_city_cat_output_chunks_missing_timesteps(mock_firestore_client):
+    """Ensures halt if files for all timesteps are not present."""
+    # Have firestore return a three-timestep configuration.
+    mock_firestore_client().collection().document().get().to_dict.return_value = {
+        "gcs_uri": "gs://config-bucket/config/file.txt",
+        "as_vector_gcs_uri": "gs://label-bucket/config/file.npy",
+        "parent_config_name": "config",
+        "rainfall_duration": 3,
+    }
+
+    # Create a blob for the file triggering the cloud function run.
+    blob_path = pathlib.PurePosixPath(
+        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+    mock_blob = mock.MagicMock(spec=storage.Blob)
+    mock_blob.name = str(blob_path)
+    mock_blob.bucket.name = "sim-bucket"
+
+    # Have list blobs return paths for the two of the three expected timesteps
+    mock_blob.bucket.list_blobs.return_value = [
+        mock.MagicMock(spec=storage.Blob),
+        mock.MagicMock(spec=storage.Blob),
+    ]
+    mock_blob.bucket.list_blobs.return_value[0].name = (
+        "chunks/study_area_name/config_group/config_name.txt/0_1/1.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[1].name = (
+        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+
+    # Create a mock labels bucket.
+    mock_labels_bucket = mock.MagicMock(spec=storage.Bucket)
+    mock_labels_bucket.name = "labels"
+
+    mock_blob.reset_mock()
+    mock_labels_bucket.reset_mock()
+    main._collapse_city_cat_output_chunks(mock_blob, blob_path, mock_labels_bucket)
+
+    # Ensure we didn't try to write to the mock labels.
+    mock_labels_bucket.blob.assert_not_called()
+
+    # Ensure we didn't try to write a metastore entry.
+    (
+        mock_firestore_client()
+        .collection()
+        .document()
+        .collection()
+        .document()
+        .set.assert_not_called()
+    )
+
+    # Ensure we didn't try to delete the intermediary chunks.
+    for blob in mock_blob.bucket.list_blobs.return_value:
+        blob.delete.assert_not_called()
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_collapse_city_cat_output_chunks_deleted_chunks(mock_firestore_client):
+    """Ensures halt if files for timesteps are deleted when read."""
+    # Have firestore return a three-timestep configuration.
+    mock_firestore_client().collection().document().get().to_dict.return_value = {
+        "gcs_uri": "gs://config-bucket/config/file.txt",
+        "as_vector_gcs_uri": "gs://label-bucket/config/file.npy",
+        "parent_config_name": "config",
+        "rainfall_duration": 3,
+    }
+
+    # Create a blob for the file triggering the cloud function run.
+    blob_path = pathlib.PurePosixPath(
+        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+    mock_blob = mock.MagicMock(spec=storage.Blob)
+    mock_blob.name = str(blob_path)
+    mock_blob.bucket.name = "sim-bucket"
+
+    # Have list blobs return paths for the three expected timesteps, but have their
+    # reads fail.
+    mock_blob.bucket.list_blobs.return_value = [
+        mock.MagicMock(spec=storage.Blob),
+        mock.MagicMock(spec=storage.Blob),
+        mock.MagicMock(spec=storage.Blob),
+    ]
+    mock_blob.bucket.list_blobs.return_value[0].name = (
+        "chunks/study_area_name/config_group/config_name.txt/0_1/0.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[0].open.side_effect = exceptions.NotFound(
+        "oh no!"
+    )
+    mock_blob.bucket.list_blobs.return_value[1].name = (
+        "chunks/study_area_name/config_group/config_name.txt/0_1/1.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[2].name = (
+        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+
+    # Create a mock labels bucket.
+    mock_labels_bucket = mock.MagicMock(spec=storage.Bucket)
+    mock_labels_bucket.name = "labels"
+
+    mock_blob.reset_mock()
+    mock_labels_bucket.reset_mock()
+    main._collapse_city_cat_output_chunks(mock_blob, blob_path, mock_labels_bucket)
+
+    # Ensure we tried to read the deleted blob.
+    mock_blob.bucket.list_blobs.return_value[0].open.assert_called_once()
+
+    # Ensure we didn't try to write to the mock labels.
+    mock_labels_bucket.blob.assert_not_called()
+
+    # Ensure we didn't try to write a metastore entry.
+    (
+        mock_firestore_client()
+        .collection()
+        .document()
+        .collection()
+        .document()
+        .set.assert_not_called()
+    )
+
+    # Ensure we didn't try to delete the intermediary chunks.
+    for blob in mock_blob.bucket.list_blobs.return_value:
+        blob.delete.assert_not_called()
