@@ -184,7 +184,7 @@ def write_flood_scenario_metadata_and_features(
         metastore.FloodScenarioConfig(
             gcs_path=f"gs://{config_blob.bucket.name}/{config_blob.name}",
             as_vector_gcs_path=f"gs://{vector_blob.bucket.name}/{vector_blob.name}",
-            num_rainfall_entries=length,
+            rainfall_duration=length,
             # File names should be in the form <parent_config_name>/<file_name>
             parent_config_name=file_name.parent.name,
         ).set(db)

@@ -364,7 +364,7 @@ def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_clien
                 {
                     "parent_config_name:": "config_name",
                     "gcs_path": "gs://bucket/config_name/Rainfall_Data_1.txt",
-                    "num_rainfall_entries": 5,
+                    "rainfall_duration": 5,
                     "as_vector_gcs_path": (
                         "gs://climateiq-study-area-feature-chunks/"
                         "rainfall/config_name/Rainfall_Data_1.npy"
