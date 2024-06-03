@@ -133,7 +133,10 @@ def test_build_feature_matrix_wrf(
     mock_error_reporting_client,
 ):
     # Get some random data to place in a netcdf file
-    netcdf_array = numpy.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=numpy.float32)
+    netcdf_array1 = numpy.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=numpy.float32)
+    netcdf_array2 = numpy.array(
+        [[10, 20, 30], [40, 50, 60], [70, 80, 90]], dtype=numpy.float32
+    )
 
     # Create an in-memory netcdf file and grab its bytes
     ncfile = netCDF4.Dataset("met_em_test.nc", mode="w", format="NETCDF4", memory=1)
@@ -147,11 +150,20 @@ def test_build_feature_matrix_wrf(
     sno_alb = ncfile.createVariable(
         "SNOALB", "float32", ("Time", "south_north", "west_east")
     )
+    pres = ncfile.createVariable(
+        "PRES", "float32", ("Time", "south_north", "west_east")
+    )
+    # Represents var in DS that we don't want to process
+    not_required_var = ncfile.createVariable(
+        "NOT_REQUIRED_VAR", "float32", ("Time", "south_north", "west_east")
+    )
 
     time[:] = 100
     lat[:] = [200, 200, 200]
     lon[:] = [300, 300, 300]
-    sno_alb[:] = netcdf_array
+    sno_alb[:] = netcdf_array1
+    pres[:] = netcdf_array2
+    not_required_var[:] = [[11, 22, 33], [44, 55, 66], [77, 88, 99]]
 
     memfile = ncfile.close()
     ncfile_bytes = memfile.tobytes()
@@ -209,7 +221,9 @@ def test_build_feature_matrix_wrf(
     # Ensure we attempted to upload a serialized matrix of the netcdf
     mock_feature_blob.upload_from_file.assert_called_once_with(mock.ANY)
     uploaded_array = numpy.load(mock_feature_blob.upload_from_file.call_args[0][0])
-    numpy.testing.assert_array_equal(uploaded_array, netcdf_array)
+    # Expected array should be all required vars extracted and stacked
+    expected_array = numpy.dstack((netcdf_array1, netcdf_array2))
+    numpy.testing.assert_array_equal(uploaded_array, expected_array)
 
     # TODO: Ensure we wrote firestore entries for the chunk.
 

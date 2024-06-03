@@ -21,6 +21,7 @@ from usl_lib.readers import elevation_readers
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
+from usl_lib.shared import wps_variables
 
 _MAX_RETRY_SECONDS = 60 * 2
 
@@ -307,12 +308,33 @@ def _read_wps_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     # Ignore type checker error - BytesIO inherits from expected type BufferedIOBase
     # https://shorturl.at/lk4om
     with xarray.open_dataset(fd) as ds:  # type: ignore
-        feature = ds.data_vars["SNOALB"].values
-        # Drop time axis - each WPS output file will correspond to single time value
-        feature = numpy.squeeze(feature, axis=0)
+        features_components = []
+        for var in wps_variables.REQUIRED_VARS:
+            feature = _process_wps_feature(ds.data_vars[var])
+            features_components.append(feature)
+
+        features_matrix = numpy.dstack(features_components)
 
     # TODO: Write to metastore
-    return feature, FeatureMetadata()
+    return features_matrix, FeatureMetadata()
+
+
+def _process_wps_feature(feature: xarray.DataArray) -> NDArray:
+    """Performs a series of array transforms on a WPS variable array.
+
+    1. Drops time axis - since each WPS output file corresponds to one datetime
+    2. TBD (feature scaling, extracting levels, etc)...
+
+    Args:
+      feature: The array containing the feature and its dimensions
+
+    Returns:
+      A new array processed according to rules above
+    """
+    feature_vals = feature.values
+    feature_vals = numpy.squeeze(feature, axis=0)
+
+    return feature_vals
 
 
 def _read_elevation_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
