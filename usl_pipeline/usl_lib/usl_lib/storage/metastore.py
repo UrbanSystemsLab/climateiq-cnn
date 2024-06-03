@@ -180,7 +180,7 @@ class FloodScenarioConfig:
     gcs_path: str
     as_vector_gcs_path: str
     parent_config_name: str
-    num_rainfall_entries: int
+    rainfall_duration: int
 
     def set(self, db: firestore.Client) -> None:
         """Creates or updates an existing entry for a CityCAT configuration file."""
@@ -193,7 +193,7 @@ class FloodScenarioConfig:
                 "parent_config_name:": self.parent_config_name,
                 "gcs_path": self.gcs_path,
                 "as_vector_gcs_path": self.as_vector_gcs_path,
-                "num_rainfall_entries": self.num_rainfall_entries,
+                "rainfall_duration": self.rainfall_duration,
             }
         )
 
