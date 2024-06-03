@@ -7,6 +7,7 @@ from unittest import mock
 from google.cloud import firestore
 from google.cloud import storage
 import functions_framework
+import netCDF4
 import numpy
 import rasterio
 
@@ -15,7 +16,7 @@ import main
 
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
+def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client):
     # Get some random data to place in a tiff file.
     height = 2
     width = 3
@@ -121,6 +122,96 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
         mock_firestore_client().collection().document(),
         {"elevation_min": 1, "elevation_max": 6},
     )
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+def test_build_feature_matrix_wrf(
+    mock_storage_client,
+    mock_firestore_client,
+    mock_error_reporting_client,
+):
+    # Get some random data to place in a netcdf file
+    netcdf_array = numpy.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=numpy.float32)
+
+    # Create an in-memory netcdf file and grab its bytes
+    ncfile = netCDF4.Dataset("met_em_test.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile.createDimension("Time", 1)
+    ncfile.createDimension("west_east", 3)
+    ncfile.createDimension("south_north", 3)
+
+    time = ncfile.createVariable("time", "f8", ("Time",))
+    lat = ncfile.createVariable("lat", "float32", ("west_east",))
+    lon = ncfile.createVariable("lon", "float32", ("south_north",))
+    sno_alb = ncfile.createVariable(
+        "SNOALB", "float32", ("Time", "south_north", "west_east")
+    )
+
+    time[:] = 100
+    lat[:] = [200, 200, 200]
+    lon[:] = [300, 300, 300]
+    sno_alb[:] = netcdf_array
+
+    memfile = ncfile.close()
+    ncfile_bytes = memfile.tobytes()
+
+    # Place the ncfile bytes into an archive.
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as tar:
+        nc = tarfile.TarInfo("met_em_test.nc")
+        nc.size = len(ncfile_bytes)
+        tar.addfile(nc, io.BytesIO(ncfile_bytes))
+    # Seek to the beginning so the file can be read.
+    archive.seek(0)
+
+    # Create a mock blob for the archive which will return the above netcdf when opened.
+    mock_archive_blob = mock.MagicMock()
+    mock_archive_blob.name = "study_area/name.tar"
+    mock_archive_blob.bucket.name = "bucket"
+    mock_archive_blob.open.return_value = archive
+
+    # Create a mock blob for feature matrix we will upload.
+    mock_feature_blob = mock.MagicMock()
+    mock_feature_blob.name = "study_area/name.npy"
+    mock_feature_blob.bucket.name = "climateiq-study-area-feature-chunks"
+
+    # Return the mock blobs.
+    mock_storage_client().bucket("").blob.side_effect = [
+        mock_archive_blob,
+        mock_feature_blob,
+    ]
+    mock_storage_client.reset_mock()
+
+    main.build_feature_matrix(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "study_area/name.tar",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we worked with the right GCP paths.
+    mock_storage_client.assert_has_calls(
+        [
+            mock.call().bucket("bucket"),
+            mock.call().bucket().blob("study_area/name.tar"),
+            mock.call().bucket("climateiq-study-area-feature-chunks"),
+            mock.call().bucket().blob("study_area/name.npy"),
+        ]
+    )
+
+    mock_archive_blob.open.assert_called_once_with("rb")
+
+    # Ensure we attempted to upload a serialized matrix of the netcdf
+    mock_feature_blob.upload_from_file.assert_called_once_with(mock.ANY)
+    uploaded_array = numpy.load(mock_feature_blob.upload_from_file.call_args[0][0])
+    numpy.testing.assert_array_equal(uploaded_array, netcdf_array)
+
+    # TODO: Ensure we wrote firestore entries for the chunk.
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
