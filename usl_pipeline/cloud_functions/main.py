@@ -184,8 +184,9 @@ def write_flood_scenario_metadata_and_features(
         _write_as_npy(vector_blob, as_vector)
 
         metastore.FloodScenarioConfig(
-            gcs_path=f"gs://{config_blob.bucket.name}/{config_blob.name}",
-            as_vector_gcs_path=f"gs://{vector_blob.bucket.name}/{vector_blob.name}",
+            name=config_blob.name,
+            gcs_uri=f"gs://{config_blob.bucket.name}/{config_blob.name}",
+            as_vector_gcs_uri=f"gs://{vector_blob.bucket.name}/{vector_blob.name}",
             rainfall_duration=length,
             # File names should be in the form <parent_config_name>/<file_name>
             parent_config_name=file_name.parent.name,
@@ -235,9 +236,7 @@ def delete_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) 
     if file_name.name.startswith("Rainfall_Data_"):
         db = firestore.Client()
 
-        metastore.FloodScenarioConfig.delete(
-            db, f"gs://{cloud_event.data['bucket']}/{cloud_event.data['name']}"
-        )
+        metastore.FloodScenarioConfig.delete(db, cloud_event.data["name"])
 
 
 @functions_framework.cloud_event

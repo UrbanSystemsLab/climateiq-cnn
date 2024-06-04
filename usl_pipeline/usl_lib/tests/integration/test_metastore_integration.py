@@ -42,6 +42,7 @@ def test_create_get_study_area(firestore_db):
     )
     study_area.create(firestore_db)
     assert study_area == metastore.StudyArea.get(firestore_db, "test")
+    assert metastore.StudyArea.get_ref(firestore_db, "test").get().exists
 
 
 def test_update_min_max_elevation(firestore_db):
@@ -73,3 +74,32 @@ def test_update_min_max_elevation(firestore_db):
     study_area = metastore.StudyArea.get(firestore_db, "test")
     assert study_area.elevation_min == 1
     assert study_area.elevation_max == 30
+
+
+def test_flood_scenario_config_get_set_delete(firestore_db):
+    """Ensures we can create, retrieve and delete flood configs."""
+    flood = metastore.FloodScenarioConfig(
+        name="config/name.txt",
+        gcs_uri="gs://config-bucket/config/name.txt",
+        as_vector_gcs_uri="gs://feature-bucket/config/name.npy",
+        parent_config_name="config",
+        rainfall_duration=15,
+    )
+    flood.set(firestore_db)
+
+    assert flood == metastore.FloodScenarioConfig.get(firestore_db, "config/name.txt")
+    assert (
+        metastore.FloodScenarioConfig.get_ref(firestore_db, "config/name.txt")
+        .get()
+        .exists
+    )
+
+    metastore.FloodScenarioConfig.delete(firestore_db, "config/name.txt")
+
+    assert not (
+        metastore.FloodScenarioConfig.get_ref(firestore_db, "config/name.txt")
+        .get()
+        .exists
+    )
+    with pytest.raises(ValueError):
+        metastore.FloodScenarioConfig.get(firestore_db, "config/name.txt")
