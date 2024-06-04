@@ -93,7 +93,12 @@ def build_chunks(
     work_dir: pathlib.Path,
 ):
     study_area_chunkers.build_and_upload_chunks(
-        args.name, prepared_inputs, work_dir, study_area_chunk_bucket, args.chunk_length
+        args.name,
+        prepared_inputs,
+        work_dir,
+        study_area_chunk_bucket,
+        args.chunk_length,
+        input_elevation_band=args.elevation_geotiff_band,
     )
 
 
