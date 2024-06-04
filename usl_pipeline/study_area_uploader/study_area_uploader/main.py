@@ -16,6 +16,8 @@ from usl_lib.storage import metastore
 def main() -> None:
     """Breaks the input files into chunks and uploads them to GCS."""
     args = parse_args()
+    # Setting up logging:
+    logging.getLogger("rasterio").setLevel(logging.WARNING)
     if args.verbose:
         logging.basicConfig(level=logging.INFO)
     else:
@@ -23,10 +25,11 @@ def main() -> None:
 
     db = firestore.Client()
     storage_client = storage.Client()
-    study_area_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_BUCKET)
-    study_area_chunk_bucket = storage_client.bucket(
-        cloud_storage.STUDY_AREA_CHUNKS_BUCKET
+    logging.info(
+        "Storage bucket for study areas: %s",
+        cloud_storage.STUDY_AREA_BUCKET,
     )
+    study_area_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_BUCKET)
     with tempfile.TemporaryDirectory() as temp_dir:
         work_dir = pathlib.Path(temp_dir)
         prepared_inputs = study_area_transformers.prepare_and_upload_study_area_files(
@@ -43,6 +46,10 @@ def main() -> None:
         )
 
         if args.export_to_citycat:
+            logging.info(
+                "Storage bucket for flood simulation inputs: %s",
+                cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET,
+            )
             export_to_city_cat(
                 args,
                 prepared_inputs,
@@ -68,7 +75,15 @@ def main() -> None:
             else:
                 break
 
-        build_chunks(args, prepared_inputs, study_area_chunk_bucket, work_dir)
+        if args.upload_chunks:
+            logging.info(
+                "Storage bucket for study area chunks: %s",
+                cloud_storage.STUDY_AREA_CHUNKS_BUCKET,
+            )
+            study_area_chunk_bucket = storage_client.bucket(
+                cloud_storage.STUDY_AREA_CHUNKS_BUCKET
+            )
+            build_chunks(args, prepared_inputs, study_area_chunk_bucket, work_dir)
 
 
 def export_to_city_cat(
@@ -148,6 +163,14 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Indicator of the execution mode where input files should be exported"
         + " to CityCat storage bucket.",
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
+        "--upload-chunks",
+        type=bool,
+        default=True,
+        help="Indicator of the execution mode where input files should be split into"
+        + " chunks and uploaded to the chunks storage bucket.",
         action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(

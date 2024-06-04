@@ -146,6 +146,11 @@ def prepare_and_upload_study_area_files(
             polygon_writers.write_polygons_to_text_file(
                 boundaries_polygons, output_file
             )
+        logging.info(
+            "File [%s/%s] was written to study area bucket",
+            study_area_name,
+            file_names.BOUNDARIES_TXT,
+        )
         # Calculate bounding box rectangle for cropping sub-area
         sub_area_bounding_box = polygon_transformers.get_bounding_box_for_boundaries(
             p[0] for p in boundaries_polygons
@@ -161,6 +166,11 @@ def prepare_and_upload_study_area_files(
     study_area_bucket.blob(
         f"{study_area_name}/{file_names.ELEVATION_TIF}"
     ).upload_from_filename(str(output_elevation_file_path))
+    logging.info(
+        "File [%s/%s] was written to study area bucket",
+        study_area_name,
+        file_names.ELEVATION_TIF,
+    )
 
     # Read polygon files
     logging.info("Preparing study area buildings data...")
@@ -173,6 +183,11 @@ def prepare_and_upload_study_area_files(
             f"{study_area_name}/{file_names.BUILDINGS_TXT}"
         ).open("w") as output_file:
             polygon_writers.write_polygons_to_text_file(buildings_polygons, output_file)
+        logging.info(
+            "File [%s/%s] was written to study area bucket",
+            study_area_name,
+            file_names.BUILDINGS_TXT,
+        )
     logging.info("Preparing study area green areas data...")
     if green_areas_shape_file_path is not None:
         green_areas_polygons = list(
@@ -187,6 +202,11 @@ def prepare_and_upload_study_area_files(
             polygon_writers.write_polygons_to_text_file(
                 green_areas_polygons, output_file
             )
+        logging.info(
+            "File [%s/%s] was written to study area bucket",
+            study_area_name,
+            file_names.GREEN_AREAS_TXT,
+        )
         # Soil information is only used when green area data is defined.
         if soil_classes_shape_file_path is not None:
             logging.info("Preparing study area soil classes data...")
@@ -214,6 +234,11 @@ def prepare_and_upload_study_area_files(
                 polygon_writers.write_polygons_to_text_file(
                     soil_classes_polygons, output_file, support_mask_values=True
                 )
+            logging.info(
+                "File [%s/%s] was written to study area bucket",
+                study_area_name,
+                file_names.SOIL_CLASSES_TXT,
+            )
 
     return PreparedInputData(
         output_elevation_file_path,
