@@ -1,6 +1,8 @@
+import pathlib
 import typing
 
 import numpy
+import rasterio
 
 from usl_lib.shared import geo_data
 
@@ -36,3 +38,38 @@ def write_to_esri_ascii_raster_file(
 
     write_header_to_esri_ascii_raster_file(elevation.header, file)
     numpy.savetxt(file, elevation.data, delimiter=" ", fmt="%s")
+
+
+def write_to_geotiff(
+    elevation: geo_data.Elevation,
+    target_file_path: pathlib.Path | str,
+):
+    """Writes elevation data to a GeoTIFF file using band number 1.
+
+    Args:
+        elevation: Elevation data.
+        target_file_path: Path to output file.
+    """
+    height = elevation.header.row_count
+    width = elevation.header.col_count
+    cell_size = elevation.header.cell_size
+    with rasterio.open(
+        str(target_file_path),
+        "w",
+        driver="GTiff",
+        dtype=rasterio.float32,
+        nodata=elevation.header.nodata_value,
+        width=width,
+        height=height,
+        count=1,
+        crs=elevation.header.crs,
+        transform=rasterio.Affine(
+            cell_size,
+            0.0,
+            elevation.header.x_ll_corner,
+            0.0,
+            -cell_size,
+            elevation.header.y_ll_corner + cell_size * height,
+        ),
+    ) as raster:
+        raster.write(elevation.data, 1)

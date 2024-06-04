@@ -53,7 +53,7 @@ def split_polygons_into_chunks(
     output_dir_path: str | pathlib.Path,
     chunk_file_name_pattern: str = "chunk_{y}_{x}",
     support_mask_values: bool = False,
-    chunk_additional_border_cells: int = 0
+    chunk_additional_border_cells: int = 0,
 ) -> list[chunkers_data.ChunkDescriptor]:
     """Writes polygon chunk files based on source with polygons and chunk structure.
 

@@ -1,17 +1,15 @@
 import argparse
-import io
 import logging
 import pathlib
-import tarfile
 import tempfile
 import time
 
 from google.cloud import firestore
 from google.cloud import storage
 
+from study_area_uploader.chunkers import study_area_chunkers
 from study_area_uploader.transformers import study_area_transformers
 from usl_lib.storage import cloud_storage
-from usl_lib.storage import file_names
 from usl_lib.storage import metastore
 
 
@@ -30,6 +28,7 @@ def main() -> None:
         cloud_storage.STUDY_AREA_CHUNKS_BUCKET
     )
     with tempfile.TemporaryDirectory() as temp_dir:
+        work_dir = pathlib.Path(temp_dir)
         prepared_inputs = study_area_transformers.prepare_and_upload_study_area_files(
             args.name,
             args.elevation_file,
@@ -38,7 +37,7 @@ def main() -> None:
             args.green_areas_file,
             args.soil_type_file,
             args.soil_type_mask_feature_property,
-            pathlib.Path(temp_dir),
+            work_dir,
             study_area_bucket,
             input_non_green_area_soil_classes=set(args.non_green_area_soil_classes),
         )
@@ -48,7 +47,7 @@ def main() -> None:
                 args,
                 prepared_inputs,
                 storage_client.bucket(cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET),
-                pathlib.Path(temp_dir),
+                work_dir,
             )
 
         # Wait till study area metadata is registered by cloud_function triggered by
@@ -69,10 +68,7 @@ def main() -> None:
             else:
                 break
 
-        for i, chunk in enumerate(build_chunks(prepared_inputs, temp_dir)):
-            study_area_chunk_bucket.blob(f"{args.name}/chunk_{i}.tar").upload_from_file(
-                chunk
-            )
+        build_chunks(args, prepared_inputs, study_area_chunk_bucket, work_dir)
 
 
 def export_to_city_cat(
@@ -96,15 +92,9 @@ def build_chunks(
     study_area_chunk_bucket: storage.Bucket,
     work_dir: pathlib.Path,
 ):
-    # Place-holder for the real chunking function.
-    tar_fd = io.BytesIO()
-    with tarfile.open(mode="w", fileobj=tar_fd) as tar:
-        tar.add(
-            str(prepared_inputs.elevation_file_path), arcname=file_names.ELEVATION_TIF
-        )
-    tar_fd.flush()
-    tar_fd.seek(0)
-    yield tar_fd
+    study_area_chunkers.build_and_upload_chunks(
+        args.name, prepared_inputs, work_dir, study_area_chunk_bucket, args.chunk_length
+    )
 
 
 def parse_args() -> argparse.Namespace:
