@@ -10,8 +10,11 @@ import functions_framework
 import netCDF4
 import numpy
 import rasterio
+import xarray
 
 import main
+
+from usl_lib.shared import wps_variables
 
 
 @mock.patch.object(main.firestore, "Client", autospec=True)
@@ -147,12 +150,9 @@ def test_build_feature_matrix_wrf(
     time = ncfile.createVariable("time", "f8", ("Time",))
     lat = ncfile.createVariable("lat", "float32", ("west_east",))
     lon = ncfile.createVariable("lon", "float32", ("south_north",))
-    sno_alb = ncfile.createVariable(
-        "SNOALB", "float32", ("Time", "south_north", "west_east")
-    )
-    pres = ncfile.createVariable(
-        "PRES", "float32", ("Time", "south_north", "west_east")
-    )
+    # Create stubbed entries for all required variables
+    for var in wps_variables.REQUIRED_VARS:
+        ncfile.createVariable(var, "float32", ("Time", "south_north", "west_east"))
     # Represents var in DS that we don't want to process
     not_required_var = ncfile.createVariable(
         "NOT_REQUIRED_VAR", "float32", ("Time", "south_north", "west_east")
@@ -161,8 +161,8 @@ def test_build_feature_matrix_wrf(
     time[:] = 100
     lat[:] = [200, 200, 200]
     lon[:] = [300, 300, 300]
-    sno_alb[:] = netcdf_array1
-    pres[:] = netcdf_array2
+    ncfile.variables["GHT"][:] = netcdf_array1
+    ncfile.variables["RH"][:] = netcdf_array2
     not_required_var[:] = [[11, 22, 33], [44, 55, 66], [77, 88, 99]]
 
     memfile = ncfile.close()
@@ -226,6 +226,44 @@ def test_build_feature_matrix_wrf(
     numpy.testing.assert_array_equal(uploaded_array, expected_array)
 
     # TODO: Ensure we wrote firestore entries for the chunk.
+
+
+def test_process_wps_feature_drop_time_axis():
+    arr = numpy.array([[[1, 2], [3, 4]]], dtype=numpy.float32)  # shape=(1,2,2)
+    xrdarr = xarray.DataArray(arr, dims=("Time", "south_north", "west_east"))
+
+    processed = main._process_wps_feature(xrdarr)
+
+    numpy.testing.assert_equal((2, 2), processed.shape)
+
+
+def test_process_wps_feature_extract_fnl_spatial_dim():
+    arr = numpy.array([[[[10, 1], [20, 2]], [[30, 3], [40, 4]]]], dtype=numpy.float32)
+    xrdarr = xarray.DataArray(
+        arr, dims=("Time", "south_north", "west_east", "num_metgrid_levels")
+    )
+
+    processed = main._process_wps_feature(xrdarr)
+
+    expected = [[10, 20], [30, 40]]
+    numpy.testing.assert_array_equal(expected, processed)
+
+
+def test_process_wps_feature_convert_percent_to_decimal():
+    arr = numpy.array([[[32.45, 15.11], [73.74, 33.21]]], dtype=numpy.float32)
+    xrdarr = xarray.DataArray(
+        arr,
+        dims=("Time", "south_north", "west_east"),
+        attrs=dict(
+            description="Test data array",
+            units="%",
+        ),
+    )
+
+    processed = main._process_wps_feature(xrdarr)
+
+    expected = [[0.3245, 0.1511], [0.7374, 0.3321]]
+    numpy.testing.assert_array_almost_equal(expected, processed)
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)

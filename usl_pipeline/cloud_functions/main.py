@@ -320,21 +320,37 @@ def _read_wps_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
 
 
 def _process_wps_feature(feature: xarray.DataArray) -> NDArray:
-    """Performs a series of array transforms on a WPS variable array.
-
-    1. Drops time axis - since each WPS output file corresponds to one datetime
-    2. TBD (feature scaling, extracting levels, etc)...
+    """Performs a series of data transforms on a WPS variable.
 
     Args:
-      feature: The array containing the feature and its dimensions
+      feature: The xarray.DataArray containing the feature, its dimensions,
+      and metadata
 
     Returns:
-      A new array processed according to rules above
+      A new numpy array with transforms applied according to rules
+      for each variable defined in: https://shorturl.at/W6nzY
     """
-    feature_vals = feature.values
-    feature_vals = numpy.squeeze(feature, axis=0)
+    # Drop time axis
+    feature = feature.isel(Time=0)
 
-    return feature_vals
+    # FNL-derived var - extract to only first level
+    if "num_metgrid_levels" in feature.dims:
+        feature = feature.isel(num_metgrid_levels=0)
+
+    # Convert percentage-based units to decimal
+    try:
+        if feature.units.lower().strip() in ["%", "percent"]:
+            return _convert_to_decimal(feature.values)
+    except AttributeError:
+        logging.warning("No unit attribute found on DataArray.")
+
+    # TODO: Feature scaling
+
+    return feature.values
+
+
+def _convert_to_decimal(x):
+    return x / 100
 
 
 def _read_elevation_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
