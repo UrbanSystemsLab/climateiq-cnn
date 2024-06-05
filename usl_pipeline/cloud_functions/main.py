@@ -15,13 +15,15 @@ import numpy
 from numpy.typing import NDArray
 import xarray
 import rasterio
+from shapely import geometry
 
 from usl_lib.readers import config_readers
-from usl_lib.readers import elevation_readers
+from usl_lib.readers import elevation_readers, polygon_readers
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
-from usl_lib.shared import wps_variables
+from usl_lib.shared import geo_data, wps_variables
+from usl_lib.transformers import feature_raster_transformers
 
 _MAX_RETRY_SECONDS = 60 * 2
 
@@ -284,6 +286,13 @@ def _build_feature_matrix_from_archive(
       A tuple of (array, metadata) for the feature matrix and
       metadata describing the feature matrix.
     """
+    metadata: Optional[FeatureMetadata] = None
+    elevation: Optional[geo_data.Elevation] = None
+    boundaries: Optional[list[Tuple[geometry.Polygon, int]]] = None
+    buildings: Optional[list[Tuple[geometry.Polygon, int]]] = None
+    green_areas: Optional[list[Tuple[geometry.Polygon, int]]] = None
+    soil_classes: Optional[list[Tuple[geometry.Polygon, int]]] = None
+
     with tarfile.TarFile(fileobj=archive) as tar:
         for member in tar:
             fd = tar.extractfile(member)
@@ -292,14 +301,40 @@ def _build_feature_matrix_from_archive(
 
             name = pathlib.PurePosixPath(member.name).name
             # TODO: Group logic branch by path (per hazard model)
+            # Handle flood model input files (CityCat)
             if name == file_names.ELEVATION_TIF:
-                return _read_elevation_features(fd)
+                (elevation, metadata) = _read_elevation_features(fd)
+            elif name == file_names.BOUNDARIES_TXT:
+                boundaries = list(polygon_readers.read_polygons_from_text_file(fd))
+            elif name == file_names.BUILDINGS_TXT:
+                buildings = list(polygon_readers.read_polygons_from_text_file(fd))
+            elif name == file_names.GREEN_AREAS_TXT:
+                green_areas = list(polygon_readers.read_polygons_from_text_file(fd))
+            elif name == file_names.SOIL_CLASSES_TXT:
+                soil_classes = list(polygon_readers.read_polygons_from_text_file(fd))
             # Handle heat model input files (WPS)
             elif name.startswith("met_em") and name.endswith(".nc"):
                 return _read_wps_features(fd)
             # TODO: handle additional archive members.
             else:
                 logging.warning(f"Unexpected member name: {name}")
+
+    if elevation is not None and metadata is not None:
+        if buildings is None:
+            raise ValueError("Flood simulation data error: buildings data missing")
+        if green_areas is None:
+            raise ValueError("Flood simulation data error: green areas data missing")
+        if soil_classes is None:
+            raise ValueError("Flood simulation data error: soil classes data missing")
+        feature_matrix = feature_raster_transformers.transform_to_feature_raster_layers(
+            elevation,
+            boundaries,
+            buildings,
+            green_areas,
+            soil_classes,
+            geo_data.InfiltrationConfiguration.load_default(),
+        )
+        return feature_matrix, metadata
 
     return None, FeatureMetadata()
 
@@ -337,26 +372,26 @@ def _process_wps_feature(feature: xarray.DataArray) -> NDArray:
     return feature_vals
 
 
-def _read_elevation_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+def _read_elevation_features(
+    fd: IO[bytes],
+) -> Tuple[geo_data.Elevation, FeatureMetadata]:
     """Reads the elevation file into a matrix and returns metadata for the matrix.
 
     Args:
       fd: The file containing elevation data.
 
     Returns:
-      A tuple of (array, metadata) for the elevation matrix and
-      metadata describing the feature matrix.
+      A tuple of (Elevation, metadata) for the elevation data and metadata describing
+      the feature matrix.
     """
-    elevation = elevation_readers.read_from_geotiff(
-        rasterio.io.MemoryFile(fd.read())
-    ).data
+    elevation = elevation_readers.read_from_geotiff(rasterio.io.MemoryFile(fd.read()))
 
     if elevation is None:
         raise ValueError("Elevation file unexpectedly empty.")
 
     metadata = FeatureMetadata(
-        elevation_min=float(elevation.min()),
-        elevation_max=float(elevation.max()),
+        elevation_min=float(elevation.data.min()),
+        elevation_max=float(elevation.data.max()),
     )
 
     return elevation, metadata

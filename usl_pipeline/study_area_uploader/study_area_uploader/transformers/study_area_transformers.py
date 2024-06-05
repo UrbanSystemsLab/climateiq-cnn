@@ -7,19 +7,22 @@ from google.cloud import storage
 from shapely import geometry
 
 from study_area_uploader.readers import polygon_readers as shape_readers
-from study_area_uploader.transformers import (
-    elevation_transformers,
-    soil_classes_transformers,
-)
+from study_area_uploader.transformers import elevation_transformers
 from usl_lib.readers import elevation_readers
 from usl_lib.shared import geo_data
 from usl_lib.storage import file_names
-from usl_lib.transformers import polygon_transformers
+from usl_lib.transformers import (
+    feature_raster_transformers,
+    polygon_transformers,
+    soil_classes_transformers,
+)
 from usl_lib.writers import polygon_writers
 
 
 # Default soil class value that is recognized a non-green area.
-DEFAULT_NON_GREEN_AREA_SOIL_CLASS: int = -9999
+DEFAULT_NON_GREEN_AREA_SOIL_CLASS: int = (
+    feature_raster_transformers.DEFAULT_NON_GREEN_AREA_SOIL_CLASS
+)
 
 
 @dataclass

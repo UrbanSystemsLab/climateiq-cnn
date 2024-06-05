@@ -47,7 +47,7 @@ def transform_soil_classes_as_green_areas(
         "Intersecting %s soil class polygons with green areas",
         len(green_area_soil_classes_polygons),
     )
-    existing_soil_class_polygons = []
+    existing_soil_class_polygons: list[Tuple[geometry.Polygon, int]] = []
     for p in green_areas_polygons:
         existing_soil_class_polygons.extend(
             polygon_transformers.intersect(
