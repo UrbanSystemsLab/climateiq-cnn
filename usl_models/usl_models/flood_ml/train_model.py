@@ -4,12 +4,14 @@ from usl_models.flood_ml.model import FloodModel, FloodModelParams
 from usl_models.flood_ml.dataset import IncrementalTrainDataGenerator
 
 """
-THis is a method that is used to train the flood model. This method is called from Docker container by the Vertex hyperparameter tuning job.
+THis is a method that is used to train the flood model.
+This method is called from Docker container by the Vertex
+hyperparameter tuning job.
 
 Args:
     model_dir: The GCS path where the model will be saved.
 
-    The hyperparameters: 
+    The hyperparameters:
         batch_size: The batch size.
         lstm_units: The number of units in the LSTM layer.
         lstm_kernel_size: The kernel size for the LSTM layer.
@@ -52,11 +54,12 @@ def train_model(
 
     # Instantiate FloodModel class
     model = FloodModel(model_params)
+    model = model.compile(tf.keras.optimizers.Adam(learning_rate=learning_rate))
     model.train(data_generator.get_next_batch())
     # Train the model
     model_history = model.train(data_generator.get_next_batch())
 
-    # save the model 
+    # save the model
     model.save(model_dir)
 
     return model_history
