@@ -14,7 +14,7 @@ import xarray
 
 import main
 
-from usl_lib.shared import wps_variables
+from usl_lib.shared.wps_variables import ScalingType, REQUIRED_VARS, Unit
 
 
 @mock.patch.object(main.firestore, "Client", autospec=True)
@@ -130,7 +130,22 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client):
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-@mock.patch.dict(main.wps_variables.REQUIRED_VARS, {"GHT": {}, "RH": {}}, clear=True)
+@mock.patch.dict(
+    main.REQUIRED_VARS,
+    {
+        "GHT": {
+            "scaling": {
+                "type": ScalingType.LOCAL,
+            }
+        },
+        "RH": {
+            "scaling": {
+                "type": ScalingType.NONE,
+            }
+        },
+    },
+    clear=True,
+)
 def test_build_feature_matrix_wrf(
     mock_storage_client,
     mock_firestore_client,
@@ -151,9 +166,8 @@ def test_build_feature_matrix_wrf(
     time = ncfile.createVariable("time", "f8", ("Time",))
     lat = ncfile.createVariable("lat", "float32", ("west_east",))
     lon = ncfile.createVariable("lon", "float32", ("south_north",))
-    print(wps_variables)
     # Create dataset entries for all variables in mock
-    for var in wps_variables.REQUIRED_VARS.keys():
+    for var in REQUIRED_VARS.keys():
         ncfile.createVariable(var, "float32", ("Time", "south_north", "west_east"))
     # Represents var in DS that we don't want to process
     not_required_var = ncfile.createVariable(
@@ -230,19 +244,21 @@ def test_build_feature_matrix_wrf(
     # TODO: Ensure we wrote firestore entries for the chunk.
 
 
+@mock.patch.dict(main.REQUIRED_VARS, {"RH": {}}, clear=True)
 def test_process_wps_feature_drop_time_axis():
     arr = numpy.array([[[1, 2], [3, 4]]], dtype=numpy.float32)  # shape=(1,2,2)
-    xrdarr = xarray.DataArray(arr, dims=("Time", "south_north", "west_east"))
+    xrdarr = xarray.DataArray(arr, name="RH", dims=("Time", "south_north", "west_east"))
 
     processed = main._process_wps_feature(xrdarr)
 
     numpy.testing.assert_equal((2, 2), processed.shape)
 
 
+@mock.patch.dict(main.REQUIRED_VARS, {"RH": {}}, clear=True)
 def test_process_wps_feature_extract_fnl_spatial_dim():
     arr = numpy.array([[[[10, 1], [20, 2]], [[30, 3], [40, 4]]]], dtype=numpy.float32)
     xrdarr = xarray.DataArray(
-        arr, dims=("Time", "south_north", "west_east", "num_metgrid_levels")
+        arr, name="RH", dims=("Time", "south_north", "west_east", "num_metgrid_levels")
     )
 
     processed = main._process_wps_feature(xrdarr)
@@ -251,10 +267,20 @@ def test_process_wps_feature_extract_fnl_spatial_dim():
     numpy.testing.assert_array_equal(expected, processed)
 
 
+@mock.patch.dict(
+    main.REQUIRED_VARS,
+    {
+        "RH": {
+            "unit": Unit.PERCENTAGE,
+        },
+    },
+    clear=True,
+)
 def test_process_wps_feature_convert_percent_to_decimal():
     arr = numpy.array([[[32.45, 15.11], [73.74, 33.21]]], dtype=numpy.float32)
     xrdarr = xarray.DataArray(
         arr,
+        name="RH",
         dims=("Time", "south_north", "west_east"),
         attrs=dict(
             description="Test data array",
@@ -266,6 +292,33 @@ def test_process_wps_feature_convert_percent_to_decimal():
 
     expected = [[0.3245, 0.1511], [0.7374, 0.3321]]
     numpy.testing.assert_array_almost_equal(expected, processed)
+
+
+@mock.patch.dict(
+    main.REQUIRED_VARS,
+    {
+        "PRES": {
+            "scaling": {
+                "type": ScalingType.GLOBAL,
+                "min": 98000,
+                "max": 121590,
+            }
+        },
+    },
+    clear=True,
+)
+def test_process_wps_feature_apply_minmax_scaler():
+    arr = numpy.array([[[111222, 555555], [121590, 12]]], dtype=numpy.float32)
+    xrdarr = xarray.DataArray(
+        arr,
+        name="PRES",
+        dims=("Time", "south_north", "west_east"),
+    )
+
+    processed = main._process_wps_feature(xrdarr)
+
+    expected = [[0.56, 1], [1, 0]]
+    numpy.testing.assert_array_almost_equal(expected, processed, decimal=3)
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)

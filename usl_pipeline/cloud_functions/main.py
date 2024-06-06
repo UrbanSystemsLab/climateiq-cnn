@@ -21,7 +21,7 @@ from usl_lib.readers import elevation_readers
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
-from usl_lib.shared import wps_variables
+from usl_lib.shared.wps_variables import ScalingType, REQUIRED_VARS, Unit
 
 _MAX_RETRY_SECONDS = 60 * 2
 
@@ -309,7 +309,7 @@ def _read_wps_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     # https://shorturl.at/lk4om
     with xarray.open_dataset(fd) as ds:  # type: ignore
         features_components = []
-        for var in wps_variables.REQUIRED_VARS.keys():
+        for var in REQUIRED_VARS.keys():
             feature = _process_wps_feature(ds.data_vars[var])
             features_components.append(feature)
 
@@ -337,21 +337,33 @@ def _process_wps_feature(feature: xarray.DataArray) -> NDArray:
     if "num_metgrid_levels" in feature.dims:
         feature = feature.isel(num_metgrid_levels=0)
 
+    feature_values = feature.values
+    wps_var = REQUIRED_VARS.get(feature.name)
+
     # Convert percentage-based units to decimal
-    try:
-        if feature.units.lower().strip() in ["%", "percent"]:
-            return _convert_to_decimal(feature.values)
-    except AttributeError:
-        logging.warning("No unit attribute found on DataArray.")
+    if wps_var.get("unit") == Unit.PERCENTAGE:
+        feature_values = _convert_to_decimal(feature_values)
 
-    # TODO: apply ceiling
-    # TODO: global scaling
+    # If var config requires global scaling, normalize feature values
+    scaling_config = wps_var.get("scaling")
+    if scaling_config is not None and scaling_config.get("type") == ScalingType.GLOBAL:
+        min = wps_var.get("scaling").get("min")
+        max = wps_var.get("scaling").get("max")
+        feature_values = _apply_minmax_scaler(feature_values, min, max)
 
-    return feature.values
+    return feature_values
 
 
 def _convert_to_decimal(x):
     return x / 100
+
+
+def _apply_minmax_scaler(x, minx, maxx):
+    # Clip values if they go out of bounds of the specified min and max
+    x[x > maxx] = maxx
+    x[x < minx] = minx
+
+    return (x - minx) / (maxx - minx)
 
 
 def _read_elevation_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
