@@ -56,33 +56,6 @@ def bbox_polygon(x1: float, y1: float, x2: float, y2: float) -> geometry.Polygon
     return geometry.Polygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2), (x1, y1)])
 
 
-def copy_stream_to_file(
-    input_fd: typing.BinaryIO,
-    output_file_path: pathlib.Path,
-) -> None:
-    """Copies file stream to local file (wrapper around shutil.copyfileobj)."""
-    with open(output_file_path, "wb") as output_fd:
-        shutil.copyfileobj(input_fd, output_fd)
-
-
-def mock_file_blob(work_dir: pathlib.Path, relative_path: str) -> storage.Blob:
-    """Mocks cloud storage blob with support of storing contents to local file."""
-    file_path = work_dir / relative_path
-    file_path.parent.absolute().mkdir(parents=True, exist_ok=True)
-    blob = mock.MagicMock()
-    blob.open.side_effect = lambda mode: open(file_path, mode)
-    blob.upload_from_filename = lambda source: shutil.copyfile(source, file_path)
-    blob.upload_from_file = lambda input_fd: copy_stream_to_file(input_fd, file_path)
-    return blob
-
-
-def mock_cloud_bucket(work_dir: pathlib.Path) -> storage.Bucket:
-    """Mocks cloud storage bucket with support of storing files to local folder."""
-    bucket = mock.MagicMock()
-    bucket.blob.side_effect = lambda path: mock_file_blob(work_dir, path)
-    return bucket
-
-
 def load_polygons_from_stream(
     fd: typing.io.IO[bytes],
 ) -> list[Tuple[geometry.Polygon, int]]:
@@ -102,7 +75,7 @@ def assert_polygon_masks_equal(
 
 
 def assert_check_tar(
-    chunk_tar_file_path,
+    chunk_tar_file: typing.BinaryIO,
     col_count: int,
     row_count: int,
     x_ll_corner: float,
@@ -119,8 +92,9 @@ def assert_check_tar(
     observed_buildings_polygons = []
     observed_green_areas_polygons = []
     observed_soil_classes_polygons = []
+    chunk_tar_file.seek(0)
     with tarfile.TarFile(
-        chunk_tar_file_path
+        fileobj=chunk_tar_file,
     ) as tar, tempfile.TemporaryDirectory() as temp_dir:
         for member in tar:
             fd = tar.extractfile(member)
@@ -129,9 +103,7 @@ def assert_check_tar(
 
             name = pathlib.PurePosixPath(member.name).name
             if name == file_names.ELEVATION_TIF:
-                temp_elevation_file = (
-                    pathlib.Path(temp_dir) / f"{chunk_tar_file_path.name}.tif"
-                )
+                temp_elevation_file = pathlib.Path(temp_dir) / "elevation.tif"
                 with open(temp_elevation_file, "wb") as output_fd:
                     shutil.copyfileobj(fd, output_fd)
                 with open(temp_elevation_file, "rb") as input_fd:
@@ -182,6 +154,17 @@ def test_build_and_upload_chunks():
         green_areas_polygons = [(bbox_polygon(0, 2, 1, 3), 1)]  # touches 0-0, 1-0
         soil_classes_polygons = [(bbox_polygon(2, 4, 3, 5), 9)]  # touches 0-0, 0-1
 
+        chunk_0_0_blob = mock.MagicMock(spec=storage.Blob)
+        chunk_0_1_blob = mock.MagicMock(spec=storage.Blob)
+        chunk_1_0_blob = mock.MagicMock(spec=storage.Blob)
+        chunk_1_1_blob = mock.MagicMock(spec=storage.Blob)
+        mock_bucket = mock.MagicMock(spec=storage.Bucket)
+        mock_bucket.blob.side_effect = [
+            chunk_0_0_blob,
+            chunk_0_1_blob,
+            chunk_1_0_blob,
+            chunk_1_1_blob,
+        ]
         study_area_chunkers.build_and_upload_chunks(
             "TestArea1",
             study_area_transformers.PreparedInputData(
@@ -192,14 +175,19 @@ def test_build_and_upload_chunks():
                 soil_classes_polygons=soil_classes_polygons,
             ),
             work_dir,
-            mock_cloud_bucket(work_dir),
+            # mock_cloud_bucket(work_dir),
+            mock_bucket,
             chunk_size=3,
             extend_soil_classes_chunk_border=False,
         )
 
-        chunks_dir = work_dir / "TestArea1"
+        chunk_0_0_tar_path = chunk_0_0_blob.upload_from_file.mock_calls[0].args[0]
+        chunk_0_1_tar_path = chunk_0_1_blob.upload_from_file.mock_calls[0].args[0]
+        chunk_1_0_tar_path = chunk_1_0_blob.upload_from_file.mock_calls[0].args[0]
+        chunk_1_1_tar_path = chunk_1_1_blob.upload_from_file.mock_calls[0].args[0]
+
         assert_check_tar(
-            chunks_dir / "chunk_0_0.tar",
+            chunk_0_0_tar_path,
             3,
             3,
             0.0,
@@ -215,41 +203,43 @@ def test_build_and_upload_chunks():
             soil_classes_polygons=[(bbox_polygon(2, 4, 3, 5), 9)],
         )
         assert_check_tar(
-            chunks_dir / "chunk_0_1.tar",
-            2,
+            chunk_0_1_tar_path,
+            3,
             3,
             3.0,
             2.0,
             [
-                [3.0, 4.0],
-                [8.0, 9.0],
-                [13.0, 14.0],
+                [3.0, 4.0, -9999.0],
+                [8.0, 9.0, -9999.0],
+                [13.0, 14.0, -9999.0],
             ],
             boundaries_polygons=[(bbox_polygon(1, 1, 4, 4), 1)],
             soil_classes_polygons=[(bbox_polygon(2, 4, 3, 5), 9)],
         )
         assert_check_tar(
-            chunks_dir / "chunk_1_0.tar",
+            chunk_1_0_tar_path,
             3,
-            2,
+            3,
             0.0,
-            0.0,
+            -1.0,
             [
                 [15.0, 16.0, 17.0],
                 [20.0, 21.0, 22.0],
+                [-9999.0, -9999.0, -9999.0],
             ],
             boundaries_polygons=[(bbox_polygon(1, 1, 4, 4), 1)],
             green_areas_polygons=[(bbox_polygon(0, 2, 1, 3), 1)],
         )
         assert_check_tar(
-            chunks_dir / "chunk_1_1.tar",
-            2,
-            2,
+            chunk_1_1_tar_path,
+            3,
+            3,
             3.0,
-            0.0,
+            -1.0,
             [
-                [18.0, 19.0],
-                [23.0, 24.0],
+                [18.0, 19.0, -9999.0],
+                [23.0, 24.0, -9999.0],
+                [-9999.0, -9999.0, -9999.0],
             ],
             boundaries_polygons=[(bbox_polygon(1, 1, 4, 4), 1)],
         )

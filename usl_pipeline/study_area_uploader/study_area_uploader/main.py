@@ -50,11 +50,12 @@ def main() -> None:
                 "Storage bucket for flood simulation inputs: %s",
                 cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET,
             )
-            export_to_city_cat(
-                args,
+            study_area_transformers.prepare_and_upload_citycat_input_files(
+                args.name,
                 prepared_inputs,
-                storage_client.bucket(cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET),
                 work_dir,
+                storage_client.bucket(cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET),
+                elevation_geotiff_band=args.elevation_geotiff_band,
             )
 
         # Wait till study area metadata is registered by cloud_function triggered by
@@ -75,46 +76,18 @@ def main() -> None:
             else:
                 break
 
-        if args.upload_chunks:
-            logging.info(
-                "Storage bucket for study area chunks: %s",
-                cloud_storage.STUDY_AREA_CHUNKS_BUCKET,
-            )
-            study_area_chunk_bucket = storage_client.bucket(
-                cloud_storage.STUDY_AREA_CHUNKS_BUCKET
-            )
-            build_chunks(args, prepared_inputs, study_area_chunk_bucket, work_dir)
-
-
-def export_to_city_cat(
-    args: argparse.Namespace,
-    prepared_inputs: study_area_transformers.PreparedInputData,
-    flood_simulation_input_bucket: storage.Bucket,
-    work_dir: pathlib.Path,
-):
-    study_area_transformers.prepare_and_upload_citycat_input_files(
-        args.name,
-        prepared_inputs,
-        work_dir,
-        flood_simulation_input_bucket,
-        elevation_geotiff_band=args.elevation_geotiff_band,
-    )
-
-
-def build_chunks(
-    args: argparse.Namespace,
-    prepared_inputs: study_area_transformers.PreparedInputData,
-    study_area_chunk_bucket: storage.Bucket,
-    work_dir: pathlib.Path,
-):
-    study_area_chunkers.build_and_upload_chunks(
-        args.name,
-        prepared_inputs,
-        work_dir,
-        study_area_chunk_bucket,
-        args.chunk_length,
-        input_elevation_band=args.elevation_geotiff_band,
-    )
+        logging.info(
+            "Storage bucket for study area chunks: %s",
+            cloud_storage.STUDY_AREA_CHUNKS_BUCKET,
+        )
+        study_area_chunkers.build_and_upload_chunks(
+            args.name,
+            prepared_inputs,
+            work_dir,
+            storage_client.bucket(cloud_storage.STUDY_AREA_CHUNKS_BUCKET),
+            args.chunk_length,
+            input_elevation_band=args.elevation_geotiff_band,
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -163,14 +136,6 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Indicator of the execution mode where input files should be exported"
         + " to CityCat storage bucket.",
-        action=argparse.BooleanOptionalAction,
-    )
-    parser.add_argument(
-        "--upload-chunks",
-        type=bool,
-        default=True,
-        help="Indicator of the execution mode where input files should be split into"
-        + " chunks and uploaded to the chunks storage bucket.",
         action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(

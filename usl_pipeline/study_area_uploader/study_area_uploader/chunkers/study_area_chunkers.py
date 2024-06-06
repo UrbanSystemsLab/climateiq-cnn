@@ -5,6 +5,7 @@ import tarfile
 from typing import Optional, Tuple
 
 from google.cloud import storage
+import numpy
 from shapely import geometry
 
 from study_area_uploader.chunkers import elevation_chunkers
@@ -58,7 +59,7 @@ def build_and_upload_chunks(
     input_data: study_area_transformers.PreparedInputData,
     work_dir: pathlib.Path,
     study_area_chunk_bucket: storage.Bucket,
-    chunk_size: int = 1000,
+    chunk_size: int,
     extend_soil_classes_chunk_border: bool = True,
     input_elevation_band: int = 1,
     default_nodata_value: float = -9999.0,
@@ -124,6 +125,25 @@ def build_and_upload_chunks(
                 band=input_elevation_band,
                 no_data_value=default_nodata_value,
             )
+        if (
+            chunk_elevation.header.row_count < chunk_size
+            or chunk_elevation.header.col_count < chunk_size
+        ):
+            y_pad = chunk_size - chunk_elevation.header.row_count
+            x_pad = chunk_size - chunk_elevation.header.col_count
+            chunk_elevation.data = numpy.pad(
+                chunk_elevation.data,
+                numpy.array(((0, y_pad), (0, x_pad))),
+                mode="constant",
+                constant_values=chunk_elevation.header.nodata_value,
+            )
+            chunk_elevation.header.row_count = chunk_size
+            chunk_elevation.header.col_count = chunk_size
+            chunk_elevation.header.y_ll_corner = (
+                chunk_elevation.header.y_ll_corner
+                - y_pad * chunk_elevation.header.cell_size
+            )
+
         elevation_writers.write_to_geotiff(chunk_elevation, elevation_chunk_file_path)
 
         tar_fd = io.BytesIO()
