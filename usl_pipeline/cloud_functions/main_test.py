@@ -13,8 +13,7 @@ import rasterio
 import xarray
 
 import main
-
-from usl_lib.shared.wps_variables import ScalingType, REQUIRED_VARS, Unit
+import usl_lib.shared.wps_data as wps_data
 
 
 @mock.patch.object(main.firestore, "Client", autospec=True)
@@ -131,16 +130,16 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client):
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 @mock.patch.dict(
-    main.REQUIRED_VARS,
+    main.wps_data.ML_REQUIRED_VARS_REPO,
     {
         "GHT": {
             "scaling": {
-                "type": ScalingType.LOCAL,
+                "type": wps_data.ScalingType.LOCAL,
             }
         },
         "RH": {
             "scaling": {
-                "type": ScalingType.NONE,
+                "type": wps_data.ScalingType.NONE,
             }
         },
     },
@@ -167,7 +166,7 @@ def test_build_feature_matrix_wrf(
     lat = ncfile.createVariable("lat", "float32", ("west_east",))
     lon = ncfile.createVariable("lon", "float32", ("south_north",))
     # Create dataset entries for all variables in mock
-    for var in REQUIRED_VARS.keys():
+    for var in wps_data.ML_REQUIRED_VARS_REPO.keys():
         ncfile.createVariable(var, "float32", ("Time", "south_north", "west_east"))
     # Represents var in DS that we don't want to process
     not_required_var = ncfile.createVariable(
@@ -244,34 +243,38 @@ def test_build_feature_matrix_wrf(
     # TODO: Ensure we wrote firestore entries for the chunk.
 
 
-@mock.patch.dict(main.REQUIRED_VARS, {"RH": {}}, clear=True)
+@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
 def test_process_wps_feature_drop_time_axis():
     arr = numpy.array([[[1, 2], [3, 4]]], dtype=numpy.float32)  # shape=(1,2,2)
     xrdarr = xarray.DataArray(arr, name="RH", dims=("Time", "south_north", "west_east"))
 
-    processed = main._process_wps_feature(xrdarr)
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+    )
 
     numpy.testing.assert_equal((2, 2), processed.shape)
 
 
-@mock.patch.dict(main.REQUIRED_VARS, {"RH": {}}, clear=True)
+@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
 def test_process_wps_feature_extract_fnl_spatial_dim():
     arr = numpy.array([[[[10, 1], [20, 2]], [[30, 3], [40, 4]]]], dtype=numpy.float32)
     xrdarr = xarray.DataArray(
         arr, name="RH", dims=("Time", "south_north", "west_east", "num_metgrid_levels")
     )
 
-    processed = main._process_wps_feature(xrdarr)
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+    )
 
     expected = [[10, 20], [30, 40]]
     numpy.testing.assert_array_equal(expected, processed)
 
 
 @mock.patch.dict(
-    main.REQUIRED_VARS,
+    main.wps_data.ML_REQUIRED_VARS_REPO,
     {
         "RH": {
-            "unit": Unit.PERCENTAGE,
+            "unit": wps_data.Unit.PERCENTAGE,
         },
     },
     clear=True,
@@ -288,18 +291,20 @@ def test_process_wps_feature_convert_percent_to_decimal():
         ),
     )
 
-    processed = main._process_wps_feature(xrdarr)
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+    )
 
     expected = [[0.3245, 0.1511], [0.7374, 0.3321]]
     numpy.testing.assert_array_almost_equal(expected, processed)
 
 
 @mock.patch.dict(
-    main.REQUIRED_VARS,
+    main.wps_data.ML_REQUIRED_VARS_REPO,
     {
         "PRES": {
             "scaling": {
-                "type": ScalingType.GLOBAL,
+                "type": wps_data.ScalingType.GLOBAL,
                 "min": 98000,
                 "max": 121590,
             }
@@ -315,7 +320,9 @@ def test_process_wps_feature_apply_minmax_scaler():
         dims=("Time", "south_north", "west_east"),
     )
 
-    processed = main._process_wps_feature(xrdarr)
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("PRES")
+    )
 
     expected = [[0.56, 1], [1, 0]]
     numpy.testing.assert_array_almost_equal(expected, processed, decimal=3)

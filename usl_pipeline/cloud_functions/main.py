@@ -18,10 +18,10 @@ import rasterio
 
 from usl_lib.readers import config_readers
 from usl_lib.readers import elevation_readers
+import usl_lib.shared.wps_data as wps_data
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
-from usl_lib.shared.wps_variables import ScalingType, REQUIRED_VARS, Unit
 
 _MAX_RETRY_SECONDS = 60 * 2
 
@@ -296,7 +296,7 @@ def _build_feature_matrix_from_archive(
                 return _read_elevation_features(fd)
             # Handle heat model input files (WPS)
             elif name.startswith("met_em") and name.endswith(".nc"):
-                return _read_wps_features(fd)
+                return _build_wps_feature_matrix(fd)
             # TODO: handle additional archive members.
             else:
                 logging.warning(f"Unexpected member name: {name}")
@@ -304,13 +304,16 @@ def _build_feature_matrix_from_archive(
     return None, FeatureMetadata()
 
 
-def _read_wps_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     # Ignore type checker error - BytesIO inherits from expected type BufferedIOBase
     # https://shorturl.at/lk4om
     with xarray.open_dataset(fd) as ds:  # type: ignore
         features_components = []
-        for var in REQUIRED_VARS.keys():
-            feature = _process_wps_feature(ds.data_vars[var])
+        for var_name in wps_data.ML_REQUIRED_VARS_REPO.keys():
+            var_config = wps_data.ML_REQUIRED_VARS_REPO[var_name]
+            feature = _process_wps_feature(
+                feature=ds.data_vars[var_name], var_config=var_config
+            )
             features_components.append(feature)
 
         features_matrix = numpy.dstack(features_components)
@@ -319,12 +322,15 @@ def _read_wps_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     return features_matrix, FeatureMetadata()
 
 
-def _process_wps_feature(feature: xarray.DataArray) -> NDArray:
+def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray:
     """Performs a series of data transforms on a WPS variable.
 
     Args:
       feature: The xarray.DataArray containing the feature, its dimensions,
       and metadata
+      var_config: The dict entry to ML_REQUIRED_VARS_REPO from wps_data.py containing
+      the metadata that will be used to determine what feature engineering processing
+      should be applied
 
     Returns:
       A new numpy array with transforms applied according to rules
@@ -338,17 +344,19 @@ def _process_wps_feature(feature: xarray.DataArray) -> NDArray:
         feature = feature.isel(num_metgrid_levels=0)
 
     feature_values = feature.values
-    wps_var = REQUIRED_VARS.get(feature.name)
 
     # Convert percentage-based units to decimal
-    if wps_var.get("unit") == Unit.PERCENTAGE:
+    if var_config.get("unit") == wps_data.Unit.PERCENTAGE:
         feature_values = _convert_to_decimal(feature_values)
 
     # If var config requires global scaling, normalize feature values
-    scaling_config = wps_var.get("scaling")
-    if scaling_config is not None and scaling_config.get("type") == ScalingType.GLOBAL:
-        min = wps_var.get("scaling").get("min")
-        max = wps_var.get("scaling").get("max")
+    scaling_config = var_config.get("scaling")
+    if (
+        scaling_config is not None
+        and scaling_config.get("type") == wps_data.ScalingType.GLOBAL
+    ):
+        min = scaling_config.get("min")
+        max = scaling_config.get("max")
         feature_values = _apply_minmax_scaler(feature_values, min, max)
 
     return feature_values
