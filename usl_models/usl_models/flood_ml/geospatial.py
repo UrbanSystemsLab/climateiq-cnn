@@ -20,16 +20,11 @@ For example, if the data has a resolution of 10 meters per pixel, then a 1000x10
 class GeospatialTensor:
     def __init__(
         self,
-        study_area,
-        data,
         settings: Settings = None,
         metastore: FirestoreDataHandler = (None,),
     ):
-        self.generate_geospatial_tensor()
         settings: Settings = None
         metastore: FirestoreDataHandler = (None,)
-        self.study_area = study_area
-        self.data = data
         # instantiate metastore class
         self.metastore = metastore or FirestoreDataHandler(
             firestore_client=self.firestore_client, settings=self.settings
@@ -37,6 +32,12 @@ class GeospatialTensor:
         # Load settings
         self.settings = settings or Settings()
 
-    def generate_geospatial_tensor(self):
+        self.study_area = None
+        self.data = None
+
+    def generate_geospatial_tensor(self, study_area, data):
+        self.study_area = study_area
+        self.data = data
+
         spatio_temporal_tensor = tf.zeros([1000, 1000, 1])
         return spatio_temporal_tensor

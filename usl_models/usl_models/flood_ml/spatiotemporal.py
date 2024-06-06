@@ -27,19 +27,14 @@ soil moisture, or historical flood events.
 """
 
 
-class Spatiotemporal:
+class SpatiotemporalTensor:
     def __init__(
         self,
-        study_area,
-        data,
         settings: Settings = None,
         metastore: FirestoreDataHandler = (None,),
     ):
-        self.generate_geospatial_tensor()
         settings: Settings = None
         metastore: FirestoreDataHandler = (None,)
-        self.study_area = study_area
-        self.data = data
         # instantiate metastore class
         self.metastore = metastore or FirestoreDataHandler(
             firestore_client=self.firestore_client, settings=self.settings
@@ -47,6 +42,11 @@ class Spatiotemporal:
         # Load settings
         self.settings = settings or Settings()
 
-    def generate_spatiotemporal_data(self):
+        self.study_area = None
+        self.data = None
+
+    def generate_spatiotemporal_data(self, study_area, data):
+        self.study_area = study_area
+        self.data = data
         spatio_temporal_tensor = tf.zeros([1000, 1000, 1])
         return spatio_temporal_tensor

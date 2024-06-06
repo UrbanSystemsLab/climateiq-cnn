@@ -11,7 +11,7 @@ from data_utils import FloodModelData
 from metastore import FirestoreDataHandler
 from settings import Settings
 from geospatial import GeospatialTensor
-from spatiotemporal import SpatialTemporalTensor
+from spatiotemporal import SpatiotemporalTensor
 
 
 """
@@ -46,7 +46,7 @@ class IncrementalTrainDataGenerator:
         storage_client: storage.Client = None,
         metastore: FirestoreDataHandler = None,
         geospatial_tensor: GeospatialTensor = None,
-        spatial_temporal_tensor: SpatialTemporalTensor = None,
+        spatial_temporal_tensor: SpatiotemporalTensor = None,
     ):
         print("Initializing IncrementalTrainDataGenerator...")
 
@@ -71,7 +71,7 @@ class IncrementalTrainDataGenerator:
         )
 
         # instantiate spatial temporal tensor class
-        self.spatial_temporal_tensor = spatial_temporal_tensor or SpatialTemporalTensor(
+        self.spatial_temporal_tensor = spatial_temporal_tensor or SpatiotemporalTensor(
             settings=self.settings
         )
 
@@ -251,7 +251,7 @@ class IncrementalTrainDataGenerator:
                     ],
                 }
             else:
-                raise ValueError(f"No simulation document found for {study_area}")
+                print(f"No simulation document found for {study_area}.")
         return simulation_data
 
     def _process_study_area_data(self, study_area, data, batch) -> List[FloodModelData]:
