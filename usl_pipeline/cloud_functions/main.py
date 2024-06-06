@@ -309,7 +309,7 @@ def _read_wps_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     # https://shorturl.at/lk4om
     with xarray.open_dataset(fd) as ds:  # type: ignore
         features_components = []
-        for var in wps_variables.REQUIRED_VARS:
+        for var in wps_variables.REQUIRED_VARS.keys():
             feature = _process_wps_feature(ds.data_vars[var])
             features_components.append(feature)
 
@@ -344,7 +344,8 @@ def _process_wps_feature(feature: xarray.DataArray) -> NDArray:
     except AttributeError:
         logging.warning("No unit attribute found on DataArray.")
 
-    # TODO: Feature scaling
+    # TODO: apply ceiling
+    # TODO: global scaling
 
     return feature.values
 

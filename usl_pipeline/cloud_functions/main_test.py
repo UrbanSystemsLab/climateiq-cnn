@@ -130,6 +130,7 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client):
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.dict(main.wps_variables.REQUIRED_VARS, {"GHT": {}, "RH": {}}, clear=True)
 def test_build_feature_matrix_wrf(
     mock_storage_client,
     mock_firestore_client,
@@ -150,8 +151,9 @@ def test_build_feature_matrix_wrf(
     time = ncfile.createVariable("time", "f8", ("Time",))
     lat = ncfile.createVariable("lat", "float32", ("west_east",))
     lon = ncfile.createVariable("lon", "float32", ("south_north",))
-    # Create stubbed entries for all required variables
-    for var in wps_variables.REQUIRED_VARS:
+    print(wps_variables)
+    # Create dataset entries for all variables in mock
+    for var in wps_variables.REQUIRED_VARS.keys():
         ncfile.createVariable(var, "float32", ("Time", "south_north", "west_east"))
     # Represents var in DS that we don't want to process
     not_required_var = ncfile.createVariable(
