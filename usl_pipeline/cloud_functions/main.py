@@ -23,7 +23,13 @@ from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
 
-_MAX_RETRY_SECONDS = 60 * 2
+# How long to accept cloud function invocations after the triggering
+# event. It's up to GCP how frequently withing this period the cloud
+# function is retried. This also needs to include lag for the length
+# of time between when an event is triggered and when the cloud
+# function actually runs, which can be a bit of time if there are a
+# lot of triggers.
+_MAX_RETRY_SECONDS = 60 * 60
 
 # The vector is long enough to express rainfall every five minutes for up to three days.
 _RAINFALL_VECTOR_LENGTH = (60 // 5) * 24 * 3
@@ -77,7 +83,16 @@ def _retry_and_report_errors(
 
         @functools.wraps(func)
         def wrapper(cloud_event: functions_framework.CloudEvent) -> None:
-            logging.basicConfig(level=logging.WARN)
+            logging.basicConfig(level=logging.INFO)
+
+            # Utilities like `gcloud storage cp` create temporary files for parallel
+            # uploads and then combine the chunks in one final write. We want to avoid
+            # the intermediary chunk writes.
+            if cloud_event.data.get("name", "").startswith(
+                "gcloud/tmp/parallel_composite_uploads"
+            ):
+                logging.debug("Skipping tmp upload file %s", cloud_event.data["name"])
+                return
 
             # To handle retries, check the time created and return if the event is too
             # old. GCP retries until the function returns successfully, so the pattern
@@ -92,9 +107,10 @@ def _retry_and_report_errors(
             ).total_seconds()
             if event_age > _MAX_RETRY_SECONDS:
                 logging.error(
-                    "Dropped event id %s source %s after %s seconds",
+                    "Dropped event id: %s source: %s name: %s after %s seconds",
                     cloud_event["id"],
                     cloud_event["source"],
+                    cloud_event.data.get("name"),
                     _MAX_RETRY_SECONDS,
                 )
                 return
@@ -103,13 +119,13 @@ def _retry_and_report_errors(
             try:
                 func(cloud_event)
             except Exception as exc:  # noqa
-                # Log the exception to display in Cloud Function logs.
-                logging.exception(exc)
                 # Report the error in GCP Error Reporter.
                 error_reporting.Client().report_exception()
                 # Perform any custom error handling.
                 if error_reporter_func is not None:
                     error_reporter_func(cloud_event, exc)
+                # Raise the exception to indicate failure and allow GCP to retry.
+                raise
 
         return wrapper
 
