@@ -18,10 +18,10 @@ import rasterio
 
 from usl_lib.readers import config_readers
 from usl_lib.readers import elevation_readers
+import usl_lib.shared.wps_data as wps_data
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
-from usl_lib.shared import wps_variables
 
 _MAX_RETRY_SECONDS = 60 * 2
 
@@ -295,7 +295,7 @@ def _build_feature_matrix_from_archive(
                 return _read_elevation_features(fd)
             # Handle heat model input files (WPS)
             elif name.startswith("met_em") and name.endswith(".nc"):
-                return _read_wps_features(fd)
+                return _build_wps_feature_matrix(fd)
             # TODO: handle additional archive members.
             else:
                 logging.warning(f"Unexpected member name: {name}")
@@ -303,13 +303,16 @@ def _build_feature_matrix_from_archive(
     return None, FeatureMetadata()
 
 
-def _read_wps_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     # Ignore type checker error - BytesIO inherits from expected type BufferedIOBase
     # https://shorturl.at/lk4om
     with xarray.open_dataset(fd) as ds:  # type: ignore
         features_components = []
-        for var in wps_variables.REQUIRED_VARS:
-            feature = _process_wps_feature(ds.data_vars[var])
+        for var_name in wps_data.ML_REQUIRED_VARS_REPO.keys():
+            var_config = wps_data.ML_REQUIRED_VARS_REPO[var_name]
+            feature = _process_wps_feature(
+                feature=ds.data_vars[var_name], var_config=var_config
+            )
             features_components.append(feature)
 
         features_matrix = numpy.dstack(features_components)
@@ -318,22 +321,56 @@ def _read_wps_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     return features_matrix, FeatureMetadata()
 
 
-def _process_wps_feature(feature: xarray.DataArray) -> NDArray:
-    """Performs a series of array transforms on a WPS variable array.
-
-    1. Drops time axis - since each WPS output file corresponds to one datetime
-    2. TBD (feature scaling, extracting levels, etc)...
+def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray:
+    """Performs a series of data transforms on a WPS variable.
 
     Args:
-      feature: The array containing the feature and its dimensions
+      feature: The xarray.DataArray containing the feature, its dimensions,
+      and metadata
+      var_config: The dict entry to ML_REQUIRED_VARS_REPO from wps_data.py containing
+      the metadata that will be used to determine what feature engineering processing
+      should be applied
 
     Returns:
-      A new array processed according to rules above
+      A new numpy array with transforms applied according to rules
+      for each variable defined in: https://shorturl.at/W6nzY
     """
-    feature_vals = feature.values
-    feature_vals = numpy.squeeze(feature, axis=0)
+    # Drop time axis
+    feature = feature.isel(Time=0)
 
-    return feature_vals
+    # FNL-derived var - extract to only first level
+    if "num_metgrid_levels" in feature.dims:
+        feature = feature.isel(num_metgrid_levels=0)
+
+    feature_values = feature.values
+
+    # Convert percentage-based units to decimal
+    if var_config.get("unit") == wps_data.Unit.PERCENTAGE:
+        feature_values = _convert_to_decimal(feature_values)
+
+    # If var config requires global scaling, normalize feature values
+    scaling_config = var_config.get("scaling")
+    if (
+        scaling_config is not None
+        and scaling_config.get("type") == wps_data.ScalingType.GLOBAL
+    ):
+        min = scaling_config.get("min")
+        max = scaling_config.get("max")
+        feature_values = _apply_minmax_scaler(feature_values, min, max)
+
+    return feature_values
+
+
+def _convert_to_decimal(x):
+    return x / 100
+
+
+def _apply_minmax_scaler(x, minx, maxx):
+    # Clip values if they go out of bounds of the specified min and max
+    x[x > maxx] = maxx
+    x[x < minx] = minx
+
+    return (x - minx) / (maxx - minx)
 
 
 def _read_elevation_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
