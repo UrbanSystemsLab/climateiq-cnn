@@ -236,8 +236,11 @@ def test_build_feature_matrix_wrf(
     # Ensure we attempted to upload a serialized matrix of the netcdf
     mock_feature_blob.upload_from_file.assert_called_once_with(mock.ANY)
     uploaded_array = numpy.load(mock_feature_blob.upload_from_file.call_args[0][0])
-    # Expected array should be all required vars extracted and stacked
-    expected_array = numpy.dstack((netcdf_array1, netcdf_array2))
+    # Expected array should be all required vars extracted, lon/lat axis reordered, and
+    # stacked
+    expected_array = numpy.dstack(
+        (numpy.swapaxes(netcdf_array1, 0, 1), numpy.swapaxes(netcdf_array2, 0, 1))
+    )
     numpy.testing.assert_array_equal(uploaded_array, expected_array)
 
     # TODO: Ensure we wrote firestore entries for the chunk.
@@ -256,6 +259,23 @@ def test_process_wps_feature_drop_time_axis():
 
 
 @mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
+def test_process_wps_feature_reorder_spatial_dims():
+    # Dims ordered here are representative of how they will be ordered in actual netcdf
+    # file
+    arr = numpy.array([[[[10, 20], [30, 40]], [[1, 2], [3, 4]]]], dtype=numpy.float32)
+    xrdarr = xarray.DataArray(
+        arr, name="RH", dims=("Time", "num_metgrid_levels", "south_north", "west_east")
+    )
+
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+    )
+
+    expected = [[10, 30], [20, 40]]
+    numpy.testing.assert_array_equal(expected, processed)
+
+
+@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
 def test_process_wps_feature_extract_fnl_spatial_dim():
     arr = numpy.array([[[[10, 1], [20, 2]], [[30, 3], [40, 4]]]], dtype=numpy.float32)
     xrdarr = xarray.DataArray(
@@ -267,7 +287,8 @@ def test_process_wps_feature_extract_fnl_spatial_dim():
     )
 
     expected = [[10, 20], [30, 40]]
-    numpy.testing.assert_array_equal(expected, processed)
+    # Expected arr will also have lat/lon axis swapped
+    numpy.testing.assert_array_equal(numpy.swapaxes(expected, 0, 1), processed)
 
 
 @mock.patch.dict(
@@ -296,7 +317,8 @@ def test_process_wps_feature_convert_percent_to_decimal():
     )
 
     expected = [[0.3245, 0.1511], [0.7374, 0.3321]]
-    numpy.testing.assert_array_almost_equal(expected, processed)
+    # Expected arr will also have lat/lon axis swapped
+    numpy.testing.assert_array_almost_equal(numpy.swapaxes(expected, 0, 1), processed)
 
 
 @mock.patch.dict(
@@ -325,7 +347,10 @@ def test_process_wps_feature_apply_minmax_scaler():
     )
 
     expected = [[0.56, 1], [1, 0]]
-    numpy.testing.assert_array_almost_equal(expected, processed, decimal=3)
+    # Expected arr will also have lat/lon axis swapped
+    numpy.testing.assert_array_almost_equal(
+        numpy.swapaxes(expected, 0, 1), processed, decimal=3
+    )
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)

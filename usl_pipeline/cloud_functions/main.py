@@ -338,6 +338,10 @@ def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray
     # Drop time axis
     feature = feature.isel(Time=0)
 
+    # Ensure order of dimension axes are: (west_east, south_north, <other spatial dims>)
+    # to stay consistent with rest of data pipeline
+    feature = feature.transpose("west_east", "south_north", ...)
+
     # FNL-derived var - extract to only first level
     if "num_metgrid_levels" in feature.dims:
         feature = feature.isel(num_metgrid_levels=0)
