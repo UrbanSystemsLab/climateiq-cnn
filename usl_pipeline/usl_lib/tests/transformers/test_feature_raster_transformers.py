@@ -128,12 +128,13 @@ def test_transform_to_feature_raster_layers_no_polygons():
                 y_ll_corner=0.0,
                 cell_size=1.0,
                 nodata_value=-9999.0,
-            ), data=numpy.asarray(
+            ),
+            data=numpy.asarray(
                 [
                     [0.0, 1.0],
                     [2.0, -9999.0],
                 ]
-            )
+            ),
         ),
         boundaries,
         [],

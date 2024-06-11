@@ -258,7 +258,7 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     _build_feature_matrix(
         cloud_event.data["bucket"],
         cloud_event.data["name"],
-        cloud_storage.FEATURE_CHUNKS_BUCKET
+        cloud_storage.FEATURE_CHUNKS_BUCKET,
     )
 
 
@@ -274,9 +274,7 @@ def _build_feature_matrix(bucket_name, chunk_name, output_bucket) -> None:
             raise ValueError(f"Empty archive found in {chunk_blob}")
 
     feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
-    feature_blob = storage_client.bucket(output_bucket).blob(
-        str(feature_file_name)
-    )
+    feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
 
     _write_as_npy(feature_blob, feature_matrix)
     _write_metastore_entry(chunk_blob, feature_blob, metadata)
