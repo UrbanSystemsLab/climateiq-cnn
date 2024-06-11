@@ -115,3 +115,35 @@ def test_transform_to_feature_raster_layers():
         0.412 / max_effective_porosity,
         0.99 / max_effective_saturation,
     ]
+
+
+def test_transform_to_feature_raster_layers_no_polygons():
+    boundaries = None
+    feature_matrix = feature_raster_transformers.transform_to_feature_raster_layers(
+        geo_data.Elevation(
+            header=geo_data.ElevationHeader(
+                col_count=2,
+                row_count=2,
+                x_ll_corner=0.0,
+                y_ll_corner=0.0,
+                cell_size=1.0,
+                nodata_value=-9999.0,
+            ), data=numpy.asarray(
+                [
+                    [0.0, 1.0],
+                    [2.0, -9999.0],
+                ]
+            )
+        ),
+        boundaries,
+        [],
+        [],
+        [],
+        geo_data.InfiltrationConfiguration.load_default(),
+    ).tolist()
+
+    # Checking results
+    assert feature_matrix[0][0] == [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    assert feature_matrix[0][1] == [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    assert feature_matrix[1][0] == [2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    assert feature_matrix[1][1] == [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

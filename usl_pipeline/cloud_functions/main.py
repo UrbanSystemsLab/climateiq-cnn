@@ -255,9 +255,17 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     GCS. It produces a feature matrix for the geo data and writes that feature matrix to
     another GCS bucket for eventual use in model training and prediction.
     """
+    _build_feature_matrix(
+        cloud_event.data["bucket"],
+        cloud_event.data["name"],
+        cloud_storage.FEATURE_CHUNKS_BUCKET
+    )
+
+
+def _build_feature_matrix(bucket_name, chunk_name, output_bucket) -> None:
+    """Builds a feature matrix when an archive of geo files is uploaded."""
     storage_client = storage.Client()
-    bucket = storage_client.bucket(cloud_event.data["bucket"])
-    chunk_name = cloud_event.data["name"]
+    bucket = storage_client.bucket(bucket_name)
     chunk_blob = bucket.blob(chunk_name)
 
     with chunk_blob.open("rb") as archive:
@@ -266,7 +274,7 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
             raise ValueError(f"Empty archive found in {chunk_blob}")
 
     feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
-    feature_blob = storage_client.bucket(cloud_storage.FEATURE_CHUNKS_BUCKET).blob(
+    feature_blob = storage_client.bucket(output_bucket).blob(
         str(feature_file_name)
     )
 
