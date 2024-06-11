@@ -1,13 +1,17 @@
+import pathlib
+import tempfile
 from io import StringIO
 
 import numpy
+from numpy import testing
 
-from usl_lib.writers.elevation_writers import write_to_esri_ascii_raster_file
-from usl_lib.shared.geo_data import Elevation, ElevationHeader
+from usl_lib.readers import elevation_readers
+from usl_lib.writers import elevation_writers
+from usl_lib.shared import geo_data
 
 
 def test_write_to_esri_ascii_raster_file():
-    header = ElevationHeader(
+    header = geo_data.ElevationHeader(
         col_count=3,
         row_count=2,
         x_ll_corner=0.0,
@@ -16,9 +20,9 @@ def test_write_to_esri_ascii_raster_file():
         nodata_value=0.0,
     )
     data = numpy.asarray([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0123456789]])
-    elevation = Elevation(header=header, data=data)
+    elevation = geo_data.Elevation(header=header, data=data)
     buffer = StringIO()
-    write_to_esri_ascii_raster_file(elevation, buffer)
+    elevation_writers.write_to_esri_ascii_raster_file(elevation, buffer)
     assert buffer.getvalue() == (
         "ncols 3\n"
         "nrows 2\n"
@@ -29,3 +33,27 @@ def test_write_to_esri_ascii_raster_file():
         "0.0 1.0 2.0\n"
         "3.0 4.0 5.0123456789\n"
     )
+
+
+def test_write_to_geotiff():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        elevation_file_path = pathlib.Path(temp_dir) / "elevation.tif"
+        header = geo_data.ElevationHeader(
+            col_count=3,
+            row_count=2,
+            x_ll_corner=0.0,
+            y_ll_corner=4.0,
+            cell_size=2.0,
+            nodata_value=0.0,
+        )
+        data = [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]
+        elevation_writers.write_to_geotiff(
+            geo_data.Elevation(header=header, data=numpy.asarray(data)),
+            elevation_file_path,
+        )
+
+        # Test what was written:
+        with open(elevation_file_path, "rb") as input_fd:
+            elevation2 = elevation_readers.read_from_geotiff(input_fd)
+        assert elevation2.header == header
+        testing.assert_array_equal(elevation2.data, data)
