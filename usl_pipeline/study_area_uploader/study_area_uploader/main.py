@@ -1,23 +1,23 @@
 import argparse
-import io
 import logging
 import pathlib
-import tarfile
 import tempfile
 import time
 
 from google.cloud import firestore
 from google.cloud import storage
 
+from study_area_uploader.chunkers import study_area_chunkers
 from study_area_uploader.transformers import study_area_transformers
 from usl_lib.storage import cloud_storage
-from usl_lib.storage import file_names
 from usl_lib.storage import metastore
 
 
 def main() -> None:
     """Breaks the input files into chunks and uploads them to GCS."""
     args = parse_args()
+    # Setting up logging:
+    logging.getLogger("rasterio").setLevel(logging.WARNING)
     if args.verbose:
         logging.basicConfig(level=logging.INFO)
     else:
@@ -25,11 +25,13 @@ def main() -> None:
 
     db = firestore.Client()
     storage_client = storage.Client()
-    study_area_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_BUCKET)
-    study_area_chunk_bucket = storage_client.bucket(
-        cloud_storage.STUDY_AREA_CHUNKS_BUCKET
+    logging.info(
+        "Storage bucket for study areas: %s",
+        cloud_storage.STUDY_AREA_BUCKET,
     )
+    study_area_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_BUCKET)
     with tempfile.TemporaryDirectory() as temp_dir:
+        work_dir = pathlib.Path(temp_dir)
         prepared_inputs = study_area_transformers.prepare_and_upload_study_area_files(
             args.name,
             args.elevation_file,
@@ -38,17 +40,22 @@ def main() -> None:
             args.green_areas_file,
             args.soil_type_file,
             args.soil_type_mask_feature_property,
-            pathlib.Path(temp_dir),
+            work_dir,
             study_area_bucket,
             input_non_green_area_soil_classes=set(args.non_green_area_soil_classes),
         )
 
         if args.export_to_citycat:
-            export_to_city_cat(
-                args,
+            logging.info(
+                "Storage bucket for flood simulation inputs: %s",
+                cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET,
+            )
+            study_area_transformers.prepare_and_upload_citycat_input_files(
+                args.name,
                 prepared_inputs,
+                work_dir,
                 storage_client.bucket(cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET),
-                pathlib.Path(temp_dir),
+                elevation_geotiff_band=args.elevation_geotiff_band,
             )
 
         # Wait till study area metadata is registered by cloud_function triggered by
@@ -69,40 +76,18 @@ def main() -> None:
             else:
                 break
 
-        for i, chunk in enumerate(build_chunks(prepared_inputs, temp_dir)):
-            study_area_chunk_bucket.blob(f"{args.name}/chunk_{i}.tar").upload_from_file(
-                chunk
-            )
-
-
-def export_to_city_cat(
-    args: argparse.Namespace,
-    prepared_inputs: study_area_transformers.PreparedInputData,
-    flood_simulation_input_bucket: storage.Bucket,
-    work_dir: pathlib.Path,
-):
-    study_area_transformers.prepare_and_upload_citycat_input_files(
-        args.name,
-        prepared_inputs,
-        work_dir,
-        flood_simulation_input_bucket,
-        elevation_geotiff_band=args.elevation_geotiff_band,
-    )
-
-
-def build_chunks(
-    prepared_inputs: study_area_transformers.PreparedInputData,
-    work_dir: str,
-):
-    # Place-holder for the real chunking function.
-    tar_fd = io.BytesIO()
-    with tarfile.open(mode="w", fileobj=tar_fd) as tar:
-        tar.add(
-            str(prepared_inputs.elevation_file_path), arcname=file_names.ELEVATION_TIF
+        logging.info(
+            "Storage bucket for study area chunks: %s",
+            cloud_storage.STUDY_AREA_CHUNKS_BUCKET,
         )
-    tar_fd.flush()
-    tar_fd.seek(0)
-    yield tar_fd
+        study_area_chunkers.build_and_upload_chunks(
+            args.name,
+            prepared_inputs,
+            work_dir,
+            storage_client.bucket(cloud_storage.STUDY_AREA_CHUNKS_BUCKET),
+            args.chunk_length,
+            input_elevation_band=args.elevation_geotiff_band,
+        )
 
 
 def parse_args() -> argparse.Namespace:

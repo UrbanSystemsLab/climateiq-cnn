@@ -14,7 +14,7 @@ def assert_chunk_polygons(
     x_chunk_index,
     expected_polygon_masks,
 ):
-    chunk_file = pathlib.Path(dir_path) / f"chunk_{y_chunk_index}_{x_chunk_index}"
+    chunk_file = pathlib.Path(dir_path) / f"chunk_{x_chunk_index}_{y_chunk_index}"
     with chunk_file.open("rt") as file:
         stored_polygon_masks = list(polygon_readers.read_polygons_from_text_file(file))
     assert stored_polygon_masks == expected_polygon_masks
