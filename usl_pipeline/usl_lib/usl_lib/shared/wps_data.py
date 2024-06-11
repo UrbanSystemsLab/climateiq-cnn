@@ -38,8 +38,9 @@ ML_REQUIRED_VARS_REPO = dict(
         "GHT": {
             "unit": Unit.METERS,
             "scaling": {
-                # TODO: Apply global scaling
-                "type": ScalingType.NONE,
+                "type": ScalingType.GLOBAL,
+                "min": 0,
+                "max": 6000,
             },
         },
         # Relative humidity
