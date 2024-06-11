@@ -19,6 +19,8 @@ class Unit(Enum):
     METERS = 3
     PERCENTAGE = 4
     KELVIN = 5
+    # Represented in decimal, range:0->1
+    FRACTION = 6
 
 
 ML_REQUIRED_VARS_REPO = dict(
@@ -54,6 +56,27 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.GLOBAL,
                 "min": 263.15,
                 "max": 333.15,
+            },
+        },
+        # Fraction of land
+        "LANDUSEF": {
+            "unit": Unit.FRACTION,
+            "scaling": {
+                "type": ScalingType.NONE,
+            },
+        },
+        # Monthly MODIS surface albedo
+        "ALBEDO12M": {
+            "unit": Unit.PERCENTAGE,
+            "scaling": {
+                "type": ScalingType.NONE,
+            },
+        },
+        # Monthly MODIS green fraction (MODIS FPAR)
+        "GREENFRAC": {
+            "unit": Unit.FRACTION,
+            "scaling": {
+                "type": ScalingType.NONE,
             },
         },
     }
