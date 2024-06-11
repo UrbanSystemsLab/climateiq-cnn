@@ -10,7 +10,7 @@ def split_geotiff_into_chunks(
     elevation_file_path: str | pathlib.Path,
     chunk_size: int,
     output_dir_path: str | pathlib.Path,
-    chunk_file_name_pattern: str = "chunk_{y}_{x}",
+    chunk_file_name_pattern: str = "chunk_{x}_{y}",
 ) -> list[chunkers_data.ChunkDescriptor]:
     """Produces a grid of chunk GeoTIFF files based on input GeoTIFF file.
 

@@ -51,7 +51,7 @@ def split_polygons_into_chunks(
     chunk_size: int,
     polygon_masks: Iterable[Tuple[geometry.Polygon, int]],
     output_dir_path: str | pathlib.Path,
-    chunk_file_name_pattern: str = "chunk_{y}_{x}",
+    chunk_file_name_pattern: str = "chunk_{x}_{y}",
     support_mask_values: bool = False,
     chunk_additional_border_cells: int = 0,
 ) -> list[chunkers_data.ChunkDescriptor]:

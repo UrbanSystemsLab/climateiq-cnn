@@ -42,7 +42,7 @@ def assert_chunk_data_equal(
     expected_data: list,
 ) -> None:
     file_path = pathlib.Path(chunk_dir_path) / "chunk_{0}_{1}".format(
-        y_chunk_index, x_chunk_index
+        x_chunk_index, y_chunk_index
     )
     with file_path.open("rb") as input_file:
         elevation = elevation_readers.read_from_geotiff(input_file)
@@ -56,7 +56,7 @@ def assert_chunk_data_equal(
 def chunk_descriptor(
     dir_path: str, y_chunk_index: int, x_chunk_index: int
 ) -> chunkers_data.ChunkDescriptor:
-    file_name = "chunk_{0}_{1}".format(y_chunk_index, x_chunk_index)
+    file_name = "chunk_{0}_{1}".format(x_chunk_index, y_chunk_index)
     return chunkers_data.ChunkDescriptor(
         y_chunk_index=y_chunk_index,
         x_chunk_index=x_chunk_index,

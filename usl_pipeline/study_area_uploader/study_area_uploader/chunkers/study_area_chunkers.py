@@ -115,7 +115,7 @@ def build_and_upload_chunks(
     for elevation_chunk_descriptor in elevation_chunk_descriptors:
         y_chunk_index = elevation_chunk_descriptor.y_chunk_index
         x_chunk_index = elevation_chunk_descriptor.x_chunk_index
-        chunk_file_name = f"chunk_{y_chunk_index}_{x_chunk_index}"
+        chunk_file_name = f"chunk_{x_chunk_index}_{y_chunk_index}"
         logging.info("Exporting %s...", chunk_file_name)
         elevation_chunk_file_path = elevation_chunk_descriptor.path
         # Let's standardize the band number (to 1) and the NODATA_value (to default one)
@@ -125,6 +125,8 @@ def build_and_upload_chunks(
                 band=input_elevation_band,
                 no_data_value=default_nodata_value,
             )
+        # Padding the chunk size to guarantee chunk_size defined by a caller for both
+        # X and Y axis (padding is done by filling in NODATA values).
         if (
             chunk_elevation.header.row_count < chunk_size
             or chunk_elevation.header.col_count < chunk_size
