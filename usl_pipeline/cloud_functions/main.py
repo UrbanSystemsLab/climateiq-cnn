@@ -400,7 +400,7 @@ def _read_elevation_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
         elevation_max=float(present_data.max()),
     )
 
-    return elevation, metadata
+    return elevation.data, metadata
 
 
 def _write_metastore_entry(
