@@ -414,6 +414,7 @@ def _collapse_city_cat_output_chunks(
     # Chunks are of the form
     # timestep_parts/<study_area_name>/<config/path>/<x_index>_<y_index>/<timestep>.npy
     study_area_name = blob_path.parts[1]
+    # Note that the config name be multiple 'folders' e.g. config_name/rainfall_4.txt
     config_path = str(pathlib.PurePosixPath(*blob_path.parts[2:-2]))
     x_index, y_index = blob_path.parts[-2].split("_")
     logging.info("Processing chunk %s for config %s", blob, config_path)
