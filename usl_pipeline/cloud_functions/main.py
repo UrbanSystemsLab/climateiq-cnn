@@ -367,7 +367,7 @@ def _write_city_cat_output_chunks(
     # Retrieve geography information for the study area to rasterize CityCAT results.
     header = metastore.StudyArea.get(db, study_area_name).as_header()
 
-    chunk_prefix = pathlib.PurePosixPath("chunks") / blob_path.parent
+    chunk_prefix = pathlib.PurePosixPath("timestep_parts") / blob_path.parent
     timestep = _timestep_number_from_rsl_path(blob_path.name)
     logging.info(
         "Writing chunks of %s for timestep %s to prefix %s",
@@ -412,7 +412,7 @@ def _collapse_city_cat_output_chunks(
       labels_bucket: The bucket in which to write the label tensor.
     """
     # Chunks are of the form
-    # chunks/<study_area_name>/<config/path>/<x_index>_<y_index>/<timestep>.npy
+    # timestep_parts/<study_area_name>/<config/path>/<x_index>_<y_index>/<timestep>.npy
     study_area_name = blob_path.parts[1]
     config_path = str(pathlib.PurePosixPath(*blob_path.parts[2:-2]))
     x_index, y_index = blob_path.parts[-2].split("_")
@@ -446,7 +446,7 @@ def _collapse_city_cat_output_chunks(
         except exceptions.NotFound:
             # Another invocation of this function has collapsed the chunks while this
             # invocation was running.
-            logging.info("Chunk deletion in process, halting.")
+            logging.info("Timestep chunk deletion in process, halting.")
             return
 
     # Stack the matrices at each timestep together and write them to the labels bucket.

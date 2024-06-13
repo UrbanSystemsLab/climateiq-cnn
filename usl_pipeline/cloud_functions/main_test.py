@@ -842,11 +842,11 @@ def test_write_city_cat_output_chunks(mock_firestore_client):
     mock_blob.assert_has_calls(
         [
             mock.call.bucket.blob(
-                "chunks/study_area_name/config_group/config_name.txt/0_0/2.npy"
+                "timestep_parts/study_area_name/config_group/config_name.txt/0_0/2.npy"
             ),
             mock.call.bucket.blob().open("wb"),
             mock.call.bucket.blob(
-                "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+                "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
             ),
             mock.call.bucket.blob().open("wb"),
         ]
@@ -886,7 +886,7 @@ def test_collapse_city_cat_output_chunks(mock_firestore_client):
 
     # Create a blob for the file triggering the cloud function run.
     blob_path = pathlib.PurePosixPath(
-        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
     )
     mock_blob = mock.MagicMock(spec=storage.Blob)
     mock_blob.name = str(blob_path)
@@ -904,7 +904,7 @@ def test_collapse_city_cat_output_chunks(mock_firestore_client):
     numpy.save(buf_t1, numpy.array([[1, 1], [1, 1]]))
     buf_t1.seek(0)
     mock_blob.bucket.list_blobs.return_value[0].name = (
-        "chunks/study_area_name/config_group/config_name.txt/0_1/1.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/1.npy"
     )
     mock_blob.bucket.list_blobs.return_value[0].open.return_value = buf_t1
 
@@ -912,7 +912,7 @@ def test_collapse_city_cat_output_chunks(mock_firestore_client):
     numpy.save(buf_t0, numpy.array([[0, 0], [0, 0]]))
     buf_t0.seek(0)
     mock_blob.bucket.list_blobs.return_value[1].name = (
-        "chunks/study_area_name/config_group/config_name.txt/0_1/0.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/0.npy"
     )
     mock_blob.bucket.list_blobs.return_value[1].open.return_value = buf_t0
 
@@ -920,7 +920,7 @@ def test_collapse_city_cat_output_chunks(mock_firestore_client):
     numpy.save(buf_t2, numpy.array([[2, 2], [2, 2]]))
     buf_t2.seek(0)
     mock_blob.bucket.list_blobs.return_value[2].name = (
-        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
     )
     mock_blob.bucket.list_blobs.return_value[2].open.return_value = buf_t2
 
@@ -939,7 +939,7 @@ def test_collapse_city_cat_output_chunks(mock_firestore_client):
 
     # Ensure we checked the right prefix.
     mock_blob.bucket.list_blobs.assert_called_once_with(
-        prefix="chunks/study_area_name/config_group/config_name.txt/0_1/"
+        prefix="timestep_parts/study_area_name/config_group/config_name.txt/0_1/"
     )
     # Ensure we wrote to the correct labels path.
     mock_labels_bucket.blob.assert_called_once_with(
@@ -995,7 +995,7 @@ def test_collapse_city_cat_output_chunks_missing_timesteps(mock_firestore_client
 
     # Create a blob for the file triggering the cloud function run.
     blob_path = pathlib.PurePosixPath(
-        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
     )
     mock_blob = mock.MagicMock(spec=storage.Blob)
     mock_blob.name = str(blob_path)
@@ -1007,10 +1007,10 @@ def test_collapse_city_cat_output_chunks_missing_timesteps(mock_firestore_client
         mock.MagicMock(spec=storage.Blob),
     ]
     mock_blob.bucket.list_blobs.return_value[0].name = (
-        "chunks/study_area_name/config_group/config_name.txt/0_1/1.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/1.npy"
     )
     mock_blob.bucket.list_blobs.return_value[1].name = (
-        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
     )
 
     # Create a mock labels bucket.
@@ -1052,7 +1052,7 @@ def test_collapse_city_cat_output_chunks_deleted_chunks(mock_firestore_client):
 
     # Create a blob for the file triggering the cloud function run.
     blob_path = pathlib.PurePosixPath(
-        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
     )
     mock_blob = mock.MagicMock(spec=storage.Blob)
     mock_blob.name = str(blob_path)
@@ -1066,16 +1066,16 @@ def test_collapse_city_cat_output_chunks_deleted_chunks(mock_firestore_client):
         mock.MagicMock(spec=storage.Blob),
     ]
     mock_blob.bucket.list_blobs.return_value[0].name = (
-        "chunks/study_area_name/config_group/config_name.txt/0_1/0.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/0.npy"
     )
     mock_blob.bucket.list_blobs.return_value[0].open.side_effect = exceptions.NotFound(
         "oh no!"
     )
     mock_blob.bucket.list_blobs.return_value[1].name = (
-        "chunks/study_area_name/config_group/config_name.txt/0_1/1.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/1.npy"
     )
     mock_blob.bucket.list_blobs.return_value[2].name = (
-        "chunks/study_area_name/config_group/config_name.txt/0_1/2.npy"
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
     )
 
     # Create a mock labels bucket.
