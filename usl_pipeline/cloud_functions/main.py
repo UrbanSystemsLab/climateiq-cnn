@@ -13,10 +13,12 @@ from google.cloud import storage
 import functions_framework
 import numpy
 from numpy.typing import NDArray
+import xarray
 import rasterio
 
 from usl_lib.readers import config_readers
 from usl_lib.readers import elevation_readers
+import usl_lib.shared.wps_data as wps_data
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
@@ -182,9 +184,10 @@ def write_flood_scenario_metadata_and_features(
         _write_as_npy(vector_blob, as_vector)
 
         metastore.FloodScenarioConfig(
-            gcs_path=f"gs://{config_blob.bucket.name}/{config_blob.name}",
-            as_vector_gcs_path=f"gs://{vector_blob.bucket.name}/{vector_blob.name}",
-            num_rainfall_entries=length,
+            name=config_blob.name,
+            gcs_uri=f"gs://{config_blob.bucket.name}/{config_blob.name}",
+            as_vector_gcs_uri=f"gs://{vector_blob.bucket.name}/{vector_blob.name}",
+            rainfall_duration=length,
             # File names should be in the form <parent_config_name>/<file_name>
             parent_config_name=file_name.parent.name,
         ).set(db)
@@ -233,9 +236,7 @@ def delete_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) 
     if file_name.name.startswith("Rainfall_Data_"):
         db = firestore.Client()
 
-        metastore.FloodScenarioConfig.delete(
-            db, f"gs://{cloud_event.data['bucket']}/{cloud_event.data['name']}"
-        )
+        metastore.FloodScenarioConfig.delete(db, cloud_event.data["name"])
 
 
 @functions_framework.cloud_event
@@ -289,13 +290,91 @@ def _build_feature_matrix_from_archive(
                 continue
 
             name = pathlib.PurePosixPath(member.name).name
+            # TODO: Group logic branch by path (per hazard model)
             if name == file_names.ELEVATION_TIF:
                 return _read_elevation_features(fd)
+            # Handle heat model input files (WPS)
+            elif name.startswith("met_em") and name.endswith(".nc"):
+                return _build_wps_feature_matrix(fd)
             # TODO: handle additional archive members.
             else:
                 logging.warning(f"Unexpected member name: {name}")
 
     return None, FeatureMetadata()
+
+
+def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+    # Ignore type checker error - BytesIO inherits from expected type BufferedIOBase
+    # https://shorturl.at/lk4om
+    with xarray.open_dataset(fd) as ds:  # type: ignore
+        features_components = []
+        for var_name in wps_data.ML_REQUIRED_VARS_REPO.keys():
+            var_config = wps_data.ML_REQUIRED_VARS_REPO[var_name]
+            feature = _process_wps_feature(
+                feature=ds.data_vars[var_name], var_config=var_config
+            )
+            features_components.append(feature)
+
+        features_matrix = numpy.dstack(features_components)
+
+    # TODO: Write to metastore
+    return features_matrix, FeatureMetadata()
+
+
+def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray:
+    """Performs a series of data transforms on a WPS variable.
+
+    Args:
+      feature: The xarray.DataArray containing the feature, its dimensions,
+      and metadata
+      var_config: The dict entry to ML_REQUIRED_VARS_REPO from wps_data.py containing
+      the metadata that will be used to determine what feature engineering processing
+      should be applied
+
+    Returns:
+      A new numpy array with transforms applied according to rules
+      for each variable defined in: https://shorturl.at/W6nzY
+    """
+    # Drop time axis
+    feature = feature.isel(Time=0)
+
+    # Ensure order of dimension axes are: (west_east, south_north, <other spatial dims>)
+    # to stay consistent with rest of data pipeline
+    feature = feature.transpose("west_east", "south_north", ...)
+
+    # FNL-derived var - extract to only first level
+    if "num_metgrid_levels" in feature.dims:
+        feature = feature.isel(num_metgrid_levels=0)
+
+    feature_values = feature.values
+
+    # Convert percentage-based units to decimal
+    if var_config.get("unit") == wps_data.Unit.PERCENTAGE:
+        feature_values = _convert_to_decimal(feature_values)
+
+    # If var config requires global scaling, normalize feature values
+    scaling_config = var_config.get("scaling")
+    if (
+        scaling_config is not None
+        and scaling_config.get("type") == wps_data.ScalingType.GLOBAL
+    ):
+        min = scaling_config.get("min")
+        max = scaling_config.get("max")
+        feature_values = _apply_minmax_scaler(feature_values, min, max)
+
+    return feature_values
+
+
+def _convert_to_decimal(x):
+    return x / 100
+
+
+def _apply_minmax_scaler(x, minx, maxx):
+    # Clip values if they go out of bounds of the specified min and max
+    x[x > maxx] = maxx
+    x[x < minx] = minx
+
+    return (x - minx) / (maxx - minx)
 
 
 def _read_elevation_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:

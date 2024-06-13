@@ -1,53 +1,11 @@
-data "google_project" "project" {
-}
-
-# Place the source code for the cloud function into a GCS bucket.
-data "archive_file" "source" {
-  type        = "zip"
-  source_dir  = "${path.module}/files/cloud_function_source"
-  output_path = "${path.module}/files/cloud_function_source.zip"
-}
-
-resource "google_storage_bucket" "source" {
-  name     = "climateiq-cloud-functions"
-  location = "us-west1"
-}
-
-resource "google_storage_bucket_object" "source" {
-  name   = basename(data.archive_file.source.output_path)
-  bucket = google_storage_bucket.source.name
-  source = data.archive_file.source.output_path
-}
-
 resource "google_storage_bucket" "chunks" {
-  name     = "climateiq-study-area-chunks"
-  location = "us-west1"
+  name     = "${var.bucket_prefix}climateiq-study-area-chunks"
+  location = var.bucket_region
 }
 
 resource "google_storage_bucket" "features" {
-  name     = "climateiq-study-area-feature-chunks"
-  location = "us-west1"
-}
-
-# Create a firestore database to use as our metastore.
-# We only need one database, so we name it (default) as recommended:
-# https://firebase.google.com/docs/firestore/manage-databases#the_default_database
-resource "google_firestore_database" "database" {
-  name        = "(default)"
-  location_id = "us-west1"
-  type        = "FIRESTORE_NATIVE"
-}
-
-# To use GCS CloudEvent triggers, the GCS service account requires the Pub/Sub
-# Publisher(roles/pubsub.publisher) IAM role in the specified project.
-# (See https://cloud.google.com/eventarc/docs/run/quickstart-storage#before-you-begin)
-data "google_storage_project_service_account" "gcs" {
-}
-
-resource "google_project_iam_member" "gcs_pubsub_publishing" {
-  project = data.google_project.project.project_id
-  role    = "roles/pubsub.publisher"
-  member  = "serviceAccount:${data.google_storage_project_service_account.gcs.email_address}"
+  name     = "${var.bucket_prefix}climateiq-study-area-feature-chunks"
+  location = var.bucket_region
 }
 
 # Create a service account used by the function and Eventarc trigger
@@ -130,6 +88,9 @@ resource "google_cloudfunctions2_function" "chunk_writes" {
     available_memory      = "256M"
     timeout_seconds       = 60
     service_account_email = google_service_account.generate_feature_matrix.email
+    environment_variables = {
+      BUCKET_PREFIX = var.bucket_prefix
+    }
   }
 
   event_trigger {

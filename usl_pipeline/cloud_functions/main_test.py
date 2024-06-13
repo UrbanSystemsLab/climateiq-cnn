@@ -7,15 +7,18 @@ from unittest import mock
 from google.cloud import firestore
 from google.cloud import storage
 import functions_framework
+import netCDF4
 import numpy
 import rasterio
+import xarray
 
 import main
+import usl_lib.shared.wps_data as wps_data
 
 
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
+def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client):
     # Get some random data to place in a tiff file.
     height = 2
     width = 3
@@ -120,6 +123,233 @@ def test_build_feature_matrix(mock_storage_client, mock_firestore_client):
     mock_firestore_client().transaction().update.assert_called_once_with(
         mock_firestore_client().collection().document(),
         {"elevation_min": 1, "elevation_max": 6},
+    )
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.dict(
+    main.wps_data.ML_REQUIRED_VARS_REPO,
+    {
+        "GHT": {
+            "scaling": {
+                "type": wps_data.ScalingType.LOCAL,
+            }
+        },
+        "RH": {
+            "scaling": {
+                "type": wps_data.ScalingType.NONE,
+            }
+        },
+    },
+    clear=True,
+)
+def test_build_feature_matrix_wrf(
+    mock_storage_client,
+    mock_firestore_client,
+    mock_error_reporting_client,
+):
+    # Get some random data to place in a netcdf file
+    netcdf_array1 = numpy.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=numpy.float32)
+    netcdf_array2 = numpy.array(
+        [[10, 20, 30], [40, 50, 60], [70, 80, 90]], dtype=numpy.float32
+    )
+
+    # Create an in-memory netcdf file and grab its bytes
+    ncfile = netCDF4.Dataset("met_em_test.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile.createDimension("Time", 1)
+    ncfile.createDimension("west_east", 3)
+    ncfile.createDimension("south_north", 3)
+
+    time = ncfile.createVariable("time", "f8", ("Time",))
+    lat = ncfile.createVariable("lat", "float32", ("west_east",))
+    lon = ncfile.createVariable("lon", "float32", ("south_north",))
+    # Create dataset entries for all variables in mock
+    for var in wps_data.ML_REQUIRED_VARS_REPO.keys():
+        ncfile.createVariable(var, "float32", ("Time", "south_north", "west_east"))
+    # Represents var in DS that we don't want to process
+    not_required_var = ncfile.createVariable(
+        "NOT_REQUIRED_VAR", "float32", ("Time", "south_north", "west_east")
+    )
+
+    time[:] = 100
+    lat[:] = [200, 200, 200]
+    lon[:] = [300, 300, 300]
+    ncfile.variables["GHT"][:] = netcdf_array1
+    ncfile.variables["RH"][:] = netcdf_array2
+    not_required_var[:] = [[11, 22, 33], [44, 55, 66], [77, 88, 99]]
+
+    memfile = ncfile.close()
+    ncfile_bytes = memfile.tobytes()
+
+    # Place the ncfile bytes into an archive.
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as tar:
+        nc = tarfile.TarInfo("met_em_test.nc")
+        nc.size = len(ncfile_bytes)
+        tar.addfile(nc, io.BytesIO(ncfile_bytes))
+    # Seek to the beginning so the file can be read.
+    archive.seek(0)
+
+    # Create a mock blob for the archive which will return the above netcdf when opened.
+    mock_archive_blob = mock.MagicMock()
+    mock_archive_blob.name = "study_area/name.tar"
+    mock_archive_blob.bucket.name = "bucket"
+    mock_archive_blob.open.return_value = archive
+
+    # Create a mock blob for feature matrix we will upload.
+    mock_feature_blob = mock.MagicMock()
+    mock_feature_blob.name = "study_area/name.npy"
+    mock_feature_blob.bucket.name = "climateiq-study-area-feature-chunks"
+
+    # Return the mock blobs.
+    mock_storage_client().bucket("").blob.side_effect = [
+        mock_archive_blob,
+        mock_feature_blob,
+    ]
+    mock_storage_client.reset_mock()
+
+    main.build_feature_matrix(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "study_area/name.tar",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we worked with the right GCP paths.
+    mock_storage_client.assert_has_calls(
+        [
+            mock.call().bucket("bucket"),
+            mock.call().bucket().blob("study_area/name.tar"),
+            mock.call().bucket("climateiq-study-area-feature-chunks"),
+            mock.call().bucket().blob("study_area/name.npy"),
+        ]
+    )
+
+    mock_archive_blob.open.assert_called_once_with("rb")
+
+    # Ensure we attempted to upload a serialized matrix of the netcdf
+    mock_feature_blob.upload_from_file.assert_called_once_with(mock.ANY)
+    uploaded_array = numpy.load(mock_feature_blob.upload_from_file.call_args[0][0])
+    # Expected array should be all required vars extracted, lon/lat axis reordered, and
+    # stacked
+    expected_array = numpy.dstack(
+        (numpy.swapaxes(netcdf_array1, 0, 1), numpy.swapaxes(netcdf_array2, 0, 1))
+    )
+    numpy.testing.assert_array_equal(uploaded_array, expected_array)
+
+    # TODO: Ensure we wrote firestore entries for the chunk.
+
+
+@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
+def test_process_wps_feature_drop_time_axis():
+    arr = numpy.array([[[1, 2], [3, 4]]], dtype=numpy.float32)  # shape=(1,2,2)
+    xrdarr = xarray.DataArray(arr, name="RH", dims=("Time", "south_north", "west_east"))
+
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+    )
+
+    numpy.testing.assert_equal((2, 2), processed.shape)
+
+
+@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
+def test_process_wps_feature_reorder_spatial_dims():
+    # Dims ordered here are representative of how they will be ordered in actual netcdf
+    # file
+    arr = numpy.array([[[[10, 20], [30, 40]], [[1, 2], [3, 4]]]], dtype=numpy.float32)
+    xrdarr = xarray.DataArray(
+        arr, name="RH", dims=("Time", "num_metgrid_levels", "south_north", "west_east")
+    )
+
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+    )
+
+    expected = [[10, 30], [20, 40]]
+    numpy.testing.assert_array_equal(expected, processed)
+
+
+@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
+def test_process_wps_feature_extract_fnl_spatial_dim():
+    arr = numpy.array([[[[10, 1], [20, 2]], [[30, 3], [40, 4]]]], dtype=numpy.float32)
+    xrdarr = xarray.DataArray(
+        arr, name="RH", dims=("Time", "south_north", "west_east", "num_metgrid_levels")
+    )
+
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+    )
+
+    expected = [[10, 20], [30, 40]]
+    # Expected arr will also have lat/lon axis swapped
+    numpy.testing.assert_array_equal(numpy.swapaxes(expected, 0, 1), processed)
+
+
+@mock.patch.dict(
+    main.wps_data.ML_REQUIRED_VARS_REPO,
+    {
+        "RH": {
+            "unit": wps_data.Unit.PERCENTAGE,
+        },
+    },
+    clear=True,
+)
+def test_process_wps_feature_convert_percent_to_decimal():
+    arr = numpy.array([[[32.45, 15.11], [73.74, 33.21]]], dtype=numpy.float32)
+    xrdarr = xarray.DataArray(
+        arr,
+        name="RH",
+        dims=("Time", "south_north", "west_east"),
+        attrs=dict(
+            description="Test data array",
+            units="%",
+        ),
+    )
+
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+    )
+
+    expected = [[0.3245, 0.1511], [0.7374, 0.3321]]
+    # Expected arr will also have lat/lon axis swapped
+    numpy.testing.assert_array_almost_equal(numpy.swapaxes(expected, 0, 1), processed)
+
+
+@mock.patch.dict(
+    main.wps_data.ML_REQUIRED_VARS_REPO,
+    {
+        "PRES": {
+            "scaling": {
+                "type": wps_data.ScalingType.GLOBAL,
+                "min": 98000,
+                "max": 121590,
+            }
+        },
+    },
+    clear=True,
+)
+def test_process_wps_feature_apply_minmax_scaler():
+    arr = numpy.array([[[111222, 555555], [121590, 12]]], dtype=numpy.float32)
+    xrdarr = xarray.DataArray(
+        arr,
+        name="PRES",
+        dims=("Time", "south_north", "west_east"),
+    )
+
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("PRES")
+    )
+
+    expected = [[0.56, 1], [1, 0]]
+    # Expected arr will also have lat/lon axis swapped
+    numpy.testing.assert_array_almost_equal(
+        numpy.swapaxes(expected, 0, 1), processed, decimal=3
     )
 
 
@@ -354,18 +584,16 @@ def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_clien
         [
             mock.call(),
             mock.call().collection("city_cat_rainfall_configs"),
-            mock.call()
-            .collection()
-            .document("gs%3A%2F%2Fbucket%2Fconfig_name%2FRainfall_Data_1.txt"),
+            mock.call().collection().document("config_name%2FRainfall_Data_1.txt"),
             mock.call()
             .collection()
             .document()
             .set(
                 {
-                    "parent_config_name:": "config_name",
-                    "gcs_path": "gs://bucket/config_name/Rainfall_Data_1.txt",
-                    "num_rainfall_entries": 5,
-                    "as_vector_gcs_path": (
+                    "parent_config_name": "config_name",
+                    "gcs_uri": "gs://bucket/config_name/Rainfall_Data_1.txt",
+                    "rainfall_duration": 5,
+                    "as_vector_gcs_uri": (
                         "gs://climateiq-study-area-feature-chunks/"
                         "rainfall/config_name/Rainfall_Data_1.npy"
                     ),
@@ -451,9 +679,7 @@ def test_delete_flood_scenario_metadata(mock_firestore_client):
         [
             mock.call(),
             mock.call().collection("city_cat_rainfall_configs"),
-            mock.call()
-            .collection()
-            .document("gs%3A%2F%2Fbucket%2Fconfig_name%2FRainfall_Data_1.txt"),
+            mock.call().collection().document("config_name%2FRainfall_Data_1.txt"),
             mock.call().collection().document().delete(),
         ]
     )

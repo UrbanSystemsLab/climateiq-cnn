@@ -18,6 +18,10 @@ from usl_lib.transformers import polygon_transformers
 from usl_lib.writers import polygon_writers
 
 
+# Default soil class value that is recognized a non-green area.
+DEFAULT_NON_GREEN_AREA_SOIL_CLASS: int = -9999
+
+
 @dataclass
 class PreparedInputData:
     """Input data needed to run pipeline for flood scenarios."""
@@ -70,6 +74,18 @@ def transform_shape_file(
     )
 
 
+def _update_mask_if_needed(
+    polygon_mask: Tuple[geometry.Polygon, int],
+    soil_classes_to_update: set[int],
+    updated_soil_class: int,
+) -> Tuple[geometry.Polygon, int]:
+    """Updates a mask to an updated value in polygon-mask tuple for matched masks."""
+    mask = polygon_mask[1]
+    if mask in soil_classes_to_update:
+        mask = updated_soil_class
+    return polygon_mask[0], mask
+
+
 def prepare_and_upload_study_area_files(
     study_area_name: str,
     elevation_file_path: str | pathlib.Path,
@@ -80,6 +96,7 @@ def prepare_and_upload_study_area_files(
     soil_class_mask_feature_property: Optional[str],
     work_dir: pathlib.Path,
     study_area_bucket: storage.Bucket,
+    input_non_green_area_soil_classes: set[int] = set(),
 ) -> PreparedInputData:
     """Prepares data needed to run pipeline for flood scenarios.
 
@@ -97,6 +114,9 @@ def prepare_and_upload_study_area_files(
             file that defines soil class values.
         work_dir: A folder that can be used for transforming files.
         study_area_bucket: Target cloud storage bucket to export study area files to.
+        input_non_green_area_soil_classes: Optional set of soil class values that will
+            be substituted by default non-green-area soil class for the unification of
+            subsequent pipeline processing.
 
     Returns:
         Prepared input data that can be exported to CityCat or be passed to chunker.
@@ -126,6 +146,11 @@ def prepare_and_upload_study_area_files(
             polygon_writers.write_polygons_to_text_file(
                 boundaries_polygons, output_file
             )
+        logging.info(
+            "File [%s/%s] was written to study area bucket",
+            study_area_name,
+            file_names.BOUNDARIES_TXT,
+        )
         # Calculate bounding box rectangle for cropping sub-area
         sub_area_bounding_box = polygon_transformers.get_bounding_box_for_boundaries(
             p[0] for p in boundaries_polygons
@@ -141,6 +166,11 @@ def prepare_and_upload_study_area_files(
     study_area_bucket.blob(
         f"{study_area_name}/{file_names.ELEVATION_TIF}"
     ).upload_from_filename(str(output_elevation_file_path))
+    logging.info(
+        "File [%s/%s] was written to study area bucket",
+        study_area_name,
+        file_names.ELEVATION_TIF,
+    )
 
     # Read polygon files
     logging.info("Preparing study area buildings data...")
@@ -153,6 +183,11 @@ def prepare_and_upload_study_area_files(
             f"{study_area_name}/{file_names.BUILDINGS_TXT}"
         ).open("w") as output_file:
             polygon_writers.write_polygons_to_text_file(buildings_polygons, output_file)
+        logging.info(
+            "File [%s/%s] was written to study area bucket",
+            study_area_name,
+            file_names.BUILDINGS_TXT,
+        )
     logging.info("Preparing study area green areas data...")
     if green_areas_shape_file_path is not None:
         green_areas_polygons = list(
@@ -167,6 +202,11 @@ def prepare_and_upload_study_area_files(
             polygon_writers.write_polygons_to_text_file(
                 green_areas_polygons, output_file
             )
+        logging.info(
+            "File [%s/%s] was written to study area bucket",
+            study_area_name,
+            file_names.GREEN_AREAS_TXT,
+        )
         # Soil information is only used when green area data is defined.
         if soil_classes_shape_file_path is not None:
             logging.info("Preparing study area soil classes data...")
@@ -178,6 +218,15 @@ def prepare_and_upload_study_area_files(
                     mask_value_feature_property=soil_class_mask_feature_property,
                 )
             )
+            if len(input_non_green_area_soil_classes) > 0:
+                soil_classes_polygons = [
+                    _update_mask_if_needed(
+                        polygon_mask,
+                        input_non_green_area_soil_classes,
+                        DEFAULT_NON_GREEN_AREA_SOIL_CLASS,
+                    )
+                    for polygon_mask in soil_classes_polygons
+                ]
             # Write soil classes to study area bucket
             with study_area_bucket.blob(
                 f"{study_area_name}/{file_names.SOIL_CLASSES_TXT}"
@@ -185,6 +234,11 @@ def prepare_and_upload_study_area_files(
                 polygon_writers.write_polygons_to_text_file(
                     soil_classes_polygons, output_file, support_mask_values=True
                 )
+            logging.info(
+                "File [%s/%s] was written to study area bucket",
+                study_area_name,
+                file_names.SOIL_CLASSES_TXT,
+            )
 
     return PreparedInputData(
         output_elevation_file_path,
@@ -275,6 +329,7 @@ def prepare_and_upload_citycat_input_files(
                     elevation_header,
                     green_areas_polygons,
                     input_data.soil_classes_polygons,
+                    non_green_area_soil_classes={DEFAULT_NON_GREEN_AREA_SOIL_CLASS},
                 )
             )
             export_mask_values = True
