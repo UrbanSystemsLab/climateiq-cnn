@@ -111,7 +111,7 @@ def _retry_and_report_errors(
             ).total_seconds()
             if event_age > _MAX_RETRY_SECONDS:
                 logging.error(
-                    "Dropped event id: %s source: %s name: %s after %s seconds",
+                    "Dropped event id: %s, source: %s, name: %s after %s seconds",
                     cloud_event["id"],
                     cloud_event["source"],
                     cloud_event.data.get("name"),
