@@ -138,6 +138,37 @@ def _retry_and_report_errors(
 
 @functions_framework.cloud_event
 @_retry_and_report_errors()
+def build_and_upload_study_area_chunk(
+    cloud_event: functions_framework.CloudEvent,
+) -> None:
+    """Creates a study area chunk and uploads it to GCS.
+
+    This function is triggered when files containing raw geo data for a study area
+    are uploaded to GCS. It will group the files into TAR-files and upload it to a
+    bucket.
+    """
+    file_name = cloud_event.data["name"]
+    bucket_name = cloud_event.data["bucket"]
+
+    if re.search(file_names.WPS_DOMAIN3_NC_REGEX, file_name):
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(bucket_name)
+        file_blob = bucket.blob(file_name)
+
+        # For WRF, we can treat each snapshot output file as its own chunk. If
+        # multiple snapshots must be processed together, we can choose to group
+        # the files together in a TAR before uploading.
+        with file_blob.open("rb") as f:
+            study_area_chunk_bucket = storage_client.bucket(
+                cloud_storage.STUDY_AREA_CHUNKS_BUCKET
+            )
+            study_area_chunk_bucket.blob(file_name).upload_from_file(f)
+
+        # TODO: Write to metastore - create new chunk entry
+
+
+@functions_framework.cloud_event
+@_retry_and_report_errors()
 def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> None:
     """Writes metadata for a study area on upload.
 
@@ -511,7 +542,8 @@ def _build_feature_matrix_from_archive(
             if name == file_names.ELEVATION_TIF:
                 return _read_elevation_features(fd)
             # Handle heat model input files (WPS)
-            elif name.startswith("met_em") and name.endswith(".nc"):
+            # TODO: Refactor to also handle un-tarred files
+            elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, name):
                 return _build_wps_feature_matrix(fd)
             # TODO: handle additional archive members.
             else:
