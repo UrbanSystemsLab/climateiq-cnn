@@ -333,6 +333,10 @@ class IncrementalTrainDataGenerator:
         flood_model_data_list = []
 
         for sim_name in sim_names:
+            print("\n")
+            print("------ Starting training data generation ------------")
+            print("Generating training data for sim_names: ", sim_names)
+            # Get the rainfall duration for the current simulation
             rainfall_duration = self._get_rainfall_duration(sim_name)
             if rainfall_duration:
                 self.rainfall_duration = rainfall_duration
@@ -343,13 +347,12 @@ class IncrementalTrainDataGenerator:
             label_dataset = self._create_label_tensors(batch, sim_name, )
             temporal_dataset = self._create_temporal_tensors(sim_name)
            
-        
             # print type of these datasets
             print(f"feature_dataset type: {type(feature_dataset)}")
             print(f"label_dataset type: {type(label_dataset)}")
             print(f"temporal_dataset type: {type(temporal_dataset)}")
 
-            if label_dataset is None: #or label_dataset is None or temporal_dataset is None# 
+            if label_dataset is None or feature_dataset is None or temporal_dataset is None:
                 print(f"Error: Missing data for simulation {sim_name}")
                 continue  # Skip to the next simulation if any data is missing
             else:
@@ -361,6 +364,8 @@ class IncrementalTrainDataGenerator:
                     storm_duration=rainfall_duration,
                 )
                 flood_model_data_list.append(flood_model_data)
+
+            print("------ Finished training data generation for this simulation ------------")
 
         # Return the FloodModelData object
         return flood_model_data_list

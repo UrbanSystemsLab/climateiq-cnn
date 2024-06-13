@@ -65,6 +65,72 @@ class GenerateFeatureLabelChunks:
             city_cat_names.append(_document.get("document_id"))
         return city_cat_names
 
+    def compare_study_area_sim_chunks(self, sim_name):
+        """
+        This method compares the study area and simulation chunks.
+        """
+        # Get the study area and simulation chunks for the given simulation name
+        simulation_document, configuration_ref, study_area_ref = (
+            self._get_study_area_config_from_sim_name(sim_name)
+        )
+        label_chunks = self._get_label_chunks_for_sim(sim_name)
+        label_chunks_num = len(label_chunks)
+
+        if study_area_ref:
+            study_area_chunks = self._get_feature_chunks_for_study_area(study_area_ref)
+            study_area_chunks_num = len(study_area_chunks)
+            print(
+                f"**** Study area chunks: {study_area_chunks}, Label chunks: {label_chunks}"
+            )
+            try:
+                if study_area_chunks_num == label_chunks_num:
+                    print(
+                        f"Study area and label chunks match for simulation name: {sim_name}"
+                    )
+                    return True
+
+            except ValueError as e:
+                print(
+                    f"Study area and label chunks do not match for simulation name: {sim_name}"
+                )
+                print(f"Study area chunks: {study_area_chunks}")
+                print(f"Label chunks: {label_chunks}")
+                print(f"Error message: {e}")
+                return False
+        else:
+            print(f"Study area for simulation name: {sim_name} not found.")
+            return False
+
+    def _get_feature_chunks_for_study_area(self, study_area_ref):
+        """
+        This method fetches the feature chunks for the given study area.
+        """
+        print(type(study_area_ref))
+
+        # Fetch the document
+        study_area_doc = study_area_ref.get()
+
+        # Access the chunks subcollection
+        try:
+            if study_area_doc:
+                chunks_collection_ref = study_area_ref.collection("chunks")
+                chunks = [doc.to_dict() for doc in chunks_collection_ref.stream()]
+
+                # Extract feature_matrix_path from each chunk and store in a list
+                feature_matrix_paths = [chunk["feature_matrix_path"] for chunk in chunks]
+
+                # Sort the list based on the numbers in the paths
+                feature_matrix_paths.sort(
+                    key=lambda path: [int(num) for num in re.findall(r"\d+", path)]
+                )
+
+                # print(f"Feature Matrix Paths: {feature_matrix_paths}")
+                return feature_matrix_paths
+            else:
+                print("Unable to create feature matrix, check the doc!")
+        except ValueError as e:
+            print(f"An error occurred in creating feature matrix: {e}")
+
     def _get_study_area_config_from_sim_name(self, sim_name):
         """
         This method fetches the study area for a given simulation name.
@@ -80,14 +146,14 @@ class GenerateFeatureLabelChunks:
             # print("Label chunks: ", label_chunks)
             if label_chunks:
                 # Get configuration and study_area from the sim document
-                configuration = simulation_document.get("configuration")
+                configuration_ref = simulation_document.get("configuration")
                 study_area_ref = simulation_document.get("study_area")
                 # verify if study_area_ref actually exist in the "study_areas" collection
                 study_area_document = self.data_handler._find_document_by_id(
                     "study_areas", study_area_ref.id
                 )
                 if study_area_document is not None:
-                    return simulation_document, configuration, study_area_ref
+                    return simulation_document, configuration_ref, study_area_ref
                 else:
                     print(f"Study area not found for simulation name: {sim_name}")
                     return None, None, None
@@ -151,7 +217,7 @@ class GenerateFeatureLabelChunks:
         try:
             if configuration:
                 print("Configuration: ", configuration.id)
-                
+
                 city_cat_rainfall_configs = configuration.get()
 
                 if city_cat_rainfall_configs is not None:
