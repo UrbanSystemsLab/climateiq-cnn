@@ -81,7 +81,7 @@ resource "google_cloudfunctions2_function" "write_citycat_config" {
   }
 
   service_config {
-    available_memory      = "256Mi"
+    available_memory      = "512Mi"
     timeout_seconds       = 60
     service_account_email = google_service_account.city_cat_config.email
     environment_variables = {
@@ -130,7 +130,7 @@ resource "google_cloudfunctions2_function" "delete_citycat_config" {
   }
 
   service_config {
-    available_memory      = "256Mi"
+    available_memory      = "512Mi"
     timeout_seconds       = 60
     service_account_email = google_service_account.city_cat_config.email
     environment_variables = {

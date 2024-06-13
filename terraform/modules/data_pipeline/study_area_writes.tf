@@ -76,7 +76,7 @@ resource "google_cloudfunctions2_function" "study_area_write" {
   }
 
   service_config {
-    available_memory      = "256M"
+    available_memory      = "512Mi"
     timeout_seconds       = 60
     service_account_email = google_service_account.study_area_writer.email
     environment_variables = {
