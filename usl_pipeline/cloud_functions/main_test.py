@@ -9,6 +9,7 @@ from google.cloud import storage
 import functions_framework
 import netCDF4
 import numpy
+import pytest
 import rasterio
 import xarray
 
@@ -16,9 +17,10 @@ import main
 import usl_lib.shared.wps_data as wps_data
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client):
+def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, _):
     # Get some random data to place in a tiff file.
     height = 2
     width = 3
@@ -145,11 +147,7 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client):
     },
     clear=True,
 )
-def test_build_feature_matrix_wrf(
-    mock_storage_client,
-    mock_firestore_client,
-    mock_error_reporting_client,
-):
+def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _):
     # Get some random data to place in a netcdf file
     netcdf_array1 = numpy.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=numpy.float32)
     netcdf_array2 = numpy.array(
@@ -365,24 +363,16 @@ def test_build_feature_matrix_errors(
     # Cause the cloud function to fail.
     mock_storage_client.side_effect = RuntimeError("oh no!")
 
-    # Grab the original datetime module before we mock it so we can use it below.
-    orig_datetime = datetime.datetime
-    # We can't mock datetime.now directly, we can only mock datetime
-    # https://docs.python.org/3/library/unittest.mock-examples.html#partial-mocking
-    with mock.patch.object(main.datetime, "datetime") as mock_datetime:
-        # Use the same value for `now` as the cloud function states as its timeCreated.
-        mock_datetime.now.return_value = orig_datetime(2012, 12, 21)
-        # Use the original functions rather than mocks.
-        mock_datetime.fromisoformat.side_effect = orig_datetime.fromisoformat
-        mock_datetime.side_effect = orig_datetime
-
+    with pytest.raises(RuntimeError):
         main.build_feature_matrix(
             functions_framework.CloudEvent(
                 {"source": "test", "type": "event"},
                 data={
                     "bucket": "bucket",
                     "name": "study_area/name.tar",
-                    "timeCreated": "2012-12-21T01:02:00",
+                    "timeCreated": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).isoformat(),
                     "id": "function-id",
                 },
             )
@@ -415,42 +405,7 @@ def test_build_feature_matrix_errors(
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_build_feature_matrix_retries(
-    mock_storage_client,
-    mock_firestore_client,
-    mock_error_reporting_client,
-):
-    """Ensure we halt on old retries."""
-    # Grab the original datetime module before we mock it so we can use it below.
-    orig_datetime = datetime.datetime
-    # We can't mock datetime.now directly, we can only mock datetime
-    # https://docs.python.org/3/library/unittest.mock-examples.html#partial-mocking
-    with mock.patch.object(main.datetime, "datetime") as mock_datetime:
-        # Use a value for `now` long after the cloud function states as its timeCreated.
-        mock_datetime.now.return_value = orig_datetime(2030, 1, 1)
-        # Use the original functions rather than mocks.
-        mock_datetime.fromisoformat.side_effect = orig_datetime.fromisoformat
-        mock_datetime.side_effect = orig_datetime
-
-        main.build_feature_matrix(
-            functions_framework.CloudEvent(
-                {"source": "test", "type": "event"},
-                data={
-                    "bucket": "bucket",
-                    "name": "study_area/name.tar",
-                    "timeCreated": "2012-12-21T01:02:00",
-                    "id": "function-id",
-                },
-            )
-        )
-
-    # Ensure we didn't try to do actual cloud function work.
-    mock_storage_client.assert_not_called()
-
-
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
-def test_write_study_area_metadata(mock_storage_client, mock_firestore_client):
+def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _):
     # Get some random data to place in a tiff file.
     height = 2
     width = 3
@@ -515,9 +470,10 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client):
     )
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_client):
+def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_client, _):
     """Ensure we sync config uploads to the metastore."""
     config_blob = mock.Mock(spec=storage.Blob)
     config_blob.name = "config_name/Rainfall_Data_1.txt"
@@ -626,16 +582,19 @@ def test_write_flood_scenario_metadata_rejects_too_long_rainfall(
     vector_blob = mock.Mock(spec=storage.Blob)
     mock_storage_client().bucket("").blob.side_effect = [config_blob, vector_blob]
 
-    main.write_flood_scenario_metadata_and_features(
-        functions_framework.CloudEvent(
-            {"source": "test", "type": "event"},
-            data={
-                "bucket": "bucket",
-                "name": "config_name/Rainfall_Data_1.txt",
-                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            },
+    with pytest.raises(ValueError):
+        main.write_flood_scenario_metadata_and_features(
+            functions_framework.CloudEvent(
+                {"source": "test", "type": "event"},
+                data={
+                    "bucket": "bucket",
+                    "name": "config_name/Rainfall_Data_1.txt",
+                    "timeCreated": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).isoformat(),
+                },
+            )
         )
-    )
 
     # Ensure we didn't try to write anything.
     vector_blob.upload_from_file.assert_not_called()
@@ -643,8 +602,11 @@ def test_write_flood_scenario_metadata_rejects_too_long_rainfall(
     mock_error_reporting_client().report_exception.assert_called_once()
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
-def test_write_flood_scenario_metadata_ignore_non_rainfall_files(mock_firestore_client):
+def test_write_flood_scenario_metadata_ignore_non_rainfall_files(
+    mock_firestore_client, _
+):
     """Ensure we ignore non-rainfall config uploads."""
     main.write_flood_scenario_metadata_and_features(
         functions_framework.CloudEvent(
@@ -660,8 +622,9 @@ def test_write_flood_scenario_metadata_ignore_non_rainfall_files(mock_firestore_
     mock_firestore_client.assert_not_called()
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
-def test_delete_flood_scenario_metadata(mock_firestore_client):
+def test_delete_flood_scenario_metadata(mock_firestore_client, _):
     """Ensure we sync config uploads to the metastore."""
     main.delete_flood_scenario_metadata(
         functions_framework.CloudEvent(
@@ -685,9 +648,10 @@ def test_delete_flood_scenario_metadata(mock_firestore_client):
     )
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 def test_delete_flood_scenario_metadata_ignore_non_rainfall_files(
-    mock_firestore_client,
+    mock_firestore_client, _
 ):
     """Ensure we ignore non-rainfall config uploads."""
     main.delete_flood_scenario_metadata(
@@ -702,3 +666,112 @@ def test_delete_flood_scenario_metadata_ignore_non_rainfall_files(
     )
 
     mock_firestore_client.assert_not_called()
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+def test_retry_decorator_runs_decorated_func(mock_error_reporter):
+    """Ensures our retry decorator passes the event to the decorated function."""
+    mock_func = mock.MagicMock()
+    decorated_func = main._retry_and_report_errors()(mock_func)
+
+    event = functions_framework.CloudEvent(
+        {"source": "test", "type": "event"},
+        data={
+            "bucket": "bucket",
+            "name": "some_file",
+            "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        },
+    )
+
+    decorated_func(event)
+
+    mock_func.assert_called_with(event)
+    mock_error_reporter.assert_not_called()
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+def test_retry_decorator_skips_gcloud_tmp_files(_):
+    """Ensures our retry decorator skips GCS events for temp gcloud files."""
+    mock_func = mock.MagicMock()
+    decorated_func = main._retry_and_report_errors()(mock_func)
+
+    decorated_func(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "gcloud/tmp/parallel_composite_uploads/some_file",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+    mock_func.assert_not_called()
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+def test_retry_decorator_error_reporting(mock_error_reporter):
+    """Ensures our retry decorator logs and raises errors."""
+    mock_func = mock.MagicMock(side_effect=RuntimeError("oh no!"))
+    decorated_func = main._retry_and_report_errors()(mock_func)
+
+    with pytest.raises(RuntimeError):
+        decorated_func(
+            functions_framework.CloudEvent(
+                {"source": "test", "type": "event"},
+                data={
+                    "bucket": "bucket",
+                    "name": "some_file",
+                    "timeCreated": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).isoformat(),
+                },
+            )
+        )
+
+    mock_error_reporter.assert_called_with()
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+def test_retry_decorator_custom_error_reporting(mock_error_reporter):
+    """Ensures our retry decorator passes the event to custom error handlers."""
+    error = RuntimeError("oh no!")
+    mock_func = mock.MagicMock(side_effect=error)
+    error_handler = mock.MagicMock()
+    decorated_func = main._retry_and_report_errors(error_handler)(mock_func)
+
+    event = functions_framework.CloudEvent(
+        {"source": "test", "type": "event"},
+        data={
+            "bucket": "bucket",
+            "name": "some_file",
+            "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        },
+    )
+
+    with pytest.raises(RuntimeError):
+        decorated_func(event)
+
+    error_handler.assert_called_once_with(event, error)
+    mock_error_reporter.assert_called_once_with()
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+def test_retry_decorator_error_timeout(mock_error_reporter):
+    """Ensures our retry decorator halts on old invocations."""
+    mock_func = mock.MagicMock(side_effect=RuntimeError("oh no!"))
+    decorated_func = main._retry_and_report_errors()(mock_func)
+
+    decorated_func(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "some_file",
+                # Pick a time from long ago so the function will not be called.
+                "timeCreated": "2012-12-21T01:02:00+00:00",
+            },
+        )
+    )
+
+    mock_func.assert_not_called()
+    mock_error_reporter.assert_not_called()
