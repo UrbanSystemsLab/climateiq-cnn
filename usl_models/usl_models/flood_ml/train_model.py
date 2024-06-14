@@ -1,8 +1,23 @@
+import sys, os
+
+ # Get the directory of the current script
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Construct the path to the desired directory (where 'usl_models' is located)
+usl_models_dir = os.path.join(current_dir, '../..') # go one directory up
+
+# Append the path to sys.path
+sys.path.append(usl_models_dir)
+print(sys.path)
+
+
+
 import tensorflow as tf
 
 from usl_models.flood_ml.model import FloodModel, FloodModelParams
 from usl_models.flood_ml.trainingdataset import IncrementalTrainDataGenerator
 from usl_models.flood_ml.featurelabelchunks import GenerateFeatureLabelChunks
+
 
 
 """
@@ -79,6 +94,9 @@ def train_model(
     # Get the next batch of data
     if len(sim_names) > 0:
         data = generator.get_next_batch(sim_names, batch_size)
+        print("\n")
+        print("Dataset generation completed, will hand over to model training..")
+        print("\n")
         print("Training model")
         model_history.append(model.train(data))
         print("Training complete")
