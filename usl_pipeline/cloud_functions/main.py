@@ -496,6 +496,13 @@ def _timestep_number_from_rsl_path(rsl_path: str) -> str:
     return time_step_num.group(1)
 
 
+def _read_polygons_from_byte_stream(
+    stream: IO[bytes],
+) -> list[Tuple[geometry.Polygon, int]]:
+    """Reads polygons from textual file content provided in form of a byte stream."""
+    return list(polygon_readers.read_polygons_from_text_file(io.TextIOWrapper(stream)))
+
+
 def _build_feature_matrix_from_archive(
     archive: BinaryIO,
 ) -> Tuple[Optional[NDArray], FeatureMetadata]:
@@ -508,7 +515,7 @@ def _build_feature_matrix_from_archive(
       A tuple of (array, metadata) for the feature matrix and
       metadata describing the feature matrix.
     """
-    metadata: Optional[FeatureMetadata] = None
+    metadata: FeatureMetadata = FeatureMetadata()
     elevation: Optional[geo_data.Elevation] = None
     boundaries: Optional[list[Tuple[geometry.Polygon, int]]] = None
     buildings: Optional[list[Tuple[geometry.Polygon, int]]] = None
@@ -529,13 +536,13 @@ def _build_feature_matrix_from_archive(
             if name == file_names.ELEVATION_TIF:
                 elevation, metadata = _read_elevation_features(fd)
             elif name == file_names.BOUNDARIES_TXT:
-                boundaries = list(polygon_readers.read_polygons_from_text_file(fd))
+                boundaries = _read_polygons_from_byte_stream(fd)
             elif name == file_names.BUILDINGS_TXT:
-                buildings = list(polygon_readers.read_polygons_from_text_file(fd))
+                buildings = _read_polygons_from_byte_stream(fd)
             elif name == file_names.GREEN_AREAS_TXT:
-                green_areas = list(polygon_readers.read_polygons_from_text_file(fd))
+                green_areas = _read_polygons_from_byte_stream(fd)
             elif name == file_names.SOIL_CLASSES_TXT:
-                soil_classes = list(polygon_readers.read_polygons_from_text_file(fd))
+                soil_classes = _read_polygons_from_byte_stream(fd)
             # Handle heat model input files (WPS)
             elif name.startswith("met_em") and name.endswith(".nc"):
                 return _build_wps_feature_matrix(fd)
@@ -648,13 +655,14 @@ def _read_elevation_features(
       the feature matrix.
     """
     elevation = elevation_readers.read_from_geotiff(rasterio.io.MemoryFile(fd.read()))
+    elevation_data = elevation.data
 
-    if elevation is None:
+    if elevation_data is None:
         raise ValueError("Elevation file unexpectedly empty.")
 
     metadata = FeatureMetadata(
-        elevation_min=float(elevation.data.min()),
-        elevation_max=float(elevation.data.max()),
+        elevation_min=float(elevation_data.min()),
+        elevation_max=float(elevation_data.max()),
     )
 
     return elevation, metadata
