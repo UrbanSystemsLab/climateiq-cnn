@@ -13,3 +13,6 @@ FLOOD_SIMULATION_INPUT_BUCKET = (
 FLOOD_SIMULATION_CONFIG_BUCKET = (
     os.environ.get("BUCKET_PREFIX", "") + "climateiq-flood-simulation-config"
 )
+LABEL_CHUNKS_BUCKET = (
+    os.environ.get("BUCKET_PREFIX", "") + "climateiq-study-area-label-chunks"
+)

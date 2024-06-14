@@ -1,14 +1,17 @@
 import datetime
 import io
+import pathlib
 import tarfile
 import textwrap
 from unittest import mock
 
+from google.api_core import exceptions
 from google.cloud import firestore
 from google.cloud import storage
 import functions_framework
 import netCDF4
 import numpy
+import pytest
 import rasterio
 import xarray
 
@@ -24,9 +27,10 @@ def _add_to_tar(tar: tarfile.TarFile, file_name: str, content_bytes: bytes):
     tar.addfile(tf, io.BytesIO(content_bytes))
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client):
+def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, _):
     # Get some random data to place in a tiff file.
     height = 2
     width = 3
@@ -172,11 +176,7 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client):
     },
     clear=True,
 )
-def test_build_feature_matrix_wrf(
-    mock_storage_client,
-    mock_firestore_client,
-    mock_error_reporting_client,
-):
+def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _):
     # Get some random data to place in a netcdf file
     netcdf_array1 = numpy.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=numpy.float32)
     netcdf_array2 = numpy.array(
@@ -263,8 +263,11 @@ def test_build_feature_matrix_wrf(
     # Ensure we attempted to upload a serialized matrix of the netcdf
     mock_feature_blob.upload_from_file.assert_called_once_with(mock.ANY)
     uploaded_array = numpy.load(mock_feature_blob.upload_from_file.call_args[0][0])
-    # Expected array should be all required vars extracted and stacked
-    expected_array = numpy.dstack((netcdf_array1, netcdf_array2))
+    # Expected array should be all required vars extracted, lon/lat axis reordered, and
+    # stacked
+    expected_array = numpy.dstack(
+        (numpy.swapaxes(netcdf_array1, 0, 1), numpy.swapaxes(netcdf_array2, 0, 1))
+    )
     numpy.testing.assert_array_equal(uploaded_array, expected_array)
 
     # TODO: Ensure we wrote firestore entries for the chunk.
@@ -283,6 +286,23 @@ def test_process_wps_feature_drop_time_axis():
 
 
 @mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
+def test_process_wps_feature_reorder_spatial_dims():
+    # Dims ordered here are representative of how they will be ordered in actual netcdf
+    # file
+    arr = numpy.array([[[[10, 20], [30, 40]], [[1, 2], [3, 4]]]], dtype=numpy.float32)
+    xrdarr = xarray.DataArray(
+        arr, name="RH", dims=("Time", "num_metgrid_levels", "south_north", "west_east")
+    )
+
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+    )
+
+    expected = [[10, 30], [20, 40]]
+    numpy.testing.assert_array_equal(expected, processed)
+
+
+@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
 def test_process_wps_feature_extract_fnl_spatial_dim():
     arr = numpy.array([[[[10, 1], [20, 2]], [[30, 3], [40, 4]]]], dtype=numpy.float32)
     xrdarr = xarray.DataArray(
@@ -294,7 +314,8 @@ def test_process_wps_feature_extract_fnl_spatial_dim():
     )
 
     expected = [[10, 20], [30, 40]]
-    numpy.testing.assert_array_equal(expected, processed)
+    # Expected arr will also have lat/lon axis swapped
+    numpy.testing.assert_array_equal(numpy.swapaxes(expected, 0, 1), processed)
 
 
 @mock.patch.dict(
@@ -323,7 +344,8 @@ def test_process_wps_feature_convert_percent_to_decimal():
     )
 
     expected = [[0.3245, 0.1511], [0.7374, 0.3321]]
-    numpy.testing.assert_array_almost_equal(expected, processed)
+    # Expected arr will also have lat/lon axis swapped
+    numpy.testing.assert_array_almost_equal(numpy.swapaxes(expected, 0, 1), processed)
 
 
 @mock.patch.dict(
@@ -352,7 +374,10 @@ def test_process_wps_feature_apply_minmax_scaler():
     )
 
     expected = [[0.56, 1], [1, 0]]
-    numpy.testing.assert_array_almost_equal(expected, processed, decimal=3)
+    # Expected arr will also have lat/lon axis swapped
+    numpy.testing.assert_array_almost_equal(
+        numpy.swapaxes(expected, 0, 1), processed, decimal=3
+    )
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
@@ -367,24 +392,16 @@ def test_build_feature_matrix_errors(
     # Cause the cloud function to fail.
     mock_storage_client.side_effect = RuntimeError("oh no!")
 
-    # Grab the original datetime module before we mock it so we can use it below.
-    orig_datetime = datetime.datetime
-    # We can't mock datetime.now directly, we can only mock datetime
-    # https://docs.python.org/3/library/unittest.mock-examples.html#partial-mocking
-    with mock.patch.object(main.datetime, "datetime") as mock_datetime:
-        # Use the same value for `now` as the cloud function states as its timeCreated.
-        mock_datetime.now.return_value = orig_datetime(2012, 12, 21)
-        # Use the original functions rather than mocks.
-        mock_datetime.fromisoformat.side_effect = orig_datetime.fromisoformat
-        mock_datetime.side_effect = orig_datetime
-
+    with pytest.raises(RuntimeError):
         main.build_feature_matrix(
             functions_framework.CloudEvent(
                 {"source": "test", "type": "event"},
                 data={
                     "bucket": "bucket",
                     "name": "study_area/name.tar",
-                    "timeCreated": "2012-12-21T01:02:00",
+                    "timeCreated": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).isoformat(),
                     "id": "function-id",
                 },
             )
@@ -417,42 +434,7 @@ def test_build_feature_matrix_errors(
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_build_feature_matrix_retries(
-    mock_storage_client,
-    mock_firestore_client,
-    mock_error_reporting_client,
-):
-    """Ensure we halt on old retries."""
-    # Grab the original datetime module before we mock it so we can use it below.
-    orig_datetime = datetime.datetime
-    # We can't mock datetime.now directly, we can only mock datetime
-    # https://docs.python.org/3/library/unittest.mock-examples.html#partial-mocking
-    with mock.patch.object(main.datetime, "datetime") as mock_datetime:
-        # Use a value for `now` long after the cloud function states as its timeCreated.
-        mock_datetime.now.return_value = orig_datetime(2030, 1, 1)
-        # Use the original functions rather than mocks.
-        mock_datetime.fromisoformat.side_effect = orig_datetime.fromisoformat
-        mock_datetime.side_effect = orig_datetime
-
-        main.build_feature_matrix(
-            functions_framework.CloudEvent(
-                {"source": "test", "type": "event"},
-                data={
-                    "bucket": "bucket",
-                    "name": "study_area/name.tar",
-                    "timeCreated": "2012-12-21T01:02:00",
-                    "id": "function-id",
-                },
-            )
-        )
-
-    # Ensure we didn't try to do actual cloud function work.
-    mock_storage_client.assert_not_called()
-
-
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
-def test_write_study_area_metadata(mock_storage_client, mock_firestore_client):
+def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _):
     # Get some random data to place in a tiff file.
     height = 2
     width = 3
@@ -517,9 +499,10 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client):
     )
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_client):
+def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_client, _):
     """Ensure we sync config uploads to the metastore."""
     config_blob = mock.Mock(spec=storage.Blob)
     config_blob.name = "config_name/Rainfall_Data_1.txt"
@@ -628,16 +611,19 @@ def test_write_flood_scenario_metadata_rejects_too_long_rainfall(
     vector_blob = mock.Mock(spec=storage.Blob)
     mock_storage_client().bucket("").blob.side_effect = [config_blob, vector_blob]
 
-    main.write_flood_scenario_metadata_and_features(
-        functions_framework.CloudEvent(
-            {"source": "test", "type": "event"},
-            data={
-                "bucket": "bucket",
-                "name": "config_name/Rainfall_Data_1.txt",
-                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            },
+    with pytest.raises(ValueError):
+        main.write_flood_scenario_metadata_and_features(
+            functions_framework.CloudEvent(
+                {"source": "test", "type": "event"},
+                data={
+                    "bucket": "bucket",
+                    "name": "config_name/Rainfall_Data_1.txt",
+                    "timeCreated": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).isoformat(),
+                },
+            )
         )
-    )
 
     # Ensure we didn't try to write anything.
     vector_blob.upload_from_file.assert_not_called()
@@ -645,8 +631,11 @@ def test_write_flood_scenario_metadata_rejects_too_long_rainfall(
     mock_error_reporting_client().report_exception.assert_called_once()
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
-def test_write_flood_scenario_metadata_ignore_non_rainfall_files(mock_firestore_client):
+def test_write_flood_scenario_metadata_ignore_non_rainfall_files(
+    mock_firestore_client, _
+):
     """Ensure we ignore non-rainfall config uploads."""
     main.write_flood_scenario_metadata_and_features(
         functions_framework.CloudEvent(
@@ -662,8 +651,9 @@ def test_write_flood_scenario_metadata_ignore_non_rainfall_files(mock_firestore_
     mock_firestore_client.assert_not_called()
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
-def test_delete_flood_scenario_metadata(mock_firestore_client):
+def test_delete_flood_scenario_metadata(mock_firestore_client, _):
     """Ensure we sync config uploads to the metastore."""
     main.delete_flood_scenario_metadata(
         functions_framework.CloudEvent(
@@ -687,9 +677,10 @@ def test_delete_flood_scenario_metadata(mock_firestore_client):
     )
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 def test_delete_flood_scenario_metadata_ignore_non_rainfall_files(
-    mock_firestore_client,
+    mock_firestore_client, _
 ):
     """Ensure we ignore non-rainfall config uploads."""
     main.delete_flood_scenario_metadata(
@@ -704,3 +695,440 @@ def test_delete_flood_scenario_metadata_ignore_non_rainfall_files(
     )
 
     mock_firestore_client.assert_not_called()
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+def test_retry_decorator_runs_decorated_func(mock_error_reporter):
+    """Ensures our retry decorator passes the event to the decorated function."""
+    mock_func = mock.MagicMock()
+    decorated_func = main._retry_and_report_errors()(mock_func)
+
+    event = functions_framework.CloudEvent(
+        {"source": "test", "type": "event"},
+        data={
+            "bucket": "bucket",
+            "name": "some_file",
+            "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        },
+    )
+
+    decorated_func(event)
+
+    mock_func.assert_called_with(event)
+    mock_error_reporter.assert_not_called()
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+def test_retry_decorator_skips_gcloud_tmp_files(_):
+    """Ensures our retry decorator skips GCS events for temp gcloud files."""
+    mock_func = mock.MagicMock()
+    decorated_func = main._retry_and_report_errors()(mock_func)
+
+    decorated_func(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "gcloud/tmp/parallel_composite_uploads/some_file",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+    mock_func.assert_not_called()
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+def test_retry_decorator_error_reporting(mock_error_reporter):
+    """Ensures our retry decorator logs and raises errors."""
+    mock_func = mock.MagicMock(side_effect=RuntimeError("oh no!"))
+    decorated_func = main._retry_and_report_errors()(mock_func)
+
+    with pytest.raises(RuntimeError):
+        decorated_func(
+            functions_framework.CloudEvent(
+                {"source": "test", "type": "event"},
+                data={
+                    "bucket": "bucket",
+                    "name": "some_file",
+                    "timeCreated": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).isoformat(),
+                },
+            )
+        )
+
+    mock_error_reporter.assert_called_with()
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+def test_retry_decorator_custom_error_reporting(mock_error_reporter):
+    """Ensures our retry decorator passes the event to custom error handlers."""
+    error = RuntimeError("oh no!")
+    mock_func = mock.MagicMock(side_effect=error)
+    error_handler = mock.MagicMock()
+    decorated_func = main._retry_and_report_errors(error_handler)(mock_func)
+
+    event = functions_framework.CloudEvent(
+        {"source": "test", "type": "event"},
+        data={
+            "bucket": "bucket",
+            "name": "some_file",
+            "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        },
+    )
+
+    with pytest.raises(RuntimeError):
+        decorated_func(event)
+
+    error_handler.assert_called_once_with(event, error)
+    mock_error_reporter.assert_called_once_with()
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+def test_retry_decorator_error_timeout(mock_error_reporter):
+    """Ensures our retry decorator halts on old invocations."""
+    mock_func = mock.MagicMock(side_effect=RuntimeError("oh no!"))
+    decorated_func = main._retry_and_report_errors()(mock_func)
+
+    decorated_func(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "some_file",
+                # Pick a time from long ago so the function will not be called.
+                "timeCreated": "2012-12-21T01:02:00+00:00",
+            },
+        )
+    )
+
+    mock_func.assert_not_called()
+    mock_error_reporter.assert_not_called()
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_write_city_cat_output_chunks(mock_firestore_client):
+    """Ensures we write the correct chunks to GCS."""
+    # Create a fake .rsl file simulation result to read.
+    blob_path = pathlib.PurePosixPath(
+        "study_area_name/config_group/config_name.txt/R11_C1_T2_10min.rsl"
+    )
+    mock_blob = mock.MagicMock(spec=storage.Blob)
+    mock_blob.name = str(blob_path)
+    mock_blob.bucket.name = "sim-bucket"
+    mock_blob.open.return_value = io.StringIO(
+        textwrap.dedent(
+            """\
+            XCen YCen Depth Vx Vy T_300.000_sec
+            0 1 0.001 0.000 0.000
+            1 2 0.002 0.000 0.000
+            2 3 0.003 0.000 0.000
+            2 1 0.004 0.000 0.000
+    """
+        )
+    )
+    # The above will rasterize to
+    # array([[0.   , 0.   , 0.   ],
+    #        [0.   , 0.   , 0.003],
+    #        [0.   , 0.002, 0.   ],
+    #        [0.001, 0.   , 0.004]])
+
+    # Return a study area geography from the mock firestore client.
+    mock_firestore_client().collection().document().get().to_dict.return_value = {
+        "col_count": 3,
+        "row_count": 4,
+        "x_ll_corner": 0,
+        "y_ll_corner": 0,
+        "cell_size": 1.0,
+    }
+
+    # Have the blob return IO objects so we can capture what was written to them.
+    # Empty their close method so we can read them later.
+    buffers = (io.BytesIO(), io.BytesIO())
+    for buf in buffers:
+        buf.close = lambda: None
+    mock_blob.bucket.blob().open.side_effect = buffers
+
+    mock_blob.reset_mock()
+    mock_firestore_client.reset_mock()
+    main._write_city_cat_output_chunks(mock_blob, blob_path, chunk_size=3)
+
+    # Ensure we wrote the two expected chunks.
+    for buf in buffers:
+        buf.seek(0)
+    numpy.testing.assert_array_almost_equal(
+        numpy.load(buffers[0]),
+        numpy.array([[0, 0, 0], [0, 0, 0.003], [0, 0.002, 0]], dtype=numpy.float32),
+    )
+    numpy.testing.assert_array_almost_equal(
+        numpy.load(buffers[1]),
+        numpy.array([[0.001, 0, 0.004], [0, 0, 0], [0, 0, 0]], dtype=numpy.float32),
+    )
+
+    # Ensure we wrote the chunks to the expected paths.
+    mock_blob.assert_has_calls(
+        [
+            mock.call.bucket.blob(
+                "timestep_parts/study_area_name/config_group/config_name.txt/0_0/2.npy"
+            ),
+            mock.call.bucket.blob().open("wb"),
+            mock.call.bucket.blob(
+                "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
+            ),
+            mock.call.bucket.blob().open("wb"),
+        ]
+    )
+
+    # Ensure we created a metastore entry for the simulation run.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("study_area_name"),
+            mock.call().collection("city_cat_rainfall_configs"),
+            mock.call().collection().document("config_group%2Fconfig_name.txt"),
+        ]
+    )
+    mock_firestore_client().collection().document().set.assert_called_once_with(
+        {
+            "gcs_prefix_uri": (
+                "gs://sim-bucket/study_area_name/config_group/config_name.txt"
+            ),
+            "simulation_type": "CityCAT",
+            "study_area": mock_firestore_client().collection().document(),
+            "configuration": mock_firestore_client().collection().document(),
+        }
+    )
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_collapse_city_cat_output_chunks(mock_firestore_client):
+    """Ensures we write the correct chunks to GCS."""
+    # Have firestore return a three-timestep configuration.
+    mock_firestore_client().collection().document().get().to_dict.return_value = {
+        "gcs_uri": "gs://config-bucket/config/file.txt",
+        "as_vector_gcs_uri": "gs://label-bucket/config/file.npy",
+        "parent_config_name": "config",
+        "rainfall_duration": 3,
+    }
+
+    # Create a blob for the file triggering the cloud function run.
+    blob_path = pathlib.PurePosixPath(
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+    mock_blob = mock.MagicMock(spec=storage.Blob)
+    mock_blob.name = str(blob_path)
+    mock_blob.bucket.name = "sim-bucket"
+
+    # Have list blobs return paths for the three expected timesteps
+    mock_blob.bucket.list_blobs.return_value = [
+        mock.MagicMock(spec=storage.Blob),
+        mock.MagicMock(spec=storage.Blob),
+        mock.MagicMock(spec=storage.Blob),
+    ]
+
+    # Set the names and read values of the above blobs.
+    buf_t1 = io.BytesIO()
+    numpy.save(buf_t1, numpy.array([[1, 1], [1, 1]]))
+    buf_t1.seek(0)
+    mock_blob.bucket.list_blobs.return_value[0].name = (
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/1.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[0].open.return_value = buf_t1
+
+    buf_t0 = io.BytesIO()
+    numpy.save(buf_t0, numpy.array([[0, 0], [0, 0]]))
+    buf_t0.seek(0)
+    mock_blob.bucket.list_blobs.return_value[1].name = (
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/0.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[1].open.return_value = buf_t0
+
+    buf_t2 = io.BytesIO()
+    numpy.save(buf_t2, numpy.array([[2, 2], [2, 2]]))
+    buf_t2.seek(0)
+    mock_blob.bucket.list_blobs.return_value[2].name = (
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[2].open.return_value = buf_t2
+
+    # Create a mock labels bucket.
+    # Have the blob return IO objects so we can capture what was written to them.
+    # Empty their close method so we can read them later.
+    mock_labels_bucket = mock.MagicMock(spec=storage.Bucket)
+    mock_labels_bucket.name = "labels"
+    labels_buf = io.BytesIO()
+    labels_buf.close = lambda: None
+    mock_labels_bucket.blob().open.return_value = labels_buf
+
+    mock_blob.reset_mock()
+    mock_labels_bucket.reset_mock()
+    main._collapse_city_cat_output_chunks(mock_blob, blob_path, mock_labels_bucket)
+
+    # Ensure we checked the right prefix.
+    mock_blob.bucket.list_blobs.assert_called_once_with(
+        prefix="timestep_parts/study_area_name/config_group/config_name.txt/0_1/"
+    )
+    # Ensure we wrote to the correct labels path.
+    mock_labels_bucket.blob.assert_called_once_with(
+        "study_area_name/config_group/config_name.txt/0_1.npy"
+    )
+    # Ensure we wrote the correct array to the labels bucket.
+    labels_buf.seek(0)
+    numpy.testing.assert_array_equal(
+        numpy.load(labels_buf),
+        numpy.array([[[0, 1, 2], [0, 1, 2]], [[0, 1, 2], [0, 1, 2]]]),
+    )
+    # Ensure we created a metastore entry for the chunk.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call().collection("simulations"),
+            mock.call()
+            .collection()
+            .document("study_area_name-config_group%2Fconfig_name.txt"),
+            mock.call().collection().document().collection("label_chunks"),
+            mock.call().collection().document().collection().document("0_1"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document()
+            .set(
+                {
+                    "gcs_uri": (
+                        "gs://labels/study_area_name/"
+                        "config_group/config_name.txt/0_1.npy"
+                    ),
+                    "x_index": 0,
+                    "y_index": 1,
+                }
+            ),
+        ]
+    )
+    # Ensure we deleted all the intermediary chunks.
+    for blob in mock_blob.bucket.list_blobs.return_value:
+        blob.delete.assert_called_once()
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_collapse_city_cat_output_chunks_missing_timesteps(mock_firestore_client):
+    """Ensures halt if files for all timesteps are not present."""
+    # Have firestore return a three-timestep configuration.
+    mock_firestore_client().collection().document().get().to_dict.return_value = {
+        "gcs_uri": "gs://config-bucket/config/file.txt",
+        "as_vector_gcs_uri": "gs://label-bucket/config/file.npy",
+        "parent_config_name": "config",
+        "rainfall_duration": 3,
+    }
+
+    # Create a blob for the file triggering the cloud function run.
+    blob_path = pathlib.PurePosixPath(
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+    mock_blob = mock.MagicMock(spec=storage.Blob)
+    mock_blob.name = str(blob_path)
+    mock_blob.bucket.name = "sim-bucket"
+
+    # Have list blobs return paths for the two of the three expected timesteps
+    mock_blob.bucket.list_blobs.return_value = [
+        mock.MagicMock(spec=storage.Blob),
+        mock.MagicMock(spec=storage.Blob),
+    ]
+    mock_blob.bucket.list_blobs.return_value[0].name = (
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/1.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[1].name = (
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+
+    # Create a mock labels bucket.
+    mock_labels_bucket = mock.MagicMock(spec=storage.Bucket)
+    mock_labels_bucket.name = "labels"
+
+    mock_blob.reset_mock()
+    mock_labels_bucket.reset_mock()
+    main._collapse_city_cat_output_chunks(mock_blob, blob_path, mock_labels_bucket)
+
+    # Ensure we didn't try to write to the mock labels.
+    mock_labels_bucket.blob.assert_not_called()
+
+    # Ensure we didn't try to write a metastore entry.
+    (
+        mock_firestore_client()
+        .collection()
+        .document()
+        .collection()
+        .document()
+        .set.assert_not_called()
+    )
+
+    # Ensure we didn't try to delete the intermediary chunks.
+    for blob in mock_blob.bucket.list_blobs.return_value:
+        blob.delete.assert_not_called()
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_collapse_city_cat_output_chunks_deleted_chunks(mock_firestore_client):
+    """Ensures halt if files for timesteps are deleted when read."""
+    # Have firestore return a three-timestep configuration.
+    mock_firestore_client().collection().document().get().to_dict.return_value = {
+        "gcs_uri": "gs://config-bucket/config/file.txt",
+        "as_vector_gcs_uri": "gs://label-bucket/config/file.npy",
+        "parent_config_name": "config",
+        "rainfall_duration": 3,
+    }
+
+    # Create a blob for the file triggering the cloud function run.
+    blob_path = pathlib.PurePosixPath(
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+    mock_blob = mock.MagicMock(spec=storage.Blob)
+    mock_blob.name = str(blob_path)
+    mock_blob.bucket.name = "sim-bucket"
+
+    # Have list blobs return paths for the three expected timesteps, but have their
+    # reads fail.
+    mock_blob.bucket.list_blobs.return_value = [
+        mock.MagicMock(spec=storage.Blob),
+        mock.MagicMock(spec=storage.Blob),
+        mock.MagicMock(spec=storage.Blob),
+    ]
+    mock_blob.bucket.list_blobs.return_value[0].name = (
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/0.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[0].open.side_effect = exceptions.NotFound(
+        "oh no!"
+    )
+    mock_blob.bucket.list_blobs.return_value[1].name = (
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/1.npy"
+    )
+    mock_blob.bucket.list_blobs.return_value[2].name = (
+        "timestep_parts/study_area_name/config_group/config_name.txt/0_1/2.npy"
+    )
+
+    # Create a mock labels bucket.
+    mock_labels_bucket = mock.MagicMock(spec=storage.Bucket)
+    mock_labels_bucket.name = "labels"
+
+    mock_blob.reset_mock()
+    mock_labels_bucket.reset_mock()
+    main._collapse_city_cat_output_chunks(mock_blob, blob_path, mock_labels_bucket)
+
+    # Ensure we tried to read the deleted blob.
+    mock_blob.bucket.list_blobs.return_value[0].open.assert_called_once()
+
+    # Ensure we didn't try to write to the mock labels.
+    mock_labels_bucket.blob.assert_not_called()
+
+    # Ensure we didn't try to write a metastore entry.
+    (
+        mock_firestore_client()
+        .collection()
+        .document()
+        .collection()
+        .document()
+        .set.assert_not_called()
+    )
+
+    # Ensure we didn't try to delete the intermediary chunks.
+    for blob in mock_blob.bucket.list_blobs.return_value:
+        blob.delete.assert_not_called()
