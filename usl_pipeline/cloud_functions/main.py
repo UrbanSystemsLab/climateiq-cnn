@@ -524,6 +524,9 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     # Ignore type checker error - BytesIO inherits from expected type BufferedIOBase
     # https://shorturl.at/lk4om
     with xarray.open_dataset(fd) as ds:  # type: ignore
+        # Assign Time coordinates so datetime is associated with each data array
+        ds = ds.assign_coords(Time=ds.Times)
+
         features_components = []
         for var_name in wps_data.ML_REQUIRED_VARS_REPO.keys():
             var_config = wps_data.ML_REQUIRED_VARS_REPO[var_name]
@@ -552,9 +555,7 @@ def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray
       A new numpy array with transforms applied according to rules
       for each variable defined in: https://shorturl.at/W6nzY
     """
-    # Drop time axis
-    feature = feature.isel(Time=0)
-
+    snapshot_time = feature.coords.get("Time")
     # Ensure order of dimension axes are: (west_east, south_north, <other spatial dims>)
     # to stay consistent with rest of data pipeline
     feature = feature.transpose("west_east", "south_north", ...)
@@ -562,6 +563,18 @@ def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray
     # FNL-derived var - extract to only first level
     if "num_metgrid_levels" in feature.dims:
         feature = feature.isel(num_metgrid_levels=0)
+
+    # Monthly climatology var - extract to only the month of the file's datestamp
+    if "z-dimension0012" in feature.dims and snapshot_time:
+        snapshot_datetime = datetime.datetime.strptime(
+            snapshot_time.values[0].decode(), "%Y-%m-%d_%H:%M:%S"
+        )
+        feature = feature.isel({"z-dimension0012": snapshot_datetime.month - 1})
+
+    # At this point, we can remove the Time axis from current feature DataArray
+    # since we no longer need it for processing or in the feature matrix for ML
+    # model. xarray.DataArry.isel() will return new DataArray with axis dropped.
+    feature = feature.isel(Time=0)
 
     feature_values = feature.values
 

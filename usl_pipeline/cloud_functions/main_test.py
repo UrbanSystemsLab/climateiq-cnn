@@ -162,9 +162,10 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     ncfile.createDimension("west_east", 3)
     ncfile.createDimension("south_north", 3)
 
-    time = ncfile.createVariable("time", "f8", ("Time",))
-    lat = ncfile.createVariable("lat", "float32", ("west_east",))
-    lon = ncfile.createVariable("lon", "float32", ("south_north",))
+    # In WPS/WRF files, 'Times'->dimension and 'Time'->variable
+    time = ncfile.createVariable("Times", "f8", ("Time",))
+    lat = ncfile.createVariable("lat", "float32", ("south_north",))
+    lon = ncfile.createVariable("lon", "float32", ("west_east",))
     # Create dataset entries for all variables in mock
     for var in wps_data.ML_REQUIRED_VARS_REPO.keys():
         ncfile.createVariable(var, "float32", ("Time", "south_north", "west_east"))
@@ -287,6 +288,27 @@ def test_process_wps_feature_extract_fnl_spatial_dim():
     )
 
     expected = [[10, 20], [30, 40]]
+    # Expected arr will also have lat/lon axis swapped
+    numpy.testing.assert_array_equal(numpy.swapaxes(expected, 0, 1), processed)
+
+
+@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"GREENFRAC": {}}, clear=True)
+def test_process_wps_feature_extract_monthly_climate_map_dim():
+    arr = numpy.array([[[[10, 1], [20, 2]], [[30, 3], [40, 4]]]], dtype=numpy.float32)
+    xrdarr = xarray.DataArray(
+        arr,
+        name="GREENFRAC",
+        dims=("Time", "south_north", "west_east", "z-dimension0012"),
+        coords={"Time": [b"2010-02-02_18:00:00"]},
+    )
+
+    processed = main._process_wps_feature(
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("GREENFRAC")
+    )
+
+    # Since dataset datetime is February (2), then the corresponding index to select
+    # from z-dimension0012 will be 1
+    expected = [[1, 2], [3, 4]]
     # Expected arr will also have lat/lon axis swapped
     numpy.testing.assert_array_equal(numpy.swapaxes(expected, 0, 1), processed)
 
