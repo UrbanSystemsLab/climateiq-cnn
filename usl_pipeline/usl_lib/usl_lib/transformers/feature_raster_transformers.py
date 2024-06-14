@@ -1,4 +1,4 @@
-from typing import Callable, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy
 import numpy.typing as npt
@@ -11,26 +11,29 @@ from usl_lib.transformers import polygon_transformers, soil_classes_transformers
 DEFAULT_NON_GREEN_AREA_SOIL_CLASS = -9999
 
 
-def _lookup_soil_class_infiltration_extract_property(
+def _build_soil_class_infiltration_layers(
     soil_classes_raster: npt.NDArray[numpy.int_],
     soil_infiltration_configuration: geo_data.InfiltrationConfiguration,
-    property_getter: Callable[[geo_data.InfiltrationParams], float],
 ) -> npt.NDArray[numpy.float32]:
-    """For each cell in 2-d matrix looks up for infiltration property by soil class."""
-    property_values_over_all_soil_classes = [
-        property_getter(item) for item in soil_infiltration_configuration.items
-    ]
-    max_property_value = max(property_values_over_all_soil_classes)
-    lookup_map = soil_infiltration_configuration.as_map()
-    lookup_np_func = numpy.vectorize(
-        lambda soil_class: (
-            0.0
-            if soil_class not in lookup_map
-            else property_getter(lookup_map[soil_class])
-        ),
-        cache=True,
+    """Converts 2d matrix to 3d one looking up infiltration properties by soil class."""
+    infiltration_layers = numpy.zeros(
+        soil_classes_raster.shape + (4,), dtype=numpy.float32
     )
-    return lookup_np_func(soil_classes_raster) / max_property_value
+
+    config_items = soil_infiltration_configuration.items
+    max_conductivity = max(item.hydraulic_conductivity for item in config_items)
+    max_wetting = max(item.wetting_front_suction_head for item in config_items)
+    max_porosity = max(item.effective_porosity for item in config_items)
+    max_saturation = max(item.effective_saturation for item in config_items)
+
+    for config_item in config_items:
+        infiltration_layers[soil_classes_raster == config_item.soil_class] = [
+            config_item.hydraulic_conductivity / max_conductivity,
+            config_item.wetting_front_suction_head / max_wetting,
+            config_item.effective_porosity / max_porosity,
+            config_item.effective_saturation / max_saturation,
+        ]
+    return infiltration_layers
 
 
 def transform_to_feature_raster_layers(
@@ -94,10 +97,9 @@ def transform_to_feature_raster_layers(
         ).astype(dtype=numpy.float32)
         buildings_raster[elevation_mask_raster == 0] = 0
     green_areas_mask_raster = empty_raster
-    hydraulic_conductivity_raster = empty_raster
-    wetting_front_suction_head_raster = empty_raster
-    effective_porosity_raster = empty_raster
-    effective_saturation_raster = empty_raster
+    infiltration_raster_layers = numpy.zeros(
+        elevation_raster.shape + (4,), dtype=numpy.float32
+    )
     if len(green_areas_polygons) > 0 and len(soil_classes_polygons) > 0:
         corrected_soil_classes_polygons = (
             soil_classes_transformers.transform_soil_classes_as_green_areas(
@@ -112,29 +114,8 @@ def transform_to_feature_raster_layers(
         )
         soil_classes_raster[elevation_mask_raster == 0] = 0
         green_areas_mask_raster[soil_classes_raster != 0] = 1
-        hydraulic_conductivity_raster = (
-            _lookup_soil_class_infiltration_extract_property(
-                soil_classes_raster,
-                soil_infiltration_configuration,
-                lambda param: param.hydraulic_conductivity,
-            )
-        )
-        wetting_front_suction_head_raster = (
-            _lookup_soil_class_infiltration_extract_property(
-                soil_classes_raster,
-                soil_infiltration_configuration,
-                lambda param: param.wetting_front_suction_head,
-            )
-        )
-        effective_porosity_raster = _lookup_soil_class_infiltration_extract_property(
-            soil_classes_raster,
-            soil_infiltration_configuration,
-            lambda param: param.effective_porosity,
-        )
-        effective_saturation_raster = _lookup_soil_class_infiltration_extract_property(
-            soil_classes_raster,
-            soil_infiltration_configuration,
-            lambda param: param.effective_saturation,
+        infiltration_raster_layers = _build_soil_class_infiltration_layers(
+            soil_classes_raster, soil_infiltration_configuration
         )
 
     return numpy.dstack(
@@ -143,9 +124,6 @@ def transform_to_feature_raster_layers(
             elevation_mask_raster.astype(dtype=numpy.float32),
             buildings_raster.astype(dtype=numpy.float32),
             green_areas_mask_raster.astype(dtype=numpy.float32),
-            hydraulic_conductivity_raster,
-            wetting_front_suction_head_raster,
-            effective_porosity_raster,
-            effective_saturation_raster,
+            infiltration_raster_layers,
         )
     )
