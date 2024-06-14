@@ -275,7 +275,6 @@ def _build_feature_matrix(bucket_name, chunk_name, output_bucket) -> None:
     feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
     feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
 
-    print(f"Writing to bucket {output_bucket}")
     _write_as_npy(feature_blob, feature_matrix)
     _write_metastore_entry(chunk_blob, feature_blob, metadata)
 
@@ -327,10 +326,8 @@ def _build_feature_matrix_from_archive(
             else:
                 logging.warning(f"Unexpected member name: {name}")
 
-    print(f"Flood simulation data tar list: {files_in_tar})")
     if any((elevation, buildings, green_areas, soil_classes)):
         if not all((elevation, buildings, green_areas, soil_classes)):
-            print(f"Some flood simulation data missing: {files_in_tar})")
             raise ValueError(
                 f"Some flood simulation data missing (see tar list: {files_in_tar})"
             )
