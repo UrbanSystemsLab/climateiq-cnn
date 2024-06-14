@@ -1,7 +1,9 @@
 import tensorflow as tf
 
 from usl_models.flood_ml.model import FloodModel, FloodModelParams
-from usl_models.flood_ml.dataset import IncrementalTrainDataGenerator
+from usl_models.flood_ml.trainingdataset import IncrementalTrainDataGenerator
+from usl_models.flood_ml.featurelabelchunks import GenerateFeatureLabelChunks
+
 
 """
 THis is a method that is used to train the flood model.
@@ -33,9 +35,8 @@ def train_model(
     lstm_kernel_size: int,
     lstm_dropout: float,
     lstm_recurrent_dropout: float,
-    learning_rate: float,
     epochs: int,
-) -> list[tf.keras.callbacks.History]:
+):
 
     # Create FloodModelParams from hyperparameters
     model_params = FloodModelParams(
@@ -45,21 +46,66 @@ def train_model(
         lstm_dropout=lstm_dropout,
         lstm_recurrent_dropout=lstm_recurrent_dropout,
         epochs=epochs,
-        learning_rate=learning_rate
     )
     model_history = []
 
-    # Instantiate data generator
-    data_generator = IncrementalTrainDataGenerator()
-
     # Instantiate FloodModel class
     model = FloodModel(model_params)
-    model = model.compile(tf.keras.optimizers.Adam(learning_rate=learning_rate))
-    model.train(data_generator.get_next_batch())
-    # Train the model
-    model_history = model.train(data_generator.get_next_batch())
+    # model = model.compile(tf.keras.optimizers.Adam(learning_rate=learning_rate))
 
-    # save the model
-    model.save(model_dir)
+    class_label = GenerateFeatureLabelChunks()
+    sim_names = class_label._get_sim_names_from_metastore()
+    print(sim_names)
+    batch_size = 32
+
+    generator = IncrementalTrainDataGenerator(
+        batch_size=batch_size,
+    )
+
+
+    # compare feature and label chunks
+    for sim_name in sim_names:
+        print(f"Comparing feature and label chunks for {sim_name}")
+        label_compare = class_label.compare_study_area_sim_chunks(sim_name)
+        if label_compare:
+            print("Feature and label chunks are equal for", sim_name)
+            print("")
+        else:
+            print("Feature and label chunks are not equal")
+            sim_names.remove(sim_name)
+
+    print("**** Length of sim_names: ", len(sim_names))
+
+    # Get the next batch of data
+    if len(sim_names) > 0:
+        data = generator.get_next_batch(sim_names, batch_size)
+        print("Training model")
+        model_history.append(model.train(data))
+        print("Training complete")
+
+    else:
+        print("No valid sims found for training data generation")
 
     return model_history
+
+
+def main():
+
+    print(tf.__version__)
+
+    model_histories = train_model(
+        model_dir="gs://usl_models_bucket/flood_model",
+        batch_size=32,
+        lstm_units=128,
+        lstm_kernel_size=3,
+        lstm_dropout=0.2,
+        lstm_recurrent_dropout=0.2,
+        epochs=1,
+    )
+
+    for history in model_histories:
+        print(history.history)
+
+
+if __name__ == "__main__":
+    main()
