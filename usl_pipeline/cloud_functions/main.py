@@ -556,11 +556,11 @@ def _build_feature_matrix_from_archive(
                 f"Some flood simulation data missing (see tar list: {files_in_tar})"
             )
         feature_matrix = feature_raster_transformers.transform_to_feature_raster_layers(
-            elevation,
+            elevation,  # type: ignore
             boundaries,
-            buildings,
-            green_areas,
-            soil_classes,
+            buildings,  # type: ignore
+            green_areas,  # type: ignore
+            soil_classes,  # type: ignore
             geo_data.DEFAULT_INFILTRATION_CONFIGURATION,
         )
         return feature_matrix, metadata
