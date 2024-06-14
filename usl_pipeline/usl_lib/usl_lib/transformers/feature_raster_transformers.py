@@ -64,16 +64,14 @@ def transform_to_feature_raster_layers(
          - effective porosity,
          - effective saturation.
     """
-    raster_h = elevation.header.row_count
-    raster_w = elevation.header.col_count
     nodata_value = elevation.header.nodata_value
     if elevation.data is None:
         raise ValueError("Elevation data missing")
     elevation_raster = elevation.data.astype(dtype=numpy.float32)
-    elevation_mask_raster = numpy.zeros((raster_h, raster_w), dtype=int)
+    elevation_mask_raster = numpy.zeros(elevation_raster.shape, dtype=int)
     # setting mask raster to 1 for cells where elevation value is present (!=NODATA)
     elevation_mask_raster[elevation_raster != nodata_value] = 1
-    empty_raster = numpy.zeros((raster_h, raster_w), dtype=numpy.float32)
+    empty_raster = numpy.zeros(elevation_raster.shape, dtype=numpy.float32)
     # If boundaries data is not present we ignore any boundaries-related corrections.
     if boundaries_polygons is not None:
         # If boundaries data is present but empty it means that the whole matrix should

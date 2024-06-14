@@ -1,14 +1,9 @@
-import typing
 from dataclasses import dataclass
-from importlib import resources
 from typing import Dict, Optional, Tuple
-import xml.etree.ElementTree as ElementTree
 
 import numpy as np
 import numpy.typing as npt
 import rasterio
-
-from usl_lib.shared import resources as resource_data
 
 
 @dataclass
@@ -108,18 +103,6 @@ class BoundingBox:
         return BoundingBox(min_x=bbox[0], min_y=bbox[1], max_x=bbox[2], max_y=bbox[3])
 
 
-def _find_xml_child_float_value(
-    parent_node: ElementTree.Element,
-    tag: str,
-) -> float:
-    items = [item for item in parent_node if item.tag == tag]
-    if len(items) != 1:
-        raise ValueError(f"Unexpected number of sub-items in xml for tag {tag}")
-    if items[0].text is None:
-        raise ValueError(f"Text value missing for xml sub-item {items[0]}")
-    return float(items[0].text)
-
-
 @dataclass
 class InfiltrationParams:
     """Infiltration properties of a soil class in flood simulation configuration."""
@@ -130,27 +113,6 @@ class InfiltrationParams:
     effective_porosity: float
     effective_saturation: float
 
-    @staticmethod
-    def parse_from_xml_node(node: ElementTree.Element) -> "InfiltrationParams":
-        """Parses infiltration properties for a given soil class from XML."""
-        soil_class_text = node.get("soilId")
-        if soil_class_text is None:
-            raise ValueError("Attribute 'soilId' missing for InfiltrationParams in xml")
-        soil_class = int(soil_class_text)
-        hydraulic_conductivity = _find_xml_child_float_value(node, "HydrConductivity")
-        wetting_front_suction_head = _find_xml_child_float_value(
-            node, "WettingFrontSuctionHead"
-        )
-        effective_porosity = _find_xml_child_float_value(node, "EffectivePorosity")
-        effective_saturation = _find_xml_child_float_value(node, "EffectiveSaturation")
-        return InfiltrationParams(
-            soil_class=soil_class,
-            hydraulic_conductivity=hydraulic_conductivity,
-            wetting_front_suction_head=wetting_front_suction_head,
-            effective_porosity=effective_porosity,
-            effective_saturation=effective_saturation,
-        )
-
 
 @dataclass
 class InfiltrationConfiguration:
@@ -158,21 +120,91 @@ class InfiltrationConfiguration:
 
     items: list[InfiltrationParams]
 
-    @staticmethod
-    def parse_from_xml_file(fd: typing.IO[str]) -> "InfiltrationConfiguration":
-        """Parses infiltration configuration for all soil classe from XML."""
-        root = ElementTree.parse(fd).getroot()
-        return InfiltrationConfiguration(
-            items=[InfiltrationParams.parse_from_xml_node(item) for item in root]
-        )
-
-    @staticmethod
-    def load_default() -> "InfiltrationConfiguration":
-        """Loads default infiltration configuration from internal resource."""
-        config_file_resource = resources.files(resource_data) / "infiltration.xml"
-        with config_file_resource.open("r") as fd:
-            return InfiltrationConfiguration.parse_from_xml_file(fd)
-
     def as_map(self) -> Dict[int, InfiltrationParams]:
         """Represents items as a dictionary indexed by soil class."""
         return {item.soil_class: item for item in self.items}
+
+
+# Default infiltration configuration used to run flood simulations.
+# TODO: Make these parameters configurable in case they vary between study areas.
+DEFAULT_INFILTRATION_CONFIGURATION = InfiltrationConfiguration(
+    items=[
+        InfiltrationParams(
+            soil_class=1,
+            hydraulic_conductivity=1.09,
+            wetting_front_suction_head=11.01,
+            effective_porosity=0.412,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=2,
+            hydraulic_conductivity=0.65,
+            wetting_front_suction_head=16.68,
+            effective_porosity=0.486,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=3,
+            hydraulic_conductivity=0.1,
+            wetting_front_suction_head=20.88,
+            effective_porosity=0.309,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=4,
+            hydraulic_conductivity=0.34,
+            wetting_front_suction_head=8.89,
+            effective_porosity=0.434,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=5,
+            hydraulic_conductivity=2.99,
+            wetting_front_suction_head=6.13,
+            effective_porosity=0.401,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=6,
+            hydraulic_conductivity=11.78,
+            wetting_front_suction_head=4.95,
+            effective_porosity=0.417,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=11,
+            hydraulic_conductivity=1.09,
+            wetting_front_suction_head=11.01,
+            effective_porosity=0.412,
+            effective_saturation=0.99,
+        ),
+        InfiltrationParams(
+            soil_class=12,
+            hydraulic_conductivity=0.65,
+            wetting_front_suction_head=16.68,
+            effective_porosity=0.486,
+            effective_saturation=0.99,
+        ),
+        InfiltrationParams(
+            soil_class=13,
+            hydraulic_conductivity=0.1,
+            wetting_front_suction_head=20.88,
+            effective_porosity=0.309,
+            effective_saturation=0.99,
+        ),
+        InfiltrationParams(
+            soil_class=14,
+            hydraulic_conductivity=0.34,
+            wetting_front_suction_head=8.89,
+            effective_porosity=0.434,
+            effective_saturation=0.99,
+        ),
+        InfiltrationParams(
+            soil_class=16,
+            hydraulic_conductivity=11.78,
+            wetting_front_suction_head=4.95,
+            effective_porosity=0.417,
+            effective_saturation=0.5,
+        ),
+    ]
+)

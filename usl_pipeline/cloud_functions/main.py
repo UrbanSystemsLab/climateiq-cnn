@@ -275,6 +275,7 @@ def _build_feature_matrix(bucket_name, chunk_name, output_bucket) -> None:
     feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
     feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
 
+    print(f"Writing to bucket {output_bucket}")
     _write_as_npy(feature_blob, feature_matrix)
     _write_metastore_entry(chunk_blob, feature_blob, metadata)
 
@@ -297,6 +298,7 @@ def _build_feature_matrix_from_archive(
     buildings: Optional[list[Tuple[geometry.Polygon, int]]] = None
     green_areas: Optional[list[Tuple[geometry.Polygon, int]]] = None
     soil_classes: Optional[list[Tuple[geometry.Polygon, int]]] = None
+    files_in_tar = []
 
     with tarfile.TarFile(fileobj=archive) as tar:
         for member in tar:
@@ -305,6 +307,7 @@ def _build_feature_matrix_from_archive(
                 continue
 
             name = pathlib.PurePosixPath(member.name).name
+            files_in_tar.append(name)
             # TODO: Group logic branch by path (per hazard model)
             # Handle flood model input files (CityCat)
             if name == file_names.ELEVATION_TIF:
@@ -324,20 +327,20 @@ def _build_feature_matrix_from_archive(
             else:
                 logging.warning(f"Unexpected member name: {name}")
 
-    if elevation is not None and metadata is not None:
-        if buildings is None:
-            raise ValueError("Flood simulation data error: buildings data missing")
-        if green_areas is None:
-            raise ValueError("Flood simulation data error: green areas data missing")
-        if soil_classes is None:
-            raise ValueError("Flood simulation data error: soil classes data missing")
+    print(f"Flood simulation data tar list: {files_in_tar})")
+    if any((elevation, buildings, green_areas, soil_classes)):
+        if not all((elevation, buildings, green_areas, soil_classes)):
+            print(f"Some flood simulation data missing: {files_in_tar})")
+            raise ValueError(
+                f"Some flood simulation data missing (see tar list: {files_in_tar})"
+            )
         feature_matrix = feature_raster_transformers.transform_to_feature_raster_layers(
             elevation,
             boundaries,
             buildings,
             green_areas,
             soil_classes,
-            geo_data.InfiltrationConfiguration.load_default(),
+            geo_data.DEFAULT_INFILTRATION_CONFIGURATION,
         )
         return feature_matrix, metadata
 

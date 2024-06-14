@@ -1,4 +1,5 @@
 import numpy
+from numpy import testing
 from shapely import geometry
 
 from usl_lib.shared import geo_data
@@ -10,7 +11,7 @@ def bbox_polygon(x1: float, y1: float, x2: float, y2: float) -> geometry.Polygon
 
 
 def test_transform_to_feature_raster_layers():
-    infiltration_configuration = geo_data.InfiltrationConfiguration.load_default()
+    infiltration_configuration = geo_data.DEFAULT_INFILTRATION_CONFIGURATION
     max_hydraulic_conductivity = max(
         [item.hydraulic_conductivity for item in infiltration_configuration.items]
     )
@@ -65,56 +66,83 @@ def test_transform_to_feature_raster_layers():
     ).tolist()
 
     # Checking the first column (should be NODATA since outside the boundaries)
-    assert feature_matrix[0][0] == [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    assert feature_matrix[1][0] == [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    assert feature_matrix[2][0] == [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    assert feature_matrix[3][0] == [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    testing.assert_array_equal(
+        feature_matrix[0][0], [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+    testing.assert_array_equal(
+        feature_matrix[1][0], [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+    testing.assert_array_equal(
+        feature_matrix[2][0], [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+    testing.assert_array_equal(
+        feature_matrix[3][0], [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
 
     # Checking the remaining first row (should be elevation/mask present + buildings=1)
-    assert feature_matrix[0][1] == [1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    assert feature_matrix[0][2] == [2.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    testing.assert_array_equal(
+        feature_matrix[0][1], [1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+    testing.assert_array_equal(
+        feature_matrix[0][2], [2.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
 
     # Checking cells row:col={1:2},{2:2} (should be NODATA as in original elevation)
-    assert feature_matrix[1][2] == [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    assert feature_matrix[2][2] == [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    testing.assert_array_equal(
+        feature_matrix[1][2], [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+    testing.assert_array_equal(
+        feature_matrix[2][2], [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
 
     # Cell row:col=1:1 has just elevation (with mask=1), no buildings, no greens
-    assert feature_matrix[1][1] == [4.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    testing.assert_array_equal(
+        feature_matrix[1][1], [4.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
 
     # Checking remaining 3 soil-related cells:
     # Cell row:col=2:1, soil class=3
-    assert feature_matrix[2][1] == [
-        7.0,
-        1.0,
-        0.0,
-        1.0,
-        0.1 / max_hydraulic_conductivity,
-        20.88 / max_wetting_front_suction_head,
-        0.309 / max_effective_porosity,
-        0.5 / max_effective_saturation,
-    ]
+    testing.assert_array_almost_equal(
+        feature_matrix[2][1],
+        [
+            7.0,
+            1.0,
+            0.0,
+            1.0,
+            0.1 / max_hydraulic_conductivity,
+            20.88 / max_wetting_front_suction_head,
+            0.309 / max_effective_porosity,
+            0.5 / max_effective_saturation,
+        ],
+    )
     # Cell row:col=3:1, soil class=4
-    assert feature_matrix[3][1] == [
-        10.0,
-        1.0,
-        0.0,
-        1.0,
-        0.34 / max_hydraulic_conductivity,
-        8.89 / max_wetting_front_suction_head,
-        0.434 / max_effective_porosity,
-        0.5 / max_effective_saturation,
-    ]
+    testing.assert_array_almost_equal(
+        feature_matrix[3][1],
+        [
+            10.0,
+            1.0,
+            0.0,
+            1.0,
+            0.34 / max_hydraulic_conductivity,
+            8.89 / max_wetting_front_suction_head,
+            0.434 / max_effective_porosity,
+            0.5 / max_effective_saturation,
+        ],
+    )
     # Cell row:col=3:2, soil class=11
-    assert feature_matrix[3][2] == [
-        11.0,
-        1.0,
-        0.0,
-        1.0,
-        1.09 / max_hydraulic_conductivity,
-        11.01 / max_wetting_front_suction_head,
-        0.412 / max_effective_porosity,
-        0.99 / max_effective_saturation,
-    ]
+    testing.assert_array_almost_equal(
+        feature_matrix[3][2],
+        [
+            11.0,
+            1.0,
+            0.0,
+            1.0,
+            1.09 / max_hydraulic_conductivity,
+            11.01 / max_wetting_front_suction_head,
+            0.412 / max_effective_porosity,
+            0.99 / max_effective_saturation,
+        ],
+    )
 
 
 def test_transform_to_feature_raster_layers_no_polygons():
@@ -140,11 +168,19 @@ def test_transform_to_feature_raster_layers_no_polygons():
         [],
         [],
         [],
-        geo_data.InfiltrationConfiguration.load_default(),
+        geo_data.DEFAULT_INFILTRATION_CONFIGURATION,
     ).tolist()
 
     # Checking results
-    assert feature_matrix[0][0] == [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    assert feature_matrix[0][1] == [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    assert feature_matrix[1][0] == [2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    assert feature_matrix[1][1] == [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    testing.assert_array_equal(
+        feature_matrix[0][0], [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+    testing.assert_array_equal(
+        feature_matrix[0][1], [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+    testing.assert_array_equal(
+        feature_matrix[1][0], [2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+    testing.assert_array_equal(
+        feature_matrix[1][1], [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
