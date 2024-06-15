@@ -2,6 +2,7 @@ from typing import List
 import os
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+import functools
 
 import numpy as np
 import tensorflow as tf
@@ -52,9 +53,9 @@ class IncrementalTrainDataGenerator:
         self.firestore_client = firestore_client or firestore.Client()
         self.storage_client = storage_client or storage.Client()
         # self.firestore_collection = self.config.get("firestore_collection")
-        self.batch_size = batch_size
+        # self.batch_size = batch_size
         self._chunks_iterator = None
-        self.rainfall_duration = None
+        # self.rainfall_duration = None
 
         # instantiate metastore class
         self.metastore = metastore or FirestoreDataHandler(
@@ -213,7 +214,7 @@ class IncrementalTrainDataGenerator:
         This method is static since it parses the example using TensorFlow's
         tf.io.parse_single_example function, and returns the parsed example.
         """
-        print(f"Parsing TFRecord example for feature: {name}")
+        #print(f"Parsing TFRecord example for feature: {name}")
 
         # Parse the serialized example using the feature description
         example = tf.io.parse_single_example(serialized_example, feature_description)
@@ -234,116 +235,6 @@ class IncrementalTrainDataGenerator:
             lambda x: self._parse_tf_example(x, feature_description, name)
         )
         return dataset
-
-    # def _create_feature_tensors(self, batch, sim_name):
-    #     """
-    #     Create feature tensors from the feature chunks.
-    #     """
-    #     # Get GCS URLs for npy chunks
-    #     feature_chunks, sim_dict = self.featurelabelchunksgenerator.get_feature_chunks(
-    #         sim_name
-    #     )
-
-    #     if feature_chunks:
-    #         if self.settings.DEBUG == 2:
-    #             print(f"GCS URLs for sim {sim_name}: {feature_chunks}")
-
-    #         # Download label chunks npy files from GCS. Uncomment this when finalized.
-    #         self._download_numpy_files(feature_chunks)
-
-    #         # Create TFRecord from numpy files
-    #         serialized_examples_list = self._create_tfrecord_from_numpy(
-    #             "geospatial_feature"
-    #         )
-
-    #         # Create a TensorFlow Dataset from the serialized examples
-    #         feature_dataset = self._create_tfrecord_dataset(
-    #             serialized_examples_list,
-    #             {
-    #                 "geospatial_feature": tf.io.FixedLenFeature(
-    #                     [1000, 1000, 8], tf.float32
-    #                 ),
-    #             },
-    #             "geospatial_feature",
-    #         )
-    #         # Batch the dataset
-    #         batched_feature_dataset = feature_dataset.batch(batch)
-
-    #         return batched_feature_dataset
-    #     else:
-    #         print(f"No feature chunks found for sim {sim_name}.")
-    #         return None
-
-    # def _create_label_tensors(self, batch, sim_name):
-    #     """
-    #     Create label tensors from the label chunks.
-    #     """
-    #     # Get GCS URLs for npy chunks
-    #     label_chunks, sim_dict = self.featurelabelchunksgenerator.get_label_chunks(
-    #         sim_name
-    #     )
-
-    #     if label_chunks:
-    #         if self.settings.DEBUG == 2:
-    #             print(f"GCS URLs for sim {sim_name}: {label_chunks}")
-
-    #         # Download label chunks npy files from GCS. Uncomment this when finalized.
-    #         self._download_numpy_files(label_chunks)
-
-    #         # Create TFRecord from numpy files
-    #         serialized_examples_list = self._create_tfrecord_from_numpy("label")
-
-    #         # Create a TensorFlow Dataset from the serialized examples
-    #         label_dataset = self._create_tfrecord_dataset(
-    #             serialized_examples_list,
-    #             {
-    #                 "label": tf.io.FixedLenFeature(
-    #                     [1000, 1000, self.rainfall_duration], tf.float32
-    #                 )
-    #             },
-    #             "label",
-    #         )
-
-    #         # Batch the dataset
-    #         batched_label_dataset = label_dataset.batch(batch)
-
-    #         return batched_label_dataset
-    #     else:
-    #         print(f"No label chunks found for sim {sim_name}.")
-    #         return None
-
-    # def _create_temporal_tensors(self, sim_name):
-    #     """
-    #     Create temporal tensors from the temporal chunks.
-    #     """
-    #     # Get GCS URLs for npy chunks
-    #     temporal_chunks, sim_dict = (
-    #         self.featurelabelchunksgenerator.get_temporal_chunks(sim_name)
-    #     )
-
-    #     if temporal_chunks:
-    #         if self.settings.DEBUG == 2:
-    #             print(f"GCS URLs for sim {sim_name}: {temporal_chunks}")
-
-    #         # Download label chunks npy files from GCS. Uncomment this when finalized.
-    #         self._download_numpy_files(temporal_chunks)
-
-    #         # Create TFRecord from numpy files
-    #         serialized_examples_list = self._create_tfrecord_from_numpy(
-    #             "temporal_feature"
-    #         )
-
-    #         # Create a TensorFlow Dataset from the serialized examples
-    #         temporal_dataset = self._create_tfrecord_dataset(
-    #             serialized_examples_list,
-    #             {"temporal_feature": tf.io.FixedLenFeature([864], tf.float32)},
-    #             "temporal_feature",
-    #         )
-
-    #         return temporal_dataset
-    #     else:
-    #         print(f"No temporal chunks found for sim {sim_name}.")
-    #         return None
 
     def _generate_rainfall_duration(self, sim_name):
         rainfall_duration, rainfaill_dict = (
@@ -375,20 +266,17 @@ class IncrementalTrainDataGenerator:
                 "geospatial_feature"
             )
 
-            # Yield batches of data
-            for i in range(0, len(serialized_examples_list), self.batch_size):
-                yield [
-                    self._parse_tf_example(
-                        serialized_examples_list[j],
-                        {
-                            "geospatial_feature": tf.io.FixedLenFeature(
-                                [1000, 1000, 8], tf.float32
-                            ),
-                        },
-                        "geospatial_feature",
-                    )
-                    for j in range(i, min(i + self.batch_size, len(serialized_examples_list)))
-                ]
+            # Yield individual feature tensors
+            for serialized_example in serialized_examples_list:
+                yield self._parse_tf_example(
+                    serialized_example,
+                    {
+                        "geospatial_feature": tf.io.FixedLenFeature(
+                            [1000, 1000, 8], tf.float32
+                        ),
+                    },
+                    "geospatial_feature",
+                )
         else:
             print(f"No feature chunks found for sim {sim_name}.")
             return None
@@ -397,7 +285,10 @@ class IncrementalTrainDataGenerator:
         """
         Create label tensors from the label chunks.
         """
-        print("The output label tensor will be of shape: ", [1000, 1000, rainfall_duration])
+        print(
+            "The output label tensor will be of shape: ",
+            [1000, 1000, rainfall_duration],
+        )
 
         # Get GCS URLs for npy chunks
         label_chunks, sim_dict = self.featurelabelchunksgenerator.get_label_chunks(
@@ -414,22 +305,19 @@ class IncrementalTrainDataGenerator:
             # Create TFRecord from numpy files
             serialized_examples_list = self._create_tfrecord_from_numpy("label")
 
-            # Yield batches of data
-            for i in range(0, len(serialized_examples_list), self.batch_size):
-                for j in range(i, min(i + self.batch_size, len(serialized_examples_list))):
-                    # Yield the label tensor directly
-                    yield self._parse_tf_example(
-                        serialized_examples_list[j],
-                        {
-                            "label": tf.io.FixedLenFeature(
-                                [1000, 1000, rainfall_duration], tf.float32
-                            )
-                        },
-                        "label",
-                    )
+            # Yield individual label tensors
+            for serialized_example in serialized_examples_list:
+                yield self._parse_tf_example(
+                    serialized_example,
+                    {
+                        "label": tf.io.FixedLenFeature(
+                            [1000, 1000, rainfall_duration], tf.float32
+                        )
+                    },
+                    "label",
+                )
         else:
             print(f"No label chunks found for sim {sim_name}.")
-            return None
 
     def _generate_temporal_tensors(self, sim_name):
         """
@@ -452,21 +340,22 @@ class IncrementalTrainDataGenerator:
                 "temporal_feature"
             )
 
-            # Yield batches of data
-            for i in range(0, len(serialized_examples_list), self.batch_size):
-                yield [
-                    self._parse_tf_example(
-                        serialized_examples_list[j],
-                        {"temporal_feature": tf.io.FixedLenFeature([864], tf.float32)},
-                        "temporal_feature",
-                    )
-                    for j in range(i, min(i + self.batch_size, len(serialized_examples_list)))
-                ]
+            for serialized_example in serialized_examples_list:
+                yield self._parse_tf_example(
+                    serialized_example,
+                    {"temporal_feature": tf.io.FixedLenFeature([864], tf.float32)},
+                    "temporal_feature",
+                )
+
         else:
             print(f"No temporal chunks found for sim {sim_name}.")
             return None
     
-    def get_next_batch(self, sim_names, batch) -> List[FloodModelData]:
+    def rainfall_duration_generator(self, sim_name):
+        print(f"Generating rainfall duration for sim_name: {sim_name}")
+        yield self._generate_rainfall_duration(sim_name)
+
+    def get_next_batch(self, sim_names, batch_size) -> List[FloodModelData]:
         """
         Get the next batch of data for training.
         """
@@ -476,28 +365,34 @@ class IncrementalTrainDataGenerator:
 
         for sim_name in sim_names:
             print("\n")
-            print(f"------ Starting training data generation:{sim_names.index(sim_name)} :: {sim_name} ------------")
+            print(
+                f"------ Starting training data generation:{sim_names.index(sim_name)} :: {sim_name} ------------"
+            )
             print("Generating training data for sim_names: ", sim_names)
-            # Get the rainfall duration for the current simulation
-            rainfall_duration = self._generate_rainfall_duration(sim_name)
-            
+
+            # Lazy loading of rainfall duration
+            rainfall_duration_gen = functools.partial(self.rainfall_duration_generator, sim_name)
+            rainfall_duration = next(rainfall_duration_gen())
 
             # Lazy loading of datasets
             feature_dataset = tf.data.Dataset.from_generator(
-                lambda: self._generate_feature_tensors(sim_name),
+                functools.partial(self._generate_feature_tensors, sim_name),
                 output_types=tf.float32,
-                output_shapes=[1000, 1000, 8],
-            )
+                # output_shapes=[1000, 1000, 8],
+            ).batch(batch_size)
+
             label_dataset = tf.data.Dataset.from_generator(
-                lambda: self._generate_label_tensors(sim_name, rainfall_duration),
+                functools.partial(self._generate_label_tensors, sim_name, rainfall_duration),
                 output_types=tf.float32,
-                output_shapes=[1000, 1000, rainfall_duration],
-            )
+                # output_shapes=[1000, 1000, rainfall_duration],
+            ).batch(batch_size)
+
             temporal_dataset = tf.data.Dataset.from_generator(
-                lambda: self._generate_temporal_tensors(sim_name),
+                functools.partial(self._generate_temporal_tensors, sim_name),
                 output_types=tf.float32,
-                output_shapes=[864],
-            )
+                # output_shapes=[864],
+            ).batch(batch_size)
+
 
             # print type of these datasets
             print(f"feature_dataset type: {type(feature_dataset)}")
@@ -527,62 +422,3 @@ class IncrementalTrainDataGenerator:
 
         # Return the FloodModelData object
         return flood_model_data_list
-
-
-
-
-
-    # def get_next_batch(self, sim_names, batch) -> List[FloodModelData]:
-    #     """
-    #     Get the next batch of data for training.
-    #     """
-    #     # Get the next batch of feature tensors
-
-    #     flood_model_data_list = []
-
-    #     for sim_name in sim_names:
-    #         print("\n")
-    #         print("------ Starting training data generation ------------")
-    #         print("Generating training data for sim_names: ", sim_names)
-    #         # Get the rainfall duration for the current simulation
-    #         rainfall_duration = self._get_rainfall_duration(sim_name)
-    #         if rainfall_duration:
-    #             self.rainfall_duration = rainfall_duration
-    #         else:
-    #             print(f"No rainfall duration found for sim {sim_name}.")
-
-    #         feature_dataset = self._create_feature_tensors(batch, sim_name)
-    #         label_dataset = self._create_label_tensors(
-    #             batch,
-    #             sim_name,
-    #         )
-    #         temporal_dataset = self._create_temporal_tensors(sim_name)
-
-    #         # print type of these datasets
-    #         print(f"feature_dataset type: {type(feature_dataset)}")
-    #         print(f"label_dataset type: {type(label_dataset)}")
-    #         print(f"temporal_dataset type: {type(temporal_dataset)}")
-
-    #         if (
-    #             label_dataset is None
-    #             or feature_dataset is None
-    #             or temporal_dataset is None
-    #         ):
-    #             print(f"Error: Missing data for simulation {sim_name}")
-    #             continue  # Skip to the next simulation if any data is missing
-    #         else:
-    #             # Create a FloodModelData object
-    #             flood_model_data = FloodModelData(
-    #                 geospatial=feature_dataset,
-    #                 labels=label_dataset,
-    #                 temporal=temporal_dataset,
-    #                 storm_duration=rainfall_duration,
-    #             )
-    #             flood_model_data_list.append(flood_model_data)
-
-    #         print(
-    #             "------ Finished training data generation for this simulation ------------"
-    #         )
-
-    #     # Return the FloodModelData object
-    #     return flood_model_data_list
