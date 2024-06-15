@@ -281,10 +281,15 @@ class IncrementalTrainDataGenerator:
             print(f"No feature chunks found for sim {sim_name}.")
             return None
 
-    def _generate_label_tensors(self, sim_name, rainfall_duration):
+    def _generate_label_tensors(self, sim_name):
         """
         Create label tensors from the label chunks.
         """
+        # get the storm duration for the simulation
+        rainfall_duration = self._generate_rainfall_duration(sim_name)
+        if rainfall_duration is None:
+            return None
+
         print(
             "The output label tensor will be of shape: ",
             [1000, 1000, rainfall_duration],
@@ -353,7 +358,7 @@ class IncrementalTrainDataGenerator:
     
     def rainfall_duration_generator(self, sim_name):
         print(f"Generating rainfall duration for sim_name: {sim_name}")
-        yield self._generate_rainfall_duration(sim_name)
+        return self._generate_rainfall_duration(sim_name)
 
     def get_next_batch(self, sim_names, batch_size) -> List[FloodModelData]:
         """
@@ -370,10 +375,6 @@ class IncrementalTrainDataGenerator:
             )
             print("Generating training data for sim_names: ", sim_names)
 
-            # Lazy loading of rainfall duration
-            rainfall_duration_gen = functools.partial(self.rainfall_duration_generator, sim_name)
-            rainfall_duration = next(rainfall_duration_gen())
-
             # Lazy loading of datasets
             feature_dataset = tf.data.Dataset.from_generator(
                 functools.partial(self._generate_feature_tensors, sim_name),
@@ -382,7 +383,7 @@ class IncrementalTrainDataGenerator:
             ).batch(batch_size)
 
             label_dataset = tf.data.Dataset.from_generator(
-                functools.partial(self._generate_label_tensors, sim_name, rainfall_duration),
+                functools.partial(self._generate_label_tensors, sim_name),
                 output_types=tf.float32,
                 # output_shapes=[1000, 1000, rainfall_duration],
             ).batch(batch_size)
@@ -393,6 +394,9 @@ class IncrementalTrainDataGenerator:
                 # output_shapes=[864],
             ).batch(batch_size)
 
+            storm_duration = self.rainfall_duration_generator(sim_name)
+
+            print(f"Storm duration: {storm_duration}")
 
             # print type of these datasets
             print(f"feature_dataset type: {type(feature_dataset)}")
@@ -412,7 +416,7 @@ class IncrementalTrainDataGenerator:
                     geospatial=feature_dataset,
                     labels=label_dataset,
                     temporal=temporal_dataset,
-                    storm_duration=rainfall_duration,
+                    storm_duration=storm_duration,
                 )
                 flood_model_data_list.append(flood_model_data)
 
