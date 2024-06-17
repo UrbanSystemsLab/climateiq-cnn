@@ -281,7 +281,9 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     )
 
 
-def _build_feature_matrix(bucket_name, chunk_name, output_bucket) -> None:
+def _build_feature_matrix(
+    bucket_name: str, chunk_name: str, output_bucket: str
+) -> None:
     """Builds a feature matrix when an archive of geo files is uploaded."""
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
@@ -555,6 +557,8 @@ def _build_feature_matrix_from_archive(
             raise ValueError(
                 f"Some flood simulation data missing (see tar list: {files_in_tar})"
             )
+        # MyPy can't figure out that the all() call above prevents arguments in the
+        # following call from being None.
         feature_matrix = feature_raster_transformers.transform_to_feature_raster_layers(
             elevation,  # type: ignore
             boundaries,

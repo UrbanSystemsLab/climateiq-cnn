@@ -103,7 +103,7 @@ class BoundingBox:
         return BoundingBox(min_x=bbox[0], min_y=bbox[1], max_x=bbox[2], max_y=bbox[3])
 
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class InfiltrationParams:
     """Infiltration properties of a soil class in flood simulation configuration."""
 
@@ -114,7 +114,7 @@ class InfiltrationParams:
     effective_saturation: float
 
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class InfiltrationConfiguration:
     """Infiltration configuration for soil classes in flood simulation configuration."""
 

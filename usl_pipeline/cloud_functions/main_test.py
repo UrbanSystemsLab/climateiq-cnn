@@ -48,7 +48,7 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
             raster.write(tiff_array.astype(rasterio.uint8), 1)
         tiff_bytes = memfile.read()
 
-    polygons_bytes = str.encode("1\n5 0 1 1 0 0 0 0 1 1 0\n")
+    polygons_bytes = b"1\n5 0 1 1 0 0 0 0 1 1 0\n"
     # Place the tiff file bytes into an archive.
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode="w") as tar:
@@ -96,9 +96,8 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
         [
             mock.call().bucket("bucket"),
             mock.call().bucket().blob("study_area/name.tar"),
-            # I don't understand why the following calls are not registered in the mock!
-            # mock.call().bucket("climateiq-study-area-feature-chunks"),
-            # mock.call().bucket().blob("study_area/name.npy"),
+            mock.call().bucket("climateiq-study-area-feature-chunks"),
+            mock.call().bucket().blob("study_area/name.npy"),
         ]
     )
 
