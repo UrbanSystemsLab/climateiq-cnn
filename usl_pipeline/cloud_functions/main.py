@@ -665,7 +665,7 @@ def _read_elevation_features(
         raise ValueError("Elevation file unexpectedly empty.")
 
     # NODATA cells should be excluded from min/max calculation
-    present_data = elevation.data[elevation.data != elevation.header.nodata_value]
+    present_data = elevation_data[elevation_data != elevation.header.nodata_value]
 
     metadata = FeatureMetadata(
         elevation_min=float(present_data.min()),
