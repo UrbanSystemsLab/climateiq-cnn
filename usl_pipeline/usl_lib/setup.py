@@ -10,6 +10,7 @@ setup(
         "google-cloud-firestore",
         "rasterio",
         "shapely",
+        "h5py",
     ],
     extras_require={
         "dev": [
