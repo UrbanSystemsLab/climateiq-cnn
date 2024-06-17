@@ -1,6 +1,6 @@
 from shapely import geometry
 
-from study_area_uploader.transformers import soil_classes_transformers
+from usl_lib.transformers import soil_classes_transformers
 from usl_lib.shared import geo_data
 
 

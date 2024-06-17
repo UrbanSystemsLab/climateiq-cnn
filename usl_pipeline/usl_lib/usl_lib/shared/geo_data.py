@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -101,3 +101,110 @@ class BoundingBox:
     def from_tuple(bbox: Tuple[float, float, float, float]) -> "BoundingBox":
         """Creates an instance from a Tuple[min_x, min_y, max_x, max_y]."""
         return BoundingBox(min_x=bbox[0], min_y=bbox[1], max_x=bbox[2], max_y=bbox[3])
+
+
+@dataclass(slots=True, frozen=True)
+class InfiltrationParams:
+    """Infiltration properties of a soil class in flood simulation configuration."""
+
+    soil_class: int
+    hydraulic_conductivity: float
+    wetting_front_suction_head: float
+    effective_porosity: float
+    effective_saturation: float
+
+
+@dataclass(slots=True, frozen=True)
+class InfiltrationConfiguration:
+    """Infiltration configuration for soil classes in flood simulation configuration."""
+
+    items: list[InfiltrationParams]
+
+    def as_map(self) -> Dict[int, InfiltrationParams]:
+        """Represents items as a dictionary indexed by soil class."""
+        return {item.soil_class: item for item in self.items}
+
+
+# Default infiltration configuration used to run flood simulations.
+# TODO: Make these parameters configurable in case they vary between study areas.
+DEFAULT_INFILTRATION_CONFIGURATION = InfiltrationConfiguration(
+    items=[
+        InfiltrationParams(
+            soil_class=1,
+            hydraulic_conductivity=1.09,
+            wetting_front_suction_head=11.01,
+            effective_porosity=0.412,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=2,
+            hydraulic_conductivity=0.65,
+            wetting_front_suction_head=16.68,
+            effective_porosity=0.486,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=3,
+            hydraulic_conductivity=0.1,
+            wetting_front_suction_head=20.88,
+            effective_porosity=0.309,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=4,
+            hydraulic_conductivity=0.34,
+            wetting_front_suction_head=8.89,
+            effective_porosity=0.434,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=5,
+            hydraulic_conductivity=2.99,
+            wetting_front_suction_head=6.13,
+            effective_porosity=0.401,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=6,
+            hydraulic_conductivity=11.78,
+            wetting_front_suction_head=4.95,
+            effective_porosity=0.417,
+            effective_saturation=0.5,
+        ),
+        InfiltrationParams(
+            soil_class=11,
+            hydraulic_conductivity=1.09,
+            wetting_front_suction_head=11.01,
+            effective_porosity=0.412,
+            effective_saturation=0.99,
+        ),
+        InfiltrationParams(
+            soil_class=12,
+            hydraulic_conductivity=0.65,
+            wetting_front_suction_head=16.68,
+            effective_porosity=0.486,
+            effective_saturation=0.99,
+        ),
+        InfiltrationParams(
+            soil_class=13,
+            hydraulic_conductivity=0.1,
+            wetting_front_suction_head=20.88,
+            effective_porosity=0.309,
+            effective_saturation=0.99,
+        ),
+        InfiltrationParams(
+            soil_class=14,
+            hydraulic_conductivity=0.34,
+            wetting_front_suction_head=8.89,
+            effective_porosity=0.434,
+            effective_saturation=0.99,
+        ),
+        InfiltrationParams(
+            soil_class=16,
+            hydraulic_conductivity=11.78,
+            wetting_front_suction_head=4.95,
+            effective_porosity=0.417,
+            effective_saturation=0.5,
+        ),
+    ]
+)

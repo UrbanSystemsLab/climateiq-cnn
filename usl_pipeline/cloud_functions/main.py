@@ -17,15 +17,17 @@ import numpy
 from numpy.typing import NDArray
 import xarray
 import rasterio
+from shapely import geometry
 
 from usl_lib.chunkers import raster_chunkers
 from usl_lib.readers import simulation_readers
 from usl_lib.readers import config_readers
-from usl_lib.readers import elevation_readers
-import usl_lib.shared.wps_data as wps_data
+from usl_lib.readers import elevation_readers, polygon_readers
+from usl_lib.shared import geo_data, wps_data
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
+from usl_lib.transformers import feature_raster_transformers
 
 # How long to accept cloud function invocations after the triggering
 # event. It's up to GCP how frequently withing this period the cloud
@@ -272,9 +274,19 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     GCS. It produces a feature matrix for the geo data and writes that feature matrix to
     another GCS bucket for eventual use in model training and prediction.
     """
+    _build_feature_matrix(
+        cloud_event.data["bucket"],
+        cloud_event.data["name"],
+        cloud_storage.FEATURE_CHUNKS_BUCKET,
+    )
+
+
+def _build_feature_matrix(
+    bucket_name: str, chunk_name: str, output_bucket: str
+) -> None:
+    """Builds a feature matrix when an archive of geo files is uploaded."""
     storage_client = storage.Client()
-    bucket = storage_client.bucket(cloud_event.data["bucket"])
-    chunk_name = cloud_event.data["name"]
+    bucket = storage_client.bucket(bucket_name)
     chunk_blob = bucket.blob(chunk_name)
 
     with chunk_blob.open("rb") as archive:
@@ -283,9 +295,7 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
             raise ValueError(f"Empty archive found in {chunk_blob}")
 
     feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
-    feature_blob = storage_client.bucket(cloud_storage.FEATURE_CHUNKS_BUCKET).blob(
-        str(feature_file_name)
-    )
+    feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
 
     _write_as_npy(feature_blob, feature_matrix)
     _write_metastore_entry(chunk_blob, feature_blob, metadata)
@@ -488,6 +498,13 @@ def _timestep_number_from_rsl_path(rsl_path: str) -> str:
     return time_step_num.group(1)
 
 
+def _read_polygons_from_byte_stream(
+    stream: IO[bytes],
+) -> list[Tuple[geometry.Polygon, int]]:
+    """Reads polygons from textual file content provided in form of a byte stream."""
+    return list(polygon_readers.read_polygons_from_text_file(io.TextIOWrapper(stream)))
+
+
 def _build_feature_matrix_from_archive(
     archive: BinaryIO,
 ) -> Tuple[Optional[NDArray], FeatureMetadata]:
@@ -500,6 +517,14 @@ def _build_feature_matrix_from_archive(
       A tuple of (array, metadata) for the feature matrix and
       metadata describing the feature matrix.
     """
+    metadata: FeatureMetadata = FeatureMetadata()
+    elevation: Optional[geo_data.Elevation] = None
+    boundaries: Optional[list[Tuple[geometry.Polygon, int]]] = None
+    buildings: Optional[list[Tuple[geometry.Polygon, int]]] = None
+    green_areas: Optional[list[Tuple[geometry.Polygon, int]]] = None
+    soil_classes: Optional[list[Tuple[geometry.Polygon, int]]] = None
+    files_in_tar = []
+
     with tarfile.TarFile(fileobj=archive) as tar:
         for member in tar:
             fd = tar.extractfile(member)
@@ -507,15 +532,42 @@ def _build_feature_matrix_from_archive(
                 continue
 
             name = pathlib.PurePosixPath(member.name).name
+            files_in_tar.append(name)
             # TODO: Group logic branch by path (per hazard model)
+            # Handle flood model input files (CityCat)
             if name == file_names.ELEVATION_TIF:
-                return _read_elevation_features(fd)
+                elevation, metadata = _read_elevation_features(fd)
+            elif name == file_names.BOUNDARIES_TXT:
+                boundaries = _read_polygons_from_byte_stream(fd)
+            elif name == file_names.BUILDINGS_TXT:
+                buildings = _read_polygons_from_byte_stream(fd)
+            elif name == file_names.GREEN_AREAS_TXT:
+                green_areas = _read_polygons_from_byte_stream(fd)
+            elif name == file_names.SOIL_CLASSES_TXT:
+                soil_classes = _read_polygons_from_byte_stream(fd)
             # Handle heat model input files (WPS)
             elif name.startswith("met_em") and name.endswith(".nc"):
                 return _build_wps_feature_matrix(fd)
             # TODO: handle additional archive members.
             else:
                 logging.warning(f"Unexpected member name: {name}")
+
+    if any((elevation, buildings, green_areas, soil_classes)):
+        if not all((elevation, buildings, green_areas, soil_classes)):
+            raise ValueError(
+                f"Some flood simulation data missing (see tar list: {files_in_tar})"
+            )
+        # MyPy can't figure out that the all() call above prevents arguments in the
+        # following call from being None.
+        feature_matrix = feature_raster_transformers.transform_to_feature_raster_layers(
+            elevation,  # type: ignore
+            boundaries,
+            buildings,  # type: ignore
+            green_areas,  # type: ignore
+            soil_classes,  # type: ignore
+            geo_data.DEFAULT_INFILTRATION_CONFIGURATION,
+        )
+        return feature_matrix, metadata
 
     return None, FeatureMetadata()
 
@@ -594,30 +646,33 @@ def _apply_minmax_scaler(x, minx, maxx):
     return (x - minx) / (maxx - minx)
 
 
-def _read_elevation_features(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+def _read_elevation_features(
+    fd: IO[bytes],
+) -> Tuple[geo_data.Elevation, FeatureMetadata]:
     """Reads the elevation file into a matrix and returns metadata for the matrix.
 
     Args:
       fd: The file containing elevation data.
 
     Returns:
-      A tuple of (array, metadata) for the elevation matrix and
-      metadata describing the feature matrix.
+      A tuple of (Elevation, metadata) for the elevation data and metadata describing
+      the feature matrix.
     """
     elevation = elevation_readers.read_from_geotiff(rasterio.io.MemoryFile(fd.read()))
+    elevation_data = elevation.data
 
-    if elevation.data is None:
+    if elevation_data is None:
         raise ValueError("Elevation file unexpectedly empty.")
 
     # NODATA cells should be excluded from min/max calculation
-    present_data = elevation.data[elevation.data != elevation.header.nodata_value]
+    present_data = elevation_data[elevation_data != elevation.header.nodata_value]
 
     metadata = FeatureMetadata(
         elevation_min=float(present_data.min()),
         elevation_max=float(present_data.max()),
     )
 
-    return elevation.data, metadata
+    return elevation, metadata
 
 
 def _write_metastore_entry(
