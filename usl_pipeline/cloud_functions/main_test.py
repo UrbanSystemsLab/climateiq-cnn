@@ -36,6 +36,7 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
             height=height,
             count=1,
             dtype=rasterio.uint8,
+            nodata=1,
         ) as raster:
             raster.write(tiff_array.astype(rasterio.uint8), 1)
         tiff_bytes = memfile.read()
@@ -126,7 +127,7 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
     # Ensure we set the elevation min & max
     mock_firestore_client().transaction().update.assert_called_once_with(
         mock_firestore_client().collection().document(),
-        {"elevation_min": 1, "elevation_max": 6},
+        {"elevation_min": 2, "elevation_max": 6},
     )
 
 
