@@ -1,6 +1,7 @@
 """Useful constants for referring to file names consistently."""
 
 ELEVATION_TIF = "elevation.tif"
+HEADER_JSON = "header.json"
 BOUNDARIES_TXT = "boundaries.txt"
 BUILDINGS_TXT = "buildings.txt"
 GREEN_AREAS_TXT = "green_areas.txt"

@@ -1,3 +1,4 @@
+import json
 import typing
 from typing import Optional
 
@@ -135,3 +136,27 @@ def read_from_esri_ascii(
             data[data == input_nodata] = no_data_value
 
     return geo_data.Elevation(header=header, data=data)
+
+
+def read_header_from_json_file(
+    input_stream: typing.TextIO,
+) -> geo_data.ElevationHeader:
+    """Loading elevation header from JSON file/stream.
+
+    Args:
+        input_stream: Text stream to load from.
+
+    Returns:
+        Elevation header.
+    """
+    header_map = json.load(input_stream)
+    crs_text = header_map["crs"]
+    return geo_data.ElevationHeader(
+        col_count=int(header_map["col_count"]),
+        row_count=int(header_map["row_count"]),
+        x_ll_corner=float(header_map["x_ll_corner"]),
+        y_ll_corner=float(header_map["y_ll_corner"]),
+        cell_size=float(header_map["cell_size"]),
+        nodata_value=float(header_map["nodata_value"]),
+        crs=None if crs_text is None else rasterio.CRS({"init": crs_text}),
+    )

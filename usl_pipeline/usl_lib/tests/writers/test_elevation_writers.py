@@ -4,6 +4,7 @@ from io import StringIO
 
 import numpy
 from numpy import testing
+import rasterio
 
 from usl_lib.readers import elevation_readers
 from usl_lib.writers import elevation_writers
@@ -57,3 +58,28 @@ def test_write_to_geotiff():
             elevation2 = elevation_readers.read_from_geotiff(input_fd)
         assert elevation2.header == header
         testing.assert_array_equal(elevation2.data, data)
+
+
+def test_write_elevation_header_to_json():
+    header = geo_data.ElevationHeader(
+        col_count=3,
+        row_count=4,
+        x_ll_corner=10.0,
+        y_ll_corner=20.0,
+        cell_size=1.0,
+        nodata_value=-30.0,
+        crs=rasterio.CRS({"init": "EPSG:32618"}),
+    )
+    buffer = StringIO()
+    elevation_writers.write_header_to_json_file(header, buffer)
+    assert buffer.getvalue() == (
+        "{\n"
+        + '    "col_count": 3,\n'
+        + '    "row_count": 4,\n'
+        + '    "x_ll_corner": 10.0,\n'
+        + '    "y_ll_corner": 20.0,\n'
+        + '    "cell_size": 1.0,\n'
+        + '    "nodata_value": -30.0,\n'
+        + '    "crs": "EPSG:32618"\n'
+        + "}"
+    )
