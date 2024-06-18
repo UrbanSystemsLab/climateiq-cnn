@@ -4,8 +4,26 @@ data "google_project" "project" {
 # Place the source code for the cloud function into a GCS bucket.
 data "archive_file" "source" {
   type        = "zip"
-  source_dir  = "${path.module}/files/cloud_function_source"
   output_path = "${path.module}/files/cloud_function_source.zip"
+
+  # Add main.py to the root of the zip file.
+  source {
+    content  = file("{path.module}/../../../usl_pipeline/cloud_functions/main.py")
+    filename = "main.py"
+  }
+  # Add requirements.txt to the root of the zip file.
+  source {
+    content  = file("{path.module}/../../../usl_pipeline/cloud_functions/requirements.txt")
+    filename = "requirements.txt"
+  }
+  # Add all the contents of usl_lib to a usl_lib directory inside the zip file.
+  dynamic "source" {
+    for_each = fileset("{path.module}/../../../usl_pipeline/usl_lib/usl_lib/", "**/*.py")
+    content {
+      content  = file("{path.module}/../../../usl_pipeline/usl_lib/usl_lib/${source.value}")
+      filename = "usl_lib/${source.value}"
+    }
+  }
 }
 
 resource "google_storage_bucket" "source" {
