@@ -175,3 +175,28 @@ def test_load_elevation_from_esri_ascii_with_missing_nodata_header():
                 [3.0, 4.0, 5.0],
             ],
         )
+
+
+def test_read_elevation_header_from_json():
+    with io.StringIO(
+        "{\n"
+        + '    "col_count": 3,\n'
+        + '    "row_count": 4,\n'
+        + '    "x_ll_corner": 10.0,\n'
+        + '    "y_ll_corner": 20.0,\n'
+        + '    "cell_size": 1.0,\n'
+        + '    "nodata_value": -30.0,\n'
+        + '    "crs": "EPSG:32618"\n'
+        + "}"
+    ) as json_file:
+        assert elevation_readers.read_header_from_json_file(
+            json_file
+        ) == geo_data.ElevationHeader(
+            col_count=3,
+            row_count=4,
+            x_ll_corner=10.0,
+            y_ll_corner=20.0,
+            cell_size=1.0,
+            nodata_value=-30.0,
+            crs=rasterio.CRS({"init": "EPSG:32618"}),
+        )

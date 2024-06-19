@@ -145,12 +145,25 @@ def test_prepare_and_upload_study_area_files_no_boundaries_buildings_only():
             buildings_input_file_path,
             [(bbox_polygon(2, 1, 4, 3), 1)],
         )
-        study_area_bucket = mock.MagicMock(spec=storage.Bucket)
+
+        # Elevation header storage file mocks
+        header_cloud_storage_buffer = StringIO()
+        header_cloud_storage_buffer.close = lambda: None  # Want to check content
+        header_blob = mock.MagicMock(spec=storage.Blob)
+        header_blob.open.return_value = header_cloud_storage_buffer
+        # Buildings storage file mocks
         buildings_cloud_storage_buffer = StringIO()
         buildings_cloud_storage_buffer.close = lambda: None  # Want to check content
-        study_area_bucket.blob.return_value.open.return_value = (
-            buildings_cloud_storage_buffer
-        )
+        buildings_blob = mock.MagicMock(spec=storage.Blob)
+        buildings_blob.open.return_value = buildings_cloud_storage_buffer
+
+        study_area_bucket = mock.MagicMock(spec=storage.Bucket)
+        elevation_blob = mock.MagicMock(spec=storage.Blob)
+        study_area_bucket.blob.side_effect = [
+            header_blob,
+            elevation_blob,
+            buildings_blob,
+        ]
         prepared_inputs = study_area_transformers.prepare_and_upload_study_area_files(
             "TestArea1",
             elevation_input_file_path,
@@ -167,11 +180,27 @@ def test_prepare_and_upload_study_area_files_no_boundaries_buildings_only():
         assert len(prepared_inputs.buildings_polygons) == 1
         assert prepared_inputs.buildings_polygons[0][0].equals(bbox_polygon(2, 1, 4, 3))
         assert study_area_bucket.mock_calls == [
+            mock.call.blob("TestArea1/header.json"),
             mock.call.blob("TestArea1/elevation.tif"),
-            mock.call.blob().upload_from_filename(str(elevation_input_file_path)),
             mock.call.blob("TestArea1/buildings.txt"),
-            mock.call.blob().open("w"),
         ]
+        assert header_blob.mock_calls == [mock.call.open("w")]
+        assert elevation_blob.mock_calls == [
+            mock.call.upload_from_filename(str(prepared_inputs.elevation_file_path))
+        ]
+        assert buildings_blob.mock_calls == [mock.call.open("w")]
+        assert (
+            header_cloud_storage_buffer.getvalue()
+            == "{\n"
+            + '    "col_count": 5,\n'
+            + '    "row_count": 5,\n'
+            + '    "x_ll_corner": 0.0,\n'
+            + '    "y_ll_corner": 0.0,\n'
+            + '    "cell_size": 1.0,\n'
+            + '    "nodata_value": 0.0,\n'
+            + '    "crs": "EPSG:32618"\n'
+            + "}"
+        )
         assert (
             buildings_cloud_storage_buffer.getvalue()
             == "1\n" + "5 2.0 2.0 4.0 4.0 2.0 1.0 3.0 3.0 1.0 1.0\n"
@@ -218,6 +247,11 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
         boundaries_cloud_storage_buffer.close = lambda: None  # Want to check content
         boundaries_blob = mock.MagicMock(spec=storage.Blob)
         boundaries_blob.open.return_value = boundaries_cloud_storage_buffer
+        # Elevation header storage file mocks
+        header_cloud_storage_buffer = StringIO()
+        header_cloud_storage_buffer.close = lambda: None  # Want to check content
+        header_blob = mock.MagicMock(spec=storage.Blob)
+        header_blob.open.return_value = header_cloud_storage_buffer
         # Green areas storage file mocks
         green_areas_cloud_storage_buffer = StringIO()
         green_areas_cloud_storage_buffer.close = lambda: None  # Want to check content
@@ -233,6 +267,7 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
         elevation_blob = mock.MagicMock(spec=storage.Blob)
         study_area_bucket.blob.side_effect = [
             boundaries_blob,
+            header_blob,
             elevation_blob,
             green_areas_blob,
             soil_classes_blob,
@@ -285,11 +320,13 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
         assert prepared_inputs.soil_classes_polygons[0][1] == 99
         assert study_area_bucket.mock_calls == [
             mock.call.blob("TestArea1/boundaries.txt"),
+            mock.call.blob("TestArea1/header.json"),
             mock.call.blob("TestArea1/elevation.tif"),
             mock.call.blob("TestArea1/green_areas.txt"),
             mock.call.blob("TestArea1/soil_classes.txt"),
         ]
         assert boundaries_blob.mock_calls == [mock.call.open("w")]
+        assert header_blob.mock_calls == [mock.call.open("w")]
         assert elevation_blob.mock_calls == [
             mock.call.upload_from_filename(str(prepared_inputs.elevation_file_path))
         ]
@@ -298,6 +335,18 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
         assert (
             boundaries_cloud_storage_buffer.getvalue()
             == "1\n" + "5 1.0 1.0 3.0 3.0 1.0 1.0 3.0 3.0 1.0 1.0\n"
+        )
+        assert (
+            header_cloud_storage_buffer.getvalue()
+            == "{\n"
+            + '    "col_count": 4,\n'
+            + '    "row_count": 4,\n'
+            + '    "x_ll_corner": 0.0,\n'
+            + '    "y_ll_corner": 0.0,\n'
+            + '    "cell_size": 1.0,\n'
+            + '    "nodata_value": 0.0,\n'
+            + '    "crs": "EPSG:32618"\n'
+            + "}"
         )
         assert (
             green_areas_cloud_storage_buffer.getvalue()
@@ -338,6 +387,11 @@ def test_prepare_and_upload_study_area_files_with_non_green_area_soil_class():
         )
 
         # Mocks:
+        # Elevation header storage file mocks
+        header_cloud_storage_buffer = StringIO()
+        header_cloud_storage_buffer.close = lambda: None  # Want to check content
+        header_blob = mock.MagicMock(spec=storage.Blob)
+        header_blob.open.return_value = header_cloud_storage_buffer
         # Green areas storage file mocks
         green_areas_cloud_storage_buffer = StringIO()
         green_areas_cloud_storage_buffer.close = lambda: None  # Want to check content
@@ -352,6 +406,7 @@ def test_prepare_and_upload_study_area_files_with_non_green_area_soil_class():
         study_area_bucket = mock.MagicMock(spec=storage.Bucket)
         elevation_blob = mock.MagicMock(spec=storage.Blob)
         study_area_bucket.blob.side_effect = [
+            header_blob,
             elevation_blob,
             green_areas_blob,
             soil_classes_blob,
@@ -401,6 +456,7 @@ def test_prepare_and_upload_study_area_files_with_non_green_area_soil_class():
         )
         assert prepared_inputs.soil_classes_polygons[0][1] == -9999  # default non-green
         assert study_area_bucket.mock_calls == [
+            mock.call.blob("TestArea1/header.json"),
             mock.call.blob("TestArea1/elevation.tif"),
             mock.call.blob("TestArea1/green_areas.txt"),
             mock.call.blob("TestArea1/soil_classes.txt"),

@@ -16,7 +16,7 @@ from usl_lib.transformers import (
     polygon_transformers,
     soil_classes_transformers,
 )
-from usl_lib.writers import polygon_writers
+from usl_lib.writers import elevation_writers, polygon_writers
 
 
 # Default soil class value that is recognized a non-green area.
@@ -164,8 +164,23 @@ def prepare_and_upload_study_area_files(
         elevation_transformers.crop_geotiff_to_sub_area(
             elevation_file_path, str(output_elevation_file_path), sub_area_bounding_box
         )
+        with open(output_elevation_file_path, "rb") as input_file:
+            elevation_header = elevation_readers.read_from_geotiff(
+                input_file, header_only=True
+            ).header
 
-    # Write elevation to study area bucket
+    # Write elevation header to study area bucket
+    with study_area_bucket.blob(f"{study_area_name}/{file_names.HEADER_JSON}").open(
+        "w"
+    ) as fd:
+        elevation_writers.write_header_to_json_file(elevation_header, fd)
+    logging.info(
+        "File [%s/%s] was written to study area bucket",
+        study_area_name,
+        file_names.HEADER_JSON,
+    )
+
+    # Write elevation data to study area bucket
     study_area_bucket.blob(
         f"{study_area_name}/{file_names.ELEVATION_TIF}"
     ).upload_from_filename(str(output_elevation_file_path))

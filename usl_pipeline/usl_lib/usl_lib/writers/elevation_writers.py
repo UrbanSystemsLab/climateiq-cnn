@@ -1,3 +1,4 @@
+import json
 import pathlib
 import typing
 
@@ -22,6 +23,30 @@ def write_header_to_esri_ascii_raster_file(
     file.write("yllcorner {}\n".format(header.y_ll_corner))
     file.write("cellsize {}\n".format(header.cell_size))
     file.write("NODATA_value {}\n".format(header.nodata_value))
+
+
+def write_header_to_json_file(
+    header: geo_data.ElevationHeader, output_stream: typing.TextIO
+) -> None:
+    """Writes elevation header to an output stream in JSON format.
+
+    Args:
+        header: Elevation header.
+        output_stream: Output file/stream to write data to.
+    """
+    json.dump(
+        {
+            "col_count": header.col_count,
+            "row_count": header.row_count,
+            "x_ll_corner": header.x_ll_corner,
+            "y_ll_corner": header.y_ll_corner,
+            "cell_size": header.cell_size,
+            "nodata_value": header.nodata_value,
+            "crs": None if header.crs is None else header.crs.to_string(),
+        },
+        output_stream,
+        indent=4,
+    )
 
 
 def write_to_esri_ascii_raster_file(
