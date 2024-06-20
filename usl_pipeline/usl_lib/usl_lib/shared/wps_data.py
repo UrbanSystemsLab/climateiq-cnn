@@ -80,5 +80,14 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.NONE,
             },
         },
+        # GMTED2010 30-arc-second topography height
+        "HGT_M": {
+            "unit": Unit.METERS,
+            "scaling": {
+                "type": ScalingType.GLOBAL,
+                "min": 0,
+                "max": 5100,
+            },
+        },
     }
 )
