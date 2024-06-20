@@ -89,7 +89,7 @@ ML_REQUIRED_VARS_REPO = dict(
             "scaling": {
                 "type": ScalingType.GLOBAL,
                 "min": 0,
-                "max": 5100,         
+                "max": 5100,
             },
         },
         # [Derived] 10meter Wind Speed
