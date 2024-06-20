@@ -25,16 +25,11 @@ is stored.
 To deploy to staging, from the root of this repository:
 ```bash
 cd terraform/dev
-../cp_cloud_function_files.sh 
 terraform apply
 ```
 
 To deploy to production, perform the same steps but from the `prod` directory
 ```bash
 cd terraform/prod
-../cp_cloud_function_files.sh 
 terraform apply
 ```
-
-You must run the `cp_cloud_function_files.sh` each time you update the
-cloud function source code you wish to deploy.

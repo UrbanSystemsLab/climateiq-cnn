@@ -406,6 +406,44 @@ def test_process_wps_feature_apply_minmax_scaler():
     )
 
 
+def test_compute_custom_wps_variables_wind():
+    ncfile = netCDF4.Dataset("met_em_test.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile.createDimension("Time", 1)
+    ncfile.createDimension("west_east", 3)
+    ncfile.createDimension("south_north", 3)
+    ncfile.createDimension("west_east_stag", 4)
+    ncfile.createDimension("south_north_stag", 4)
+    ncfile.createDimension("num_metgrid_levels", 3)
+
+    # In WPS/WRF files, 'Times'->dimension and 'Time'->variable
+    ncfile.createVariable("Times", "f8", ("Time",))
+    uu = ncfile.createVariable(
+        "UU", "float32", ("Time", "num_metgrid_levels", "south_north", "west_east_stag")
+    )
+    vv = ncfile.createVariable(
+        "VV", "float32", ("Time", "num_metgrid_levels", "south_north_stag", "west_east")
+    )
+
+    uu[:] = numpy.array(
+        [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]], dtype=numpy.float32
+    )
+    vv[:] = numpy.array(
+        [[22, 33, 44], [55, 66, 77], [88, 99, 111], [222, 333, 444]],
+        dtype=numpy.float32,
+    )
+
+    memfile = ncfile.close()
+    ncfile_bytes = memfile.tobytes()
+    ds = xarray.open_dataset(io.BytesIO(ncfile_bytes))
+
+    processed_ds = main._compute_custom_wps_variables(ds)
+
+    # Check that processed dataset contains newly computed variables
+    assert all(var in processed_ds.keys() for var in ["WSPD10", "WDIR10"])
+    # Check expected shape of computed variable
+    assert processed_ds.data_vars["WSPD10"].values.shape == (1, 3, 3, 3)
+
+
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)

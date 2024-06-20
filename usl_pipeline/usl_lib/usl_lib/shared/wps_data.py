@@ -21,6 +21,9 @@ class Unit(Enum):
     KELVIN = 5
     # Represented in decimal, range:0->1
     FRACTION = 6
+    METERSPERSEC = 7
+    # Measured clockwise from true north, range:0->359
+    DEGREES = 8
 
 
 ML_REQUIRED_VARS_REPO = dict(
@@ -86,7 +89,25 @@ ML_REQUIRED_VARS_REPO = dict(
             "scaling": {
                 "type": ScalingType.GLOBAL,
                 "min": 0,
-                "max": 5100,
+                "max": 5100,         
+            },
+        },
+        # [Derived] 10meter Wind Speed
+        "WSPD10": {
+            "unit": Unit.METERSPERSEC,
+            "scaling": {
+                "type": ScalingType.GLOBAL,
+                "min": 0,
+                "max": 100,
+            },
+        },
+        # [Derived] 10meter Wind Direction
+        "WDIR10": {
+            "unit": Unit.DEGREES,
+            "scaling": {
+                "type": ScalingType.GLOBAL,
+                "min": 0,
+                "max": 359,
             },
         },
     }

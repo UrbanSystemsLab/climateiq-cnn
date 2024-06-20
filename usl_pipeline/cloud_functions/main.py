@@ -578,7 +578,10 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     with xarray.open_dataset(fd) as ds:  # type: ignore
         # Assign Time coordinates so datetime is associated with each data array
         ds = ds.assign_coords(Time=ds.Times)
+        # Derive non-native variables and assign to dataset
+        ds = _compute_custom_wps_variables(ds)
 
+        # Apply feature engineering and build features matrix
         features_components = []
         for var_name in wps_data.ML_REQUIRED_VARS_REPO.keys():
             var_config = wps_data.ML_REQUIRED_VARS_REPO[var_name]
@@ -591,6 +594,36 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
 
     # TODO: Write to metastore
     return features_matrix, FeatureMetadata()
+
+
+def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
+    """Computes additional, non-native variables for WPS datasets.
+
+    Args:
+      dataset: The xarray dataset containing all WPS data and its metadata.
+
+    Returns:
+      A new xarray dataset with newly derived variables.
+    """
+    # Derive wind components: WSPD10 (wind speed), WDIR10 (wind direction)
+    if all(var in dataset.keys() for var in ["UU", "VV"]):
+        uu = dataset.data_vars["UU"]
+        vv = dataset.data_vars["VV"]
+
+        # Interpolate UU and VV to the common 200x200 grid
+        uu_centered = (uu[:, :, :, :-1] + uu[:, :, :, 1:]) / 2
+        vv_centered = (vv[:, :, :-1, :] + vv[:, :, 1:, :]) / 2
+
+        wind_speed = numpy.sqrt(uu_centered.values**2 + vv_centered.values**2)
+        wind_direction = (
+            270 - numpy.degrees(numpy.arctan2(vv_centered.values, uu_centered.values))
+        ) % 360
+
+        new_dims = ["Time", "num_metgrid_levels", "south_north", "west_east"]
+        dataset = dataset.assign(WSPD10=(new_dims, wind_speed))
+        dataset = dataset.assign(WDIR10=(new_dims, wind_direction))
+
+    return dataset
 
 
 def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray:
