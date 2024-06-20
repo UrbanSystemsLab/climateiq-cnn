@@ -149,7 +149,7 @@ def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> No
     files.
     """
     file_name = pathlib.PurePosixPath(cloud_event.data["name"])
-    if file_name.name == file_names.ELEVATION_TIF:
+    if file_name.name == file_names.HEADER_JSON:
         storage_client = storage.Client()
         db = firestore.Client()
 
@@ -158,9 +158,7 @@ def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> No
 
         with blob.open("rb") as fd:
             # We're only reading the header, so reading the first MB is plenty.
-            header = elevation_readers.read_from_geotiff(
-                rasterio.io.MemoryFile(fd.read(1048576)), header_only=True
-            ).header
+            header = elevation_readers.read_header_from_json_file(fd)
         # File names should be in the form <study_area_name>/<file_name>
         study_area_name = file_name.parent.name
 
