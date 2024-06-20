@@ -83,6 +83,15 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.NONE,
             },
         },
+        # GMTED2010 30-arc-second topography height
+        "HGT_M": {
+            "unit": Unit.METERS,
+            "scaling": {
+                "type": ScalingType.GLOBAL,
+                "min": 0,
+                "max": 5100,
+            },
+        },
         # [Derived] 10meter Wind Speed
         "WSPD10": {
             "unit": Unit.METERSPERSEC,
