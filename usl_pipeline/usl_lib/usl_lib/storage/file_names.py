@@ -11,3 +11,6 @@ CITYCAT_ELEVATION_ASC = "Domain_DEM.asc"
 CITYCAT_BUILDINGS_TXT = "Buildings.txt"
 CITYCAT_GREEN_AREAS_TXT = "GreenAreas.txt"
 CITYCAT_SPATIAL_GREEN_AREAS_TXT = "Spatial_GreenAreas.txt"
+
+# Match only Domain 3 (500m) WPS files
+WPS_DOMAIN3_NC_REGEX = r"met_em\.d03.*\.nc$"

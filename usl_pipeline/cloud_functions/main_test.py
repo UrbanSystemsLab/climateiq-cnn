@@ -188,7 +188,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     )
 
     # Create an in-memory netcdf file and grab its bytes
-    ncfile = netCDF4.Dataset("met_em_test.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
     ncfile.createDimension("Time", 1)
     ncfile.createDimension("west_east", 3)
     ncfile.createDimension("south_north", 3)
@@ -218,7 +218,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     # Place the ncfile bytes into an archive.
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode="w") as tar:
-        nc = tarfile.TarInfo("met_em_test.nc")
+        nc = tarfile.TarInfo("met_em.d03_test.nc")
         nc.size = len(ncfile_bytes)
         tar.addfile(nc, io.BytesIO(ncfile_bytes))
     # Seek to the beginning so the file can be read.
@@ -493,6 +493,59 @@ def test_build_feature_matrix_errors(
             ),
         ]
     )
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+def test_build_and_upload_study_area_chunk(mock_storage_client, mock_firestore_client):
+    # Create an in-memory netcdf file and grab its bytes
+    ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile.createDimension("Time", 1)
+    ncfile.createVariable("time", "f8", ("Time",))
+
+    memfile = ncfile.close()
+
+    # Create a mock blob for the input file uploaded
+    mock_input_blob = mock.MagicMock()
+    mock_input_blob.name = "study_area/met_em.d03_test.nc"
+    mock_input_blob.bucket.name = "input-bucket"
+    mock_input_blob.open.return_value = memfile
+
+    # Create a mock blob for the archive we will upload.
+    mock_chunk_blob = mock.MagicMock()
+    mock_chunk_blob.name = "study_area/met_em.d03_test.nc"
+    mock_chunk_blob.bucket.name = "climateiq-study-area-chunks"
+
+    # Return the mock blobs.
+    mock_storage_client().bucket("").blob.side_effect = [
+        mock_input_blob,
+        mock_chunk_blob,
+    ]
+    mock_storage_client.reset_mock()
+
+    main.build_and_upload_study_area_chunk(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "input-bucket",
+                "name": "study_area/met_em.d03_test.nc",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we worked with the right GCP paths.
+    mock_storage_client.assert_has_calls(
+        [
+            mock.call().bucket("input-bucket"),
+            mock.call().bucket().blob("study_area/met_em.d03_test.nc"),
+            mock.call().bucket("climateiq-study-area-chunks"),
+            mock.call().bucket().blob("study_area/met_em.d03_test.nc"),
+        ]
+    )
+
+    # Ensure we attempted to upload the chunked file
+    mock_chunk_blob.upload_from_file.assert_called_once_with(mock.ANY)
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
