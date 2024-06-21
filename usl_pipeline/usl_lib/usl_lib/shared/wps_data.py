@@ -109,7 +109,7 @@ ML_REQUIRED_VARS_REPO = dict(
                 "max": 359,
             },
         },
-         # Monthly Climatology MODIS Leaf Area Index
+        # Monthly Climatology MODIS Leaf Area Index
         "LAI12M": {
             "unit": Unit.FRACTION,
             "scaling": {
@@ -118,7 +118,8 @@ ML_REQUIRED_VARS_REPO = dict(
                 "max": 10,
             },
         },
-        # Soil Temp layer 0-10cm below ground (WPS Initial Condition) THIS IS FOR SUMMER!!! (-10C to 60C)
+        # Soil Temp layer 0-10cm below ground (WPS Initial Condition)
+        # THIS IS FOR SUMMER!!! (-10C to 60C)
         "ST000010": {
             "unit": Unit.KELVIN,
             "scaling": {
@@ -134,7 +135,8 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP1 mean building height
+        # Custom UCPs for cities.
+        # UCP1 mean building height
         "BUILD_HEIGHT": {
             "unit": Unit.METERS,
             "scaling": {
@@ -143,112 +145,128 @@ ML_REQUIRED_VARS_REPO = dict(
                 "max": 150,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 0-5m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 0-5m frequency bin
         "HGT_DIST_5m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 5-10m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 5-10m frequency bin
         "HGT_DIST_10m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 10-15m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 10-15m frequency bin
         "HGT_DIST_15m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 15-20m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 15-20m frequency bin
         "HGT_DIST_20m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 20-25m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 20-25m frequency bin
         "HGT_DIST_25m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 25-30m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 25-30m frequency bin
         "HGT_DIST_30m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 30-35m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 30-35m frequency bin
         "HGT_DIST_35m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 35-40m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 35-40m frequency bin
         "HGT_DIST_40m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 40-45m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 40-45m frequency bin
         "HGT_DIST_45m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 45-50m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 45-50m frequency bin
         "HGT_DIST_50m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 50-55m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 50-55m frequency bin
         "HGT_DIST_55m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 55-60m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 55-60m frequency bin
         "HGT_DIST_60m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 60-65m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 60-65m frequency bin
         "HGT_DIST_65m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 65-70m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 65-70m frequency bin
         "HGT_DIST_70m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP2 Distribution of building heights 70-75m frequency bin 
+        # Custom UCPs for cities.
+        # UCP2 Distribution of building heights 70-75m frequency bin
         "HGT_DIST_75m": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP3 Area weighted mean building height
+        # Custom UCPs for cities.
+        # UCP3 Area weighted mean building height
         "AW_BUILD_HEIGHT": {
             "unit": Unit.METERS,
             "scaling": {
@@ -257,7 +275,8 @@ ML_REQUIRED_VARS_REPO = dict(
                 "max": 250,
             },
         },
-        # Custom UCPs for cities. UCP4 Standard deviation of building height
+        # Custom UCPs for cities.
+        # UCP4 Standard deviation of building height
         "STDH_URB2D": {
             "unit": Unit.METERS,
             "scaling": {
@@ -266,14 +285,16 @@ ML_REQUIRED_VARS_REPO = dict(
                 "max": 200,
             },
         },
-        # Custom UCPs for cities. UCP5 Plan area fraction 
+        # Custom UCPs for cities.
+        # UCP5 Plan area fraction
         "BUILDING_AREA_FRACTION": {
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
             },
         },
-        # Custom UCPs for cities. UCP6 Building surface to plan area ratio. Update for Very Dense Cities 
+        # Custom UCPs for cities.
+        # UCP6 Building surface to plan area ratio. Update for Very Dense Cities
         "BUILD_SURF_RATIO": {
             "unit": Unit.FRACTION,
             "scaling": {
@@ -282,7 +303,8 @@ ML_REQUIRED_VARS_REPO = dict(
                 "max": 200,
             },
         },
-        # Custom UCPs for cities. UCP7 Urban fraction 
+        # Custom UCPs for cities.
+        # UCP7 Urban fraction
         "FRC_URB2D": {
             "unit": Unit.FRACTION,
             "scaling": {
