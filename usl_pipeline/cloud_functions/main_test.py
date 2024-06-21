@@ -16,7 +16,7 @@ import rasterio
 import xarray
 
 import main
-from usl_lib.shared import wps_data
+from usl_lib.shared import geo_data, wps_data
 from usl_lib.storage import file_names
 
 
@@ -1192,3 +1192,35 @@ def test_collapse_city_cat_output_chunks_deleted_chunks(mock_firestore_client):
     # Ensure we didn't try to delete the intermediary chunks.
     for blob in mock_blob.bucket.list_blobs.return_value:
         blob.delete.assert_not_called()
+
+
+def test_calculate_metadata_for_elevation_happy_path():
+    header = geo_data.ElevationHeader(
+        col_count=3,
+        row_count=2,
+        x_ll_corner=0.0,
+        y_ll_corner=2.0,
+        cell_size=1.0,
+        nodata_value=0.0,
+    )
+    data = numpy.array([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
+    metadata = main._calculate_metadata_for_elevation(
+        geo_data.Elevation(header=header, data=data)
+    )
+    assert metadata == main.FeatureMetadata(elevation_min=1.0, elevation_max=5.0)
+
+
+def test_calculate_metadata_for_elevation_empty_area():
+    header = geo_data.ElevationHeader(
+        col_count=3,
+        row_count=2,
+        x_ll_corner=0.0,
+        y_ll_corner=2.0,
+        cell_size=1.0,
+        nodata_value=0.0,
+    )
+    data = numpy.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    metadata = main._calculate_metadata_for_elevation(
+        geo_data.Elevation(header=header, data=data)
+    )
+    assert metadata == main.FeatureMetadata(elevation_min=None, elevation_max=None)
