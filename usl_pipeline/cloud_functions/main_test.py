@@ -499,33 +499,29 @@ def test_build_feature_matrix_errors(
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _):
-    # Get some random data to place in a tiff file.
-    height = 2
-    width = 3
-    tiff_array = numpy.array([[1, 2, 3], [4, 5, 6]], dtype=numpy.uint8)
-
-    # Build an in-memory tiff file and grab its bytes.
-    with rasterio.io.MemoryFile() as memfile:
-        with memfile.open(
-            driver="GTiff",
-            width=width,
-            height=height,
-            count=1,
-            dtype=rasterio.uint8,
-            crs=rasterio.CRS.from_epsg(32618),
-        ) as raster:
-            raster.write(tiff_array.astype(rasterio.uint8), 1)
-        tiff_bytes = io.BytesIO(memfile.read())
-
-    # Return the bytes above form the mock storage client.
-    mock_storage_client().bucket("").blob("").open.return_value = tiff_bytes
+    # Return the elevation header from the mock storage client.
+    mock_storage_client().bucket("").blob("").open.return_value = io.StringIO(
+        textwrap.dedent(
+            """\
+            {
+            "col_count": 3,
+            "row_count": 2,
+            "x_ll_corner": 0.0,
+            "y_ll_corner": 2.0,
+            "cell_size": 1.0,
+            "nodata_value": 0.0,
+            "crs": "EPSG:32618"
+            }
+            """
+        )
+    )
 
     main.write_study_area_metadata(
         functions_framework.CloudEvent(
             {"source": "test", "type": "event"},
             data={
                 "bucket": "bucket",
-                "name": "study_area/elevation.tif",
+                "name": "study_area/header.json",
                 "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             },
         )
@@ -535,7 +531,7 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
     mock_storage_client.assert_has_calls(
         [
             mock.call().bucket("bucket"),
-            mock.call().bucket().blob("study_area/elevation.tif"),
+            mock.call().bucket().blob("study_area/header.json"),
         ]
     )
     mock_storage_client().bucket("").blob("").open.assert_called_once_with("rb")
