@@ -179,6 +179,8 @@ def main():
     # slice sim_names to get the first two elements
     sim_names_2 = sim_names[:2]
 
+    generator.download_numpy_files(sim_names_2)
+
     for sim_name in sim_names_2:
         print(f"Index: {sim_names_2.index(sim_name)} , Sim name: {sim_name}")
         print("")

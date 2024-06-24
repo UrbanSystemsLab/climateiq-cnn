@@ -411,21 +411,19 @@ class IncrementalTrainDataGenerator:
         for sim_name in sim_names:
             print(f"Downloading numpy files for sim: {sim_name}")
             # Get GCS URLs for npy chunks
-            feature_chunks, sim_dict = self.featurelabelchunksgenerator.get_feature_chunks(
-                sim_name
-            )
+            # feature_chunks, sim_dict = self.featurelabelchunksgenerator.get_feature_chunks(
+            #     sim_name
+            # )
             label_chunks, sim_dict = self.featurelabelchunksgenerator.get_label_chunks(
                 sim_name
             )
 
-            if feature_chunks:
-                self._download_numpy_files(feature_chunks)
+            # if feature_chunks:
+            #     self._download_numpy_files(feature_chunks)
             if label_chunks:
-                self._download_numpy_files(label_chunks)
+                for sim_name in sim_names:
+                    self.download_numpy_files_in_dir(label_chunks, sim_name)
             
-
-
-
     def rainfall_duration_generator(self, sim_name):
         print(f"Generating rainfall duration for sim_name: {sim_name}")
         return self._generate_rainfall_duration(sim_name)
