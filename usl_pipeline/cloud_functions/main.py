@@ -722,6 +722,26 @@ def _apply_minmax_scaler(x, minx, maxx):
     return (x - minx) / (maxx - minx)
 
 
+def _calculate_metadata_for_elevation(elevation: geo_data.Elevation) -> FeatureMetadata:
+    """Calculates metadata for the elevation data."""
+    elevation_data = elevation.data
+
+    if elevation_data is None:
+        raise ValueError("Elevation file unexpectedly empty.")
+
+    # NODATA cells should be excluded from min/max calculation
+    present_data = elevation_data[elevation_data != elevation.header.nodata_value]
+
+    if present_data.size == 0:
+        # All the cells in the study area have NODATA values.
+        return FeatureMetadata()
+
+    return FeatureMetadata(
+        elevation_min=float(present_data.min()),
+        elevation_max=float(present_data.max()),
+    )
+
+
 def _read_elevation_features(
     fd: IO[bytes],
 ) -> Tuple[geo_data.Elevation, FeatureMetadata]:
@@ -735,20 +755,8 @@ def _read_elevation_features(
       the feature matrix.
     """
     elevation = elevation_readers.read_from_geotiff(rasterio.io.MemoryFile(fd.read()))
-    elevation_data = elevation.data
 
-    if elevation_data is None:
-        raise ValueError("Elevation file unexpectedly empty.")
-
-    # NODATA cells should be excluded from min/max calculation
-    present_data = elevation_data[elevation_data != elevation.header.nodata_value]
-
-    metadata = FeatureMetadata(
-        elevation_min=float(present_data.min()),
-        elevation_max=float(present_data.max()),
-    )
-
-    return elevation, metadata
+    return elevation, _calculate_metadata_for_elevation(elevation)
 
 
 def _write_metastore_entry(
