@@ -179,6 +179,7 @@ def main():
     # slice sim_names to get the first two elements
     sim_names_2 = sim_names[:2]
 
+    # download npy locally first
     generator.download_numpy_files(sim_names_2)
 
     for sim_name in sim_names_2:
@@ -195,35 +196,33 @@ def main():
     print("\n")
 
 
-
-
-    # # Print the shapes of the tensors in the batch
-    # for data in data_batch:
-    #     # Take the first element from tf dataset iterator and print shape of each tensors
+    # Print the shapes of the tensors in the batch
+    for data in data_batch:
+        # Take the first element from tf dataset iterator and print shape of each tensors
         
-    #     print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
-    #     print("Labels shape:", next(iter(data.labels.take(1))).shape)
-    #     print(
-    #         "geospatial Feature tensor shape:",
-    #         next(iter(data.geospatial.take(1))).shape,
-    #     )
-    #     print("Rainfall duration:", data.storm_duration)
-    #     print("")
-    #     print("-" * 20)
+        print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
+        print("Labels shape:", next(iter(data.labels.take(1))).shape)
+        print(
+            "geospatial Feature tensor shape:",
+            next(iter(data.geospatial.take(1))).shape,
+        )
+        print("Rainfall duration:", data.storm_duration)
+        print("")
+        print("-" * 20)
         
-    #     # Validate the shape of the labels tensor
-    #     first_label = next(iter(data.take(1)))[0]  # Get the first label batch
-    #     expected_label_shape = list(first_label.shape)
-    #     expected_label_shape[-1] = rainfall_duration
+        # # Validate the shape of the labels tensor
+        # first_label = next(iter(data.take(1)))[0]  # Get the first label batch
+        # expected_label_shape = list(first_label.shape)
+        # expected_label_shape[-1] = rainfall_duration
 
-    #     # Labels must match the storm duration.
-    #     assert first_label.shape[-1] == rainfall_duration, (  # Compare the shape of the first label tensor
-    #         "Provided labels are inconsistent with storm duration. "
-    #         f"Labels are expected to have shape {expected_label_shape}. "
-    #         f"Actual shape: {first_label.shape}."  # Use first_label.shape
-    #     )
-    #     print("Labels are consistent with storm duration.")
-    #     print("-" * 20) 
+        # # Labels must match the storm duration.
+        # assert first_label.shape[-1] == rainfall_duration, (  # Compare the shape of the first label tensor
+        #     "Provided labels are inconsistent with storm duration. "
+        #     f"Labels are expected to have shape {expected_label_shape}. "
+        #     f"Actual shape: {first_label.shape}."  # Use first_label.shape
+        # )
+        # print("Labels are consistent with storm duration.")
+        # print("-" * 20) 
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from typing import List
 import os
+import glob
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import functools
@@ -149,10 +150,14 @@ class IncrementalTrainDataGenerator:
             print("GCS directory name is empty, returning...")
             return
         else:
-            # delete dir_name if exist
+            # Check if the directory exists
             if os.path.exists(dir_name):
-                os.rmdir(dir_name)
-            os.makedirs(dir_name)
+                # Use glob to find any .npy files within the directory
+                npy_files = glob.glob(os.path.join(dir_name, '*.npy'))
+                # If there are .npy files, return and do not proceed further
+                if npy_files:
+                    print("Npy chunks already exists, returning..")
+                    return
            
         print(f"Downloading numpy files from GCS directory to: {dir_name}")
 
