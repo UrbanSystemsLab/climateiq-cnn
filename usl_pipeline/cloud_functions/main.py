@@ -700,7 +700,7 @@ def _calculate_metadata_for_elevation(elevation: geo_data.Elevation) -> FeatureM
     # NODATA cells should be excluded from min/max calculation
     present_data = elevation_data[elevation_data != elevation.header.nodata_value]
 
-    if len(present_data) == 0:
+    if present_data.size == 0:
         # All the cells in the study area have NODATA values.
         return FeatureMetadata()
 
