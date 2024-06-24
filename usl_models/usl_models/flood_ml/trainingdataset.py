@@ -141,7 +141,56 @@ class IncrementalTrainDataGenerator:
                     print(f"Error downloading chunk numpy files: {e}")
         print("Finished downloading numpy files.")
 
-    def _create_tfrecord_from_numpy(self, name) -> List[tf.train.Example]:
+    def download_numpy_files_in_dir(self, gcs_urls, dir_name, max_workers=5):
+        """
+        Download all numpy files from a directory in GCS to local storage.
+        """
+        if dir_name is None:
+            print("GCS directory name is empty, returning...")
+            return
+        else:
+            # delete dir_name if exist
+            if os.path.exists(dir_name):
+                os.rmdir(dir_name)
+            os.makedirs(dir_name)
+           
+        print(f"Downloading numpy files from GCS directory to: {dir_name}")
+
+        if len(gcs_urls) > 1:
+            max_workers = min(self.settings.MAX_WORKERS, len(gcs_urls))
+        else:
+            max_workers = 1
+
+        def _download_file(gcs_url, local_dir):
+
+            if gcs_url is None:
+                return
+
+            try:
+                # print(f"Downloading file from GCS URL: {gcs_url}")
+                bucket_name, blob_name = gcs_url.replace("gs://", "").split("/", 1)
+                bucket = self.storage_client.bucket(bucket_name)
+                blob = bucket.blob(blob_name)
+                local_path = os.path.join(local_dir, os.path.basename(blob_name))
+                blob.download_to_filename(local_path)
+                # print(f"Downloaded {gcs_url} to {local_path}")
+            except Exception as e:
+                print(f"Error downloading file {gcs_url}: {e}")
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(_download_file, gcs_url, dir_name)
+                for gcs_url in gcs_urls
+            ]
+
+            for future in futures:
+                try:
+                    future.result()  # Wait for all futures to complete
+                except Exception as e:
+                    print(f"Error downloading chunk numpy files: {e}")
+        print("Finished downloading numpy files.")
+
+    def _create_tfrecord_from_numpy(self, name, dir_name) -> List[tf.train.Example]:
         """
         Create TFRecord from numpy files.
 
@@ -156,14 +205,14 @@ class IncrementalTrainDataGenerator:
         serialized_examples_list = []
 
         # check if the LOCAL_NUMPY_DIR is not empty
-        if not os.listdir(self.settings.LOCAL_NUMPY_DIR):
-            print("LOCAL_NUMPY_DIR is empty.")
+        if not os.listdir(dir_name):
+            print(f"{dir_name} is empty, will exit.")
             return []
 
-        for file_name in os.listdir(self.settings.LOCAL_NUMPY_DIR):
+        for file_name in os.listdir(dir_name):
             if file_name.endswith(".npy"):
                 try:
-                    file_path = os.path.join(self.settings.LOCAL_NUMPY_DIR, file_name)
+                    file_path = os.path.join(dir_name, file_name)
                     data = np.load(file_path)
                     # print(f"Loaded numpy file: {file_path}")
 
@@ -195,16 +244,15 @@ class IncrementalTrainDataGenerator:
 
         # clean-up downloaded files from local storage. Uncomment this code once finalized.
 
-        for file_name in os.listdir(self.settings.LOCAL_NUMPY_DIR):
-            if file_name.endswith(".npy"):
-                os.remove(os.path.join(self.settings.LOCAL_NUMPY_DIR, file_name))
+        # for file_name in os.listdir(self.settings.LOCAL_NUMPY_DIR):
+        #     if file_name.endswith(".npy"):
+        #         os.remove(os.path.join(self.settings.LOCAL_NUMPY_DIR, file_name))
 
         print(
             "Finished creating seriliazed TFRecord from numpy files, files cleaned up from local storage. \n \n"
         )
         return serialized_examples_list
 
-    @staticmethod
     @staticmethod
     def _parse_tf_example(serialized_example, feature_description, name):
         """
@@ -304,11 +352,11 @@ class IncrementalTrainDataGenerator:
             if self.settings.DEBUG == 2:
                 print(f"GCS URLs for sim {sim_name}: {label_chunks}")
 
-            # Download label chunks npy files from GCS. Uncomment this when finalized.
-            self._download_numpy_files(label_chunks)
+            # This step is done as preprocessed before calling this function
+           # self._download_numpy_files(label_chunks)
 
             # Create TFRecord from numpy files
-            serialized_examples_list = self._create_tfrecord_from_numpy("label")
+            serialized_examples_list = self._create_tfrecord_from_numpy("label", sim_name)
 
             # Yield individual label tensors
             for serialized_example in serialized_examples_list:
@@ -356,6 +404,28 @@ class IncrementalTrainDataGenerator:
             print(f"No temporal chunks found for sim {sim_name}.")
             return None
     
+    def download_numpy_files(self, sim_names):
+        """
+        Download numpy files for the given sim_names.
+        """
+        for sim_name in sim_names:
+            print(f"Downloading numpy files for sim: {sim_name}")
+            # Get GCS URLs for npy chunks
+            feature_chunks, sim_dict = self.featurelabelchunksgenerator.get_feature_chunks(
+                sim_name
+            )
+            label_chunks, sim_dict = self.featurelabelchunksgenerator.get_label_chunks(
+                sim_name
+            )
+
+            if feature_chunks:
+                self._download_numpy_files(feature_chunks)
+            if label_chunks:
+                self._download_numpy_files(label_chunks)
+            
+
+
+
     def rainfall_duration_generator(self, sim_name):
         print(f"Generating rainfall duration for sim_name: {sim_name}")
         return self._generate_rainfall_duration(sim_name)

@@ -71,21 +71,19 @@ class FloodModel:
                 raise ValueError("Labels must be provided during model training.")
 
             # Labels must match the storm duration.
-            # expected_label_shape = list(data.labels.shape) # Updates to work with tf.data.Dataset.from_generator
-            # expected_label_shape[1] = data.storm_duration
             # Get the shape of the first label
             first_label = next(iter(data.labels.take(1)))
             expected_label_shape = list(first_label.shape)
+            expected_label_shape[1] = data.storm_duration
 
             # Labels must match the storm duration.
-            expected_label_shape[1] = data.storm_duration
-            assert data.labels.shape[1] == data.storm_duration, (
+            assert first_label.shape[1] == data.storm_duration, (  # Compare the shape of the first label tensor
                 "Provided labels are inconsistent with storm duration. "
                 f"Labels are expected to have shape {expected_label_shape}. "
                 # f"Actual shape: {data.labels.shape}."
                 f"Actual shape: {first_label.shape}."  # Use first_label.shape
             )
-
+        
         # Check whether the temporal data is already windowed. If it is, checks
         # the expected shape. Otherwise, create the window view.
         if tf.rank(data.temporal) == 3:  # windowed: (B, T_max, m)
