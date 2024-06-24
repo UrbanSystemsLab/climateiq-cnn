@@ -582,8 +582,22 @@ def _build_feature_matrix_from_archive(
             else:
                 logging.warning(f"Unexpected member name: {name}")
 
-    if any((elevation, buildings, green_areas, soil_classes)):
-        if not all((elevation, buildings, green_areas, soil_classes)):
+    if any(
+        (
+            elevation is not None,
+            buildings is not None,
+            green_areas is not None,
+            soil_classes is not None,
+        )
+    ):
+        if not all(
+            (
+                elevation is not None,
+                buildings is not None,
+                green_areas is not None,
+                soil_classes is not None,
+            )
+        ):
             raise ValueError(
                 f"Some flood simulation data missing (see tar list: {files_in_tar})"
             )
