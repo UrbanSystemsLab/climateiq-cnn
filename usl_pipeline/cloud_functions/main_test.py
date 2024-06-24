@@ -219,6 +219,29 @@ def test_build_feature_matrix_from_archive_empty_polygons():
     assert metadata == main.FeatureMetadata(elevation_min=2, elevation_max=6)
 
 
+def test_build_feature_matrix_from_archive_elevation_file_missing():
+    polygons_bytes = b"0\n"
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as tar:
+        _add_to_tar(tar, file_names.BUILDINGS_TXT, polygons_bytes)
+        _add_to_tar(tar, file_names.GREEN_AREAS_TXT, polygons_bytes)
+        _add_to_tar(tar, file_names.SOIL_CLASSES_TXT, polygons_bytes)
+    # Seek to the beginning so the file can be read.
+    archive.seek(0)
+
+    try:
+        main._build_feature_matrix_from_archive(archive)
+    except Exception as e:
+        # Check expected error:
+        assert isinstance(e, ValueError)
+        assert str(e) == (
+            "Some flood simulation data missing (see tar list: ['buildings.txt', "
+            + "'green_areas.txt', 'soil_classes.txt'])"
+        )
+    else:
+        raise Exception("Expected error never happened")
+
+
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
