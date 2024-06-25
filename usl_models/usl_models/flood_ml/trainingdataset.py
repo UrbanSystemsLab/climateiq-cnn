@@ -152,10 +152,10 @@ class IncrementalTrainDataGenerator:
 
         # Example condition to decide on appending '_label' or '_feature'
         # This is a placeholder condition and should be replaced with actual logic
-        if "label" in gcs_urls[0]:  # Assuming gcs_urls contains relevant information
-            dir_name += "_label"
-        else:
-            dir_name += "_feature"
+        # if "label" in gcs_urls[0]:  # Assuming gcs_urls contains relevant information
+        #     dir_name += "_label"
+        # else:
+        #     dir_name += "_feature"
 
         # Now, dir_name has been adjusted, proceed with the existing checks
         if os.path.exists(dir_name):
@@ -163,6 +163,9 @@ class IncrementalTrainDataGenerator:
             if npy_files:
                 print(f"Directory '{dir_name}' already contains .npy files, skipping download.")
                 return
+        else:
+            os.makedirs(dir_name)
+            print(f"Directory '{dir_name}' did not exist and was created.")
 
         print(f"Downloading numpy files from GCS directory to: {dir_name}")
 
@@ -317,11 +320,11 @@ class IncrementalTrainDataGenerator:
                 print(f"GCS URLs for sim {sim_name}: {feature_chunks}")
 
             # Download feature chunks npy files from GCS. Uncomment this when finalized.
-            self._download_numpy_files(feature_chunks)
+            #self._download_numpy_files(feature_chunks)
 
             # Create TFRecord from numpy files
             serialized_examples_list = self._create_tfrecord_from_numpy(
-                "geospatial_feature"
+                "geospatial_feature", sim_name+"_feature"
             )
 
             # Yield individual feature tensors
@@ -366,7 +369,7 @@ class IncrementalTrainDataGenerator:
            # self._download_numpy_files(label_chunks)
 
             # Create TFRecord from numpy files
-            serialized_examples_list = self._create_tfrecord_from_numpy("label", sim_name)
+            serialized_examples_list = self._create_tfrecord_from_numpy("label", sim_name+"_label")
 
             # Yield individual label tensors
             for serialized_example in serialized_examples_list:
@@ -414,12 +417,13 @@ class IncrementalTrainDataGenerator:
             print(f"No temporal chunks found for sim {sim_name}.")
             return None
     
-    def download_numpy_files(self, sim_names):
+    def download_numpy_files(self, sim_names, chunktype):
         """
         Download numpy files for the given sim_names.
         """
         for sim_name in sim_names:
             print(f"Downloading numpy files for sim: {sim_name}")
+
             # Get GCS URLs for npy chunks
             feature_chunks, sim_dict = self.featurelabelchunksgenerator.get_feature_chunks(
                 sim_name
@@ -427,13 +431,22 @@ class IncrementalTrainDataGenerator:
             label_chunks, sim_dict = self.featurelabelchunksgenerator.get_label_chunks(
                 sim_name
             )
+            temporal_chunks = self.featurelabelchunksgenerator.get_temporal_chunks(
+                sim_name
+            )
 
-            if feature_chunks:
+            if chunktype == "feature":
+                dir_name = sim_name+"_feature"
                 for sim_name in sim_names:
-                    self._download_numpy_files(feature_chunks, sim_name+"_feature")
-            if label_chunks:
+                    self._download_numpy_files(feature_chunks, dir_name)
+            if chunktype == "label":
+                dir_name = sim_name+"_feature"
                 for sim_name in sim_names:
-                    self.download_numpy_files_in_dir(label_chunks, sim_name+"_label")
+                    self.download_numpy_files_in_dir(label_chunks, dir_name)
+            if chunktype == "temporal":
+                dir_name = sim_name+"_temporal"
+                for sim_name in sim_names:
+                    self.download_numpy_files_in_dir(temporal_chunks, dir_name)
             
     def rainfall_duration_generator(self, sim_name):
         print(f"Generating rainfall duration for sim_name: {sim_name}")

@@ -179,39 +179,45 @@ def main():
     # slice sim_names to get the first two elements
     sim_names_2 = sim_names[:2]
 
-    # download npy label chunks locally first
-    generator.download_numpy_files(sim_names_2)
+    # download npy label chunks locally
+    generator.download_numpy_files(sim_names_2, "label")
 
-    # download npy feature chunks locally second
-    generator.download_numpy_files(sim_names)
+    # download npy feature chunks locally
+    generator.download_numpy_files(sim_names_2, "feature")
 
-    for sim_name in sim_names_2:
-        print(f"Index: {sim_names_2.index(sim_name)} , Sim name: {sim_name}")
-        print("")
+    # download npy temporal chunks locally
+    generator.download_numpy_files(sim_names_2, "temporal")
 
-    # Get the next batch of data for one simulation
-    data_batch = generator.get_next_batch(sim_names_2, batch_size)
+    # print("Printing valid sims in metastore"))
 
-    print("\n")
+
+    # for sim_name in sim_names_2:
+    #     print(f"Index: {sim_names_2.index(sim_name)} , Sim name: {sim_name}")
+    #     print("")
+
+    # # Get the next batch of data for one simulation
+    # data_batch = generator.get_next_batch(sim_names_2, batch_size)
+
+    # print("\n")
     
-    # print size of data_batch
-    print("Data batch size:", len(data_batch))
-    print("\n")
+    # # print size of data_batch
+    # print("Data batch size:", len(data_batch))
+    # print("\n")
 
 
-    # Print the shapes of the tensors in the batch
-    for data in data_batch:
-        # Take the first element from tf dataset iterator and print shape of each tensors
+    # # Print the shapes of the tensors in the batch
+    # for data in data_batch:
+    #     # Take the first element from tf dataset iterator and print shape of each tensors
         
-        print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
-        print("Labels shape:", next(iter(data.labels.take(1))).shape)
-        print(
-            "geospatial Feature tensor shape:",
-            next(iter(data.geospatial.take(1))).shape,
-        )
-        print("Rainfall duration:", data.storm_duration)
-        print("")
-        print("-" * 20)
+    #     print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
+    #     print("Labels shape:", next(iter(data.labels.take(1))).shape)
+    #     print(
+    #         "geospatial Feature tensor shape:",
+    #         next(iter(data.geospatial.take(1))).shape,
+    #     )
+    #     print("Rainfall duration:", data.storm_duration)
+    #     print("")
+    #     print("-" * 20)
         
         # # Validate the shape of the labels tensor
         # first_label = next(iter(data.take(1)))[0]  # Get the first label batch
