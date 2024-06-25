@@ -164,9 +164,6 @@ def simple_training(
     # download npy temporal chunks locally
     generator.download_numpy_files(sim_names, "temporal")
 
-    # declare empty tf.data.dataset
-    floodModelDataset = tf.data.Dataset()
-
     # compare feature and label chunks
 
     for sim_name in sim_names:
@@ -174,16 +171,16 @@ def simple_training(
         print(type(floodModelDataset))
         print(storm_duration)
 
-    # look through floodModelDataset via iterator
-    iterator = iter(floodModelDataset)
+        # look through floodModelDataset via iterator
+        iterator = iter(floodModelDataset)
 
-    while True:
-        try:
-            element = next(iterator)
-            print(element)
-        except StopIteration:
-            # End of dataset reached
-            break
+        while True:
+            try:
+                element = next(iterator)
+                print(element)
+            except StopIteration:
+                # End of dataset reached
+                break
 
 
     # verify_labels_shape(dataset)
