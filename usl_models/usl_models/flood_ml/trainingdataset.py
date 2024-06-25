@@ -339,15 +339,15 @@ class IncrementalTrainDataGenerator:
 
             # Yield individual feature tensors
             for serialized_example in serialized_examples_list:
-                yield self._parse_tf_example(
+                feature_tensor = self._parse_tf_example(
                     serialized_example,
                     {
                         "geospatial_feature": tf.io.FixedLenFeature(
                             [1000, 1000, 8], tf.float32
                         ),
-                    },
-                    "geospatial_feature",
-                )
+                    }, 
+                )["geospatial_feature"]  # Extract the 'feature' tensor from the dictionary
+                yield feature_tensor  # Yield only the feature tensor
         else:
             print(f"No feature chunks found for sim {sim_name}.")
             return None
@@ -383,15 +383,15 @@ class IncrementalTrainDataGenerator:
 
             # Yield individual label tensors
             for serialized_example in serialized_examples_list:
-                yield self._parse_tf_example(
+                label_tensor = self._parse_tf_example(
                     serialized_example,
                     {
                         "label": tf.io.FixedLenFeature(
                             [1000, 1000, rainfall_duration], tf.float32
                         )
                     },
-                    "label",
-                )
+                )["label"]  # Extract the 'label' tensor from the dictionary
+                yield label_tensor  # Yield only the label tensor
         else:
             print(f"No label chunks found for sim {sim_name}.")
 
@@ -420,7 +420,6 @@ class IncrementalTrainDataGenerator:
                 yield self._parse_tf_example(
                     serialized_example,
                     {"temporal_feature": tf.io.FixedLenFeature([864], tf.float32)},
-                    "temporal_feature",
                 )
 
         else:
