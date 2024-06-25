@@ -175,7 +175,7 @@ class IncrementalTrainDataGenerator:
                     blob = bucket.blob(blob_name)
                     local_path = os.path.join(local_dir, os.path.basename(blob_name))
                     blob.download_to_filename(local_path)
-                    print(f"Downloaded {single_gcs_url} to {local_path}")
+                    # print(f"Downloaded {single_gcs_url} to {local_path}")
                 except Exception as e:
                     print(f"Error downloading file {single_gcs_url}: {e}")
 
