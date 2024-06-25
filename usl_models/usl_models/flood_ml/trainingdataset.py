@@ -399,7 +399,7 @@ class IncrementalTrainDataGenerator:
         return self._generate_rainfall_duration(sim_name)
 
     # create a dummy dataset for Spatiotemporal tensors
-    def _create_dummy_dataset(input_shape):
+    def _create_dummy_dataset(self, input_shape):
         # Create a dummy dataset with the correct shape
         # Adjust the shape and dtype according to your needs
         return tf.data.Dataset.from_tensor_slices(tf.zeros(input_shape)).batch(1)
