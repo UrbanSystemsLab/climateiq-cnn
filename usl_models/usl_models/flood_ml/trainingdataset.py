@@ -417,10 +417,11 @@ class IncrementalTrainDataGenerator:
             )
 
             for serialized_example in serialized_examples_list:
-                yield self._parse_tf_example(
+                temporal_tensor = self._parse_tf_example(
                     serialized_example,
                     {"temporal_feature": tf.io.FixedLenFeature([864], tf.float32)},
-                )
+                )["temporal_feature"]  # Extract the 'temporal_tensor' tensor from the dictionary
+                yield temporal_tensor  # Yield only the temporal_tensor tensor
 
         else:
             print(f"No temporal chunks found for sim {sim_name}.")
