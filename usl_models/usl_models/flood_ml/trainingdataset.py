@@ -395,7 +395,7 @@ class IncrementalTrainDataGenerator:
 
             # Create TFRecord from numpy files
             serialized_examples_list = self._create_tfrecord_from_numpy(
-                "temporal_feature"
+                "temporal_feature", sim_name
             )
 
             for serialized_example in serialized_examples_list:
