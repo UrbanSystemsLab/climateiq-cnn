@@ -161,18 +161,13 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
         ]
     )
     # Ensure we set the elevation min & max
-    mock_firestore_client().transaction().update.assert_has_calls(
-        [
-            mock.call(
-                mock_firestore_client().collection().document(),
-                {"elevation_min": 2, "elevation_max": 6},
-            ),
-            mock.call(
-                mock_firestore_client().collection().document(),
-                {"chunk_size": 2, "chunk_x_count": 5, "chunk_y_count": 10},
-            ),
-        ]
+    mock_firestore_client().transaction().update.assert_called_once_with(
+        mock_firestore_client().collection().document(),
+        {"elevation_min": 2, "elevation_max": 6},
     )
+    mock_firestore_client().collection().document().update.assert_called_once_with(
+        {"chunk_size": 2, "chunk_x_count": 5, "chunk_y_count": 10}
+    ),
 
 
 def test_build_feature_matrix_from_archive_empty_polygons():

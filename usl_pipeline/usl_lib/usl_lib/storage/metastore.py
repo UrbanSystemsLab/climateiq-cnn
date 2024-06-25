@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+import math
 from typing import Iterable, Optional
 import urllib.parse
 
@@ -142,12 +143,10 @@ class StudyArea:
             return
 
         # Calculate number of chunks over each of X and Y axes:
-        x_count = (study_area.col_count + chunk_size - 1) // chunk_size
-        y_count = (study_area.row_count + chunk_size - 1) // chunk_size
+        x_count = math.ceil(study_area.col_count / chunk_size)
+        y_count = math.ceil(study_area.row_count / chunk_size)
 
-        study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
-        db.transaction().update(
-            study_area_ref,
+        db.collection(STUDY_AREAS).document(study_area_name).update(
             {
                 "chunk_size": chunk_size,
                 "chunk_x_count": x_count,
