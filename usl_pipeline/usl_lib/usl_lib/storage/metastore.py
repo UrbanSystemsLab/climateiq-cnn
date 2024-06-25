@@ -42,6 +42,9 @@ class StudyArea:
     crs: Optional[str] = None
     elevation_min: Optional[float] = None
     elevation_max: Optional[float] = None
+    chunk_size: Optional[int] = None
+    chunk_x_count: Optional[int] = None
+    chunk_y_count: Optional[int] = None
 
     def as_header(self) -> geo_data.ElevationHeader:
         """Represents the study area as a header describing a raster space."""
@@ -116,6 +119,41 @@ class StudyArea:
         study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
         transaction = db.transaction()
         _update_study_area_min_max_elevation(transaction, study_area_ref, min_, max_)
+
+    @staticmethod
+    def update_chunk_info(
+        db: firestore.Client, study_area_name: str, chunk_size: int
+    ) -> None:
+        """Sets chunk-related properties of study area if they weren't set before.
+
+        Args:
+          db: The firestore database client to use to make the update.
+          study_area_name: The study area to update.
+          chunk_size: Size of the chunk in cells. Will only be set chunk-related fields
+                if they weren't set before.
+        """
+        study_area = StudyArea.get(db, study_area_name)
+        if study_area.chunk_size is not None:
+            if study_area.chunk_size != chunk_size:
+                raise ValueError(
+                    "Unexpected variation detected for chunk size:"
+                    + f" {study_area.chunk_size} != {chunk_size}"
+                )
+            return
+
+        # Calculate number of chunks over each of X and Y axes:
+        x_count = (study_area.col_count + chunk_size - 1) // chunk_size
+        y_count = (study_area.row_count + chunk_size - 1) // chunk_size
+
+        study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
+        db.transaction().update(
+            study_area_ref,
+            {
+                "chunk_size": chunk_size,
+                "chunk_x_count": x_count,
+                "chunk_y_count": y_count,
+            },
+        )
 
     def _as_dict(self) -> dict:
         as_dict = {}

@@ -52,6 +52,7 @@ class FeatureMetadata:
 
     elevation_min: Optional[float] = None
     elevation_max: Optional[float] = None
+    chunk_size: Optional[int] = None
 
 
 def _retry_and_report_errors(
@@ -326,8 +327,11 @@ def _build_feature_matrix(
     feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
     feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
 
+    # Updating min/max elevation in the study area metadata first before storing feature
+    # matrix file that will trigger rescaling post-processing.
+    _update_study_area_metastore_entry(chunk_blob, metadata)
     _write_as_npy(feature_blob, feature_matrix)
-    _write_metastore_entry(chunk_blob, feature_blob, metadata)
+    _write_flood_chunk_metastore_entry(chunk_blob, feature_blob)
 
 
 @functions_framework.cloud_event
@@ -742,6 +746,7 @@ def _calculate_metadata_for_elevation(elevation: geo_data.Elevation) -> FeatureM
     return FeatureMetadata(
         elevation_min=float(present_data.min()),
         elevation_max=float(present_data.max()),
+        chunk_size=elevation.header.row_count,
     )
 
 
@@ -762,18 +767,42 @@ def _read_elevation_features(
     return elevation, _calculate_metadata_for_elevation(elevation)
 
 
-def _write_metastore_entry(
-    chunk_blob: storage.Blob, feature_blob: storage.Blob, metadata: FeatureMetadata
+def _update_study_area_metastore_entry(
+    chunk_blob: storage.Blob, metadata: FeatureMetadata
+) -> None:
+    """Updates the study area metadata with new information for a given chunk.
+
+    Updates elevation_min and elevation_max values supplied in the metadata for the
+    whole study area.
+
+    Args:
+      chunk_blob: The GCS blob containing the raw chunk archive.
+      metadata: Additional metadata describing the features.
+    """
+    db = firestore.Client()
+    study_area_name, _ = _parse_chunk_path(chunk_blob.name)
+
+    if metadata.elevation_min is not None and metadata.elevation_max is not None:
+        metastore.StudyArea.update_min_max_elevation(
+            db,
+            study_area_name,
+            min_=metadata.elevation_min,
+            max_=metadata.elevation_max,
+        )
+    if metadata.chunk_size is not None:
+        metastore.StudyArea.update_chunk_info(db, study_area_name, metadata.chunk_size)
+
+
+def _write_flood_chunk_metastore_entry(
+    chunk_blob: storage.Blob, feature_blob: storage.Blob
 ) -> None:
     """Updates the metastore with new information for the given chunks.
 
-    Writes a Firestore entry for the new feature matrix chunk. Updates elvation_min and
-    elevation_max values supplied in the metadata for the whole study area.
+    Writes a Firestore entry for the new feature matrix chunk.
 
     Args:
       chunk_blob: The GCS blob containing the raw chunk archive.
       feature_blob: The GCS blob containing the feature tensor for the chunk.
-      metadata: Additional metadata describing the features.
     """
     db = firestore.Client()
     study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
@@ -785,14 +814,6 @@ def _write_metastore_entry(
         # Remove any errors from previous failed retries which have now succeeded.
         error=firestore.DELETE_FIELD,
     ).merge(db, study_area_name)
-
-    if metadata.elevation_min is not None and metadata.elevation_max is not None:
-        metastore.StudyArea.update_min_max_elevation(
-            db,
-            study_area_name,
-            min_=metadata.elevation_min,
-            max_=metadata.elevation_max,
-        )
 
 
 def _write_chunk_metastore_error(chunk_path: str, error_message: str) -> None:
