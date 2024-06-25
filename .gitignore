@@ -29,3 +29,6 @@ VENV/
 
 # Ignore other unnecessary files
 .vscode/
+usl_models/test_metastore_client.py
+usl_models/test_client.py
+usl_models/usl_models/flood_ml/simplePython.py

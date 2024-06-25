@@ -362,7 +362,7 @@ class IncrementalTrainDataGenerator:
             return None
 
         print(
-            "The output label tensor will be of shape: ",
+            "The output label tensor will initially be of shape: ",
             [1000, 1000, rainfall_duration],
         )
 
@@ -376,7 +376,7 @@ class IncrementalTrainDataGenerator:
                 print(f"GCS URLs for sim {sim_name}: {label_chunks}")
 
             # This step is done as preprocessed before calling this function
-           # self._download_numpy_files(label_chunks)
+            # self._download_numpy_files(label_chunks)
 
             # Create TFRecord from numpy files
             serialized_examples_list = self._create_tfrecord_from_numpy("label", sim_name+"_label")
@@ -391,7 +391,10 @@ class IncrementalTrainDataGenerator:
                         )
                     },
                 )["label"]  # Extract the 'label' tensor from the dictionary
-                yield label_tensor  # Yield only the label tensor
+                
+                # Reshape the tensor to (rainfall_duration, 1000, 1000)
+                reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
+                yield reshaped_label_tensor  # Yield only the reshaped label tensor
         else:
             print(f"No label chunks found for sim {sim_name}.")
 
