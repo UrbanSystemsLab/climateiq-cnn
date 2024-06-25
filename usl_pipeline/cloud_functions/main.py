@@ -297,9 +297,9 @@ def delete_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) 
     )
 )
 def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
-    """Builds a feature matrix when an archive of geo files is uploaded.
+    """Builds a feature matrix when an a set of geo files is uploaded.
 
-    This function is triggered when archive files containing geo data are uploaded to
+    This function is triggered when files containing geo data are uploaded to
     GCS. It produces a feature matrix for the geo data and writes that feature matrix to
     another GCS bucket for eventual use in model training and prediction.
     """
@@ -313,15 +313,24 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 def _build_feature_matrix(
     bucket_name: str, chunk_name: str, output_bucket: str
 ) -> None:
-    """Builds a feature matrix when an archive of geo files is uploaded."""
+    """Builds a feature matrix when a set of geo files is uploaded."""
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     chunk_blob = bucket.blob(chunk_name)
 
-    with chunk_blob.open("rb") as archive:
-        feature_matrix, metadata = _build_feature_matrix_from_archive(archive)
-        if feature_matrix is None:
-            raise ValueError(f"Empty archive found in {chunk_blob}")
+    # TODO: Refactor to better handle both tar'ed + un-tarred chunks
+    with chunk_blob.open("rb") as chunk:
+        # Flood (CityCat)
+        if chunk_name.endswith(".tar"):
+            feature_matrix, metadata = _build_feature_matrix_from_archive(chunk)
+
+            if feature_matrix is None:
+                raise ValueError(f"Empty archive found in {chunk_blob}")
+        # Heat (WRF) - treat one WPS outout file as one chunk
+        elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_name):
+            feature_matrix, metadata = _build_wps_feature_matrix(chunk)
+        else:
+            raise ValueError(f"Unexpected file {chunk_name}")
 
     feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
     feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
@@ -562,7 +571,6 @@ def _build_feature_matrix_from_archive(
 
             name = pathlib.PurePosixPath(member.name).name
             files_in_tar.append(name)
-            # TODO: Group logic branch by path (per hazard model)
             # Handle flood model input files (CityCat)
             if name == file_names.ELEVATION_TIF:
                 elevation, metadata = _read_elevation_features(fd)
@@ -574,11 +582,9 @@ def _build_feature_matrix_from_archive(
                 green_areas = _read_polygons_from_byte_stream(fd)
             elif name == file_names.SOIL_CLASSES_TXT:
                 soil_classes = _read_polygons_from_byte_stream(fd)
-            # Handle heat model input files (WPS)
-            # TODO: Refactor to also handle un-tarred files
+            # Handle heat model input files (WPS) (if tarred)
             elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, name):
                 return _build_wps_feature_matrix(fd)
-            # TODO: handle additional archive members.
             else:
                 logging.warning(f"Unexpected member name: {name}")
 
@@ -608,7 +614,7 @@ def _build_feature_matrix_from_archive(
 def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     # Ignore type checker error - BytesIO inherits from expected type BufferedIOBase
     # https://shorturl.at/lk4om
-    with xarray.open_dataset(fd) as ds:  # type: ignore
+    with xarray.open_dataset(fd, engine="h5netcdf") as ds:  # type: ignore
         # Assign Time coordinates so datetime is associated with each data array
         ds = ds.assign_coords(Time=ds.Times)
         # Derive non-native variables and assign to dataset
