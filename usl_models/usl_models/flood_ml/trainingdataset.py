@@ -387,7 +387,7 @@ class IncrementalTrainDataGenerator:
                     serialized_example,
                     {
                         "label": tf.io.FixedLenFeature(
-                            [1000, 1000, rainfall_duration], tf.float32
+                            [rainfall_duration, 1000, rainfall_duration], tf.float32
                         )
                     },
                 )["label"]  # Extract the 'label' tensor from the dictionary
