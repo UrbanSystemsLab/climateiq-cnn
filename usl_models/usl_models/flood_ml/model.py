@@ -160,7 +160,7 @@ class FloodModel:
 
         history = self._model.fit(
             dataset_with_storm_duration,
-            epochs=self.epochs,
+            epochs=1,
             callbacks=self.callbacks,
             validation_split=self.validation_split,
             verbose=self.verbose
