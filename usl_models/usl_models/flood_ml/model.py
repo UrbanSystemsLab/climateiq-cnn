@@ -146,12 +146,17 @@ class FloodModel:
         # storm_duration handle separately
         storm_duration = flood_model_data.storm_duration
 
+        self._model.set_n_predictions(storm_duration)
+
         # Define a function to add storm_duration to each element of the dataset
         def add_storm_duration(geospatial, temporal, spatiotemporal, labels):
             return ((geospatial, temporal, spatiotemporal, storm_duration), labels)
 
         # Apply this function to the dataset
         dataset_with_storm_duration = combined_dataset.map(add_storm_duration)
+
+        # Prefetch for performance
+        dataset_with_storm_duration = dataset_with_storm_duration.prefetch(tf.data.AUTOTUNE)
 
         history = self._model.fit(
             dataset_with_storm_duration,
