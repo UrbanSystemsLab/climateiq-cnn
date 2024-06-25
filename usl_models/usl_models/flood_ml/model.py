@@ -86,15 +86,17 @@ class FloodModel:
         
         # Check whether the temporal data is already windowed. If it is, checks
         # the expected shape. Otherwise, create the window view.
-        if tf.rank(data.temporal) == 3:  # windowed: (B, T_max, m)
-            assert data.temporal.shape[-1] == self._model_params.m_rainfall, (
+        # Updates to support tf.dataset
+        first_temporal = next(iter(data.temporal.take(1)))
+        if tf.rank(first_temporal) == 3:  # windowed: (B, T_max, m)
+            assert first_temporal.shape[-1] == self._model_params.m_rainfall, (
                 "Mismatch between the temporal data window size "
-                f"({data.temporal.shape[-1]}) and the expected window size "
+                f"({first_temporal.shape[-1]}) and the expected window size "
                 f"(m = {self._model_params.m_rainfall})."
             )
         else:
             full_temp_input = data_utils.temporal_window_view(
-                data.temporal, self._model_params.m_rainfall
+                first_temporal, self._model_params.m_rainfall
             )
             data = dataclasses.replace(data, temporal=full_temp_input)
 
