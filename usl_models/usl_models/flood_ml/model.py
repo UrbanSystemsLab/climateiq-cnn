@@ -135,11 +135,18 @@ class FloodModel:
     #     return history
 
     def _model_fit(self, flood_model_data: FloodModelData):
+
+        inputs = {
+            "spatiotemporal": flood_model_data.spatiotemporal,
+            "geospatial": flood_model_data.geospatial,
+            "temporal": flood_model_data.temporal,
+        }
+
+        combined_dataset = tf.data.Dataset.from_tensor_slices(inputs)
+        
         # Create a dataset that combines all inputs
         combined_dataset = tf.data.Dataset.zip((
-            flood_model_data.geospatial,
-            flood_model_data.temporal,
-            flood_model_data.spatiotemporal,
+            inputs,
             flood_model_data.labels
         ))
 
@@ -148,20 +155,12 @@ class FloodModel:
 
         self._model.set_n_predictions(storm_duration)
 
-        # Define a function to add storm_duration to each element of the dataset
-        def add_storm_duration(geospatial, temporal, spatiotemporal, labels):
-            return ((geospatial, temporal, spatiotemporal, storm_duration), labels)
-
-        # Apply this function to the dataset
-        dataset_with_storm_duration = combined_dataset.map(add_storm_duration)
-
-        # Prefetch for performance
-        dataset_with_storm_duration = dataset_with_storm_duration.prefetch(tf.data.AUTOTUNE)
+        # # Prefetch for performance
+        # combined_dataset = combined_dataset.prefetch(tf.data.AUTOTUNE)
 
         history = self._model.fit(
-            dataset_with_storm_duration,
+            combined_dataset,
             epochs=1,
-            verbose=self.verbose
         )
         return history
 
