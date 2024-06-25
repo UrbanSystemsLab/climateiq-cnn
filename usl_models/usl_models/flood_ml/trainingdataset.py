@@ -92,56 +92,6 @@ class IncrementalTrainDataGenerator:
         file_obj.seek(0)
         return file_obj
 
-    # def _download_numpy_files(self, gcs_urls, max_workers=5):
-    #     """
-    #     Download numpy files from GCS to local storage. This is a multi-threaded approach to download files.
-
-    #     Args:
-    #         gcs_urls: List of GCS URLs to download.
-    #         max_workers: Maximum number of workers to use for downloading.
-
-    #     Returns:
-    #         None
-    #     """
-    #     if gcs_urls is None or len(gcs_urls) == 0:
-    #         print("GCS URLs are empty.")
-    #         return
-
-    #     print("Downloading numpy files...", self.settings.LOCAL_NUMPY_DIR)
-    #     if len(gcs_urls) > 1:
-    #         max_workers = min(self.settings.MAX_WORKERS, len(gcs_urls))
-    #     else:
-    #         max_workers = 1
-
-    #     def _download_file(gcs_url, local_dir):
-
-    #         if gcs_url is None:
-    #             return
-
-    #         try:
-    #             # print(f"Downloading file from GCS URL: {gcs_url}")
-    #             bucket_name, blob_name = gcs_url.replace("gs://", "").split("/", 1)
-    #             bucket = self.storage_client.bucket(bucket_name)
-    #             blob = bucket.blob(blob_name)
-    #             local_path = os.path.join(local_dir, os.path.basename(blob_name))
-    #             blob.download_to_filename(local_path)
-    #             # print(f"Downloaded {gcs_url} to {local_path}")
-    #         except Exception as e:
-    #             print(f"Error downloading file {gcs_url}: {e}")
-
-    #     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-    #         futures = [
-    #             executor.submit(_download_file, gcs_url, self.settings.LOCAL_NUMPY_DIR)
-    #             for gcs_url in gcs_urls
-    #         ]
-
-    #         for future in futures:
-    #             try:
-    #                 future.result()  # Wait for all futures to complete
-    #             except Exception as e:
-    #                 print(f"Error downloading chunk numpy files: {e}")
-    #     print("Finished downloading numpy files.")
-
     def download_numpy_files_in_dir(self, gcs_urls, dir_name, max_workers=5):
         """
         Download all numpy files from a directory in GCS to local storage.
@@ -264,23 +214,6 @@ class IncrementalTrainDataGenerator:
         )
         return serialized_examples_list
 
-    #@staticmethod
-    # def _parse_tf_example(serialized_example, feature_description, name):
-    #     """
-    #     Parse TFRecord example given a feature description and serialized example.
-    #     Example refers to a single example in the TFRecord tf.train.Example protocol buffer.
-
-    #     This method is static since it parses the example using TensorFlow's
-    #     tf.io.parse_single_example function, and returns the parsed example.
-    #     """
-    #     #print(f"Parsing TFRecord example for feature: {name}")
-
-    #     # Parse the serialized example using the feature description
-    #     example = tf.io.parse_single_example(serialized_example, feature_description)
-
-    #     label_tensor = example[name]
-
-    #     return label_tensor
     @staticmethod
     def _parse_tf_example(serialized_example, feature_description):
         # Before parsing, log the serialized example to inspect its structure (for debugging purposes)

@@ -100,10 +100,11 @@ class FloodModel:
             )
             data = dataclasses.replace(data, temporal=full_temp_input)
 
+        first_spatiotemporal = next(iter(data.spatiotemporal.take(1)))
         # We assume that, if provided, this input is a *single* flood map.
         st_input = data.spatiotemporal
         if st_input is None:
-            st_shape = data.geospatial.shape[:3] + [1]
+            st_shape = first_spatiotemporal.geospatial.shape[:3] + [1]
             st_input = tf.zeros(st_shape)
 
         data = dataclasses.replace(data, spatiotemporal=st_input)
