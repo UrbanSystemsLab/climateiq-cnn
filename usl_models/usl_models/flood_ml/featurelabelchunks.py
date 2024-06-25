@@ -337,7 +337,7 @@ class GenerateFeatureLabelChunks:
                 print(f"An error occurred in creating feature matrix: {e}")
 
         else:
-            print("Simulation not found or it doesn't have label chunks.")
+            print("Simulation not found or it doesn't have feature chunks.")
 
         # If the method hasn't returned by this point, return an empty list and the sim_name_dict
         return [], sim_name_dict

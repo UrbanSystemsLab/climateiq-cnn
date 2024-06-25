@@ -179,8 +179,11 @@ def main():
     # slice sim_names to get the first two elements
     sim_names_2 = sim_names[:2]
 
-    # download npy locally first
+    # download npy label chunks locally first
     generator.download_numpy_files(sim_names_2)
+
+    # download npy feature chunks locally second
+    generator.download_numpy_files(sim_names)
 
     for sim_name in sim_names_2:
         print(f"Index: {sim_names_2.index(sim_name)} , Sim name: {sim_name}")

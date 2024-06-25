@@ -149,16 +149,21 @@ class IncrementalTrainDataGenerator:
         if dir_name is None:
             print("GCS directory name is empty, returning...")
             return
+
+        # Example condition to decide on appending '_label' or '_feature'
+        # This is a placeholder condition and should be replaced with actual logic
+        if "label" in gcs_urls[0]:  # Assuming gcs_urls contains relevant information
+            dir_name += "_label"
         else:
-            # Check if the directory exists
-            if os.path.exists(dir_name):
-                # Use glob to find any .npy files within the directory
-                npy_files = glob.glob(os.path.join(dir_name, '*.npy'))
-                # If there are .npy files, return and do not proceed further
-                if npy_files:
-                    print("Npy chunks already exists, returning..")
-                    return
-           
+            dir_name += "_feature"
+
+        # Now, dir_name has been adjusted, proceed with the existing checks
+        if os.path.exists(dir_name):
+            npy_files = glob.glob(os.path.join(dir_name, '*.npy'))
+            if npy_files:
+                print(f"Directory '{dir_name}' already contains .npy files, skipping download.")
+                return
+
         print(f"Downloading numpy files from GCS directory to: {dir_name}")
 
         if len(gcs_urls) > 1:
@@ -166,7 +171,7 @@ class IncrementalTrainDataGenerator:
         else:
             max_workers = 1
 
-        def _download_file(gcs_url, local_dir):
+        def _download_file(gcs_url, dir_name):
 
             if gcs_url is None:
                 return
@@ -176,7 +181,7 @@ class IncrementalTrainDataGenerator:
                 bucket_name, blob_name = gcs_url.replace("gs://", "").split("/", 1)
                 bucket = self.storage_client.bucket(bucket_name)
                 blob = bucket.blob(blob_name)
-                local_path = os.path.join(local_dir, os.path.basename(blob_name))
+                local_path = os.path.join(dir_name, os.path.basename(blob_name))
                 blob.download_to_filename(local_path)
                 # print(f"Downloaded {gcs_url} to {local_path}")
             except Exception as e:
@@ -206,7 +211,7 @@ class IncrementalTrainDataGenerator:
         List[tf.train.Example]: List of TFRecord examples.
 
         """
-        print("Creating TFRecord from numpy files...")
+        print("Creating TFRecord from numpy files for: ", dir_name)
         serialized_examples_list = []
 
         # check if the LOCAL_NUMPY_DIR is not empty
@@ -311,7 +316,7 @@ class IncrementalTrainDataGenerator:
             if self.settings.DEBUG == 2:
                 print(f"GCS URLs for sim {sim_name}: {feature_chunks}")
 
-            # Download label chunks npy files from GCS. Uncomment this when finalized.
+            # Download feature chunks npy files from GCS. Uncomment this when finalized.
             self._download_numpy_files(feature_chunks)
 
             # Create TFRecord from numpy files
@@ -391,11 +396,11 @@ class IncrementalTrainDataGenerator:
                 print(f"GCS URLs for sim {sim_name}: {temporal_chunks}")
 
             # Download label chunks npy files from GCS. Uncomment this when finalized.
-            self._download_numpy_files(temporal_chunks)
+            #self._download_numpy_files(temporal_chunks)
 
             # Create TFRecord from numpy files
             serialized_examples_list = self._create_tfrecord_from_numpy(
-                "temporal_feature", sim_name
+                "temporal_feature", sim_name+"_temporal"
             )
 
             for serialized_example in serialized_examples_list:
@@ -416,18 +421,19 @@ class IncrementalTrainDataGenerator:
         for sim_name in sim_names:
             print(f"Downloading numpy files for sim: {sim_name}")
             # Get GCS URLs for npy chunks
-            # feature_chunks, sim_dict = self.featurelabelchunksgenerator.get_feature_chunks(
-            #     sim_name
-            # )
+            feature_chunks, sim_dict = self.featurelabelchunksgenerator.get_feature_chunks(
+                sim_name
+            )
             label_chunks, sim_dict = self.featurelabelchunksgenerator.get_label_chunks(
                 sim_name
             )
 
-            # if feature_chunks:
-            #     self._download_numpy_files(feature_chunks)
+            if feature_chunks:
+                for sim_name in sim_names:
+                    self._download_numpy_files(feature_chunks, sim_name+"_feature")
             if label_chunks:
                 for sim_name in sim_names:
-                    self.download_numpy_files_in_dir(label_chunks, sim_name)
+                    self.download_numpy_files_in_dir(label_chunks, sim_name+"_label")
             
     def rainfall_duration_generator(self, sim_name):
         print(f"Generating rainfall duration for sim_name: {sim_name}")
