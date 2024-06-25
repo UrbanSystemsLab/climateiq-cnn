@@ -134,22 +134,31 @@ class FloodModel:
     #     )
     #     return history
 
-    def _model_fit(self, data:  tf.data.Dataset) -> tf.keras.callbacks.History:
-        """ Fits the model using a tf.data.Dataset.
+    def _model_fit(self, flood_model_data: FloodModelData):
+        # Create a dataset that combines all inputs
+        combined_dataset = tf.data.Dataset.zip((
+            flood_model_data.geospatial,
+            flood_model_data.temporal,
+            flood_model_data.spatiotemporal,
+            flood_model_data.labels
+        ))
 
-            Args:
-                dataset: A tf.data.Dataset object that yields tuples of (inputs, labels),
-                        where inputs is a dictionary with keys 'spatiotemporal', 'geospatial',
-                        and 'temporal'.
+        # storm_duration handle separately
+        storm_duration = flood_model_data.storm_duration
 
-            Returns: A History object containing the training and validation loss
-                    and metrics.
-        """
-        self._model.set_n_predictions(data.storm_duration)
+        # Define a function to add storm_duration to each element of the dataset
+        def add_storm_duration(geospatial, temporal, spatiotemporal, labels):
+            return ((geospatial, temporal, spatiotemporal, storm_duration), labels)
+
+        # Apply this function to the dataset
+        dataset_with_storm_duration = combined_dataset.map(add_storm_duration)
+
         history = self._model.fit(
-            data,
-            batch_size=self._model_params.batch_size,
-            epochs=self._model_params.epochs,
+            dataset_with_storm_duration,
+            epochs=self.epochs,
+            callbacks=self.callbacks,
+            validation_split=self.validation_split,
+            verbose=self.verbose
         )
         return history
 
