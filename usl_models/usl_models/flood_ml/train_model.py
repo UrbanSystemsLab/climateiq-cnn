@@ -198,28 +198,28 @@ def main():
     data_batch = generator.get_next_batch(sim_names_2, batch_size)
 
     print("\n")
-    
+
     # print size of data_batch
     print("Data batch size:", len(data_batch))
     print("\n")
 
+    # Print the shapes of the tensors in the batch
+    for data in data_batch:
+        # Take the first element from tf dataset iterator and print shape of each tensors
+        print("_" * 10, "\n\n")
+        # print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
+        print("_" * 10, "\n\n")
+        # print("Labels shape:", next(iter(data.labels.take(1))).shape)
+        print("_" * 10, "\n\n")
+        print(
+            "geospatial Feature tensor shape:",
+            next(iter(data.geospatial.take(1))).shape,
+        )
+        print("_" * 10, "\n\n")
+        # print("Rainfall duration:", data.storm_duration)
+        print("")
+        print("-" * 20)
 
-    # # Print the shapes of the tensors in the batch
-    # for data in data_batch:
-    #     # Take the first element from tf dataset iterator and print shape of each tensors
-    #     print("_" * 10 , "\n\n")
-    #    # print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
-    #     print("_" * 10 , "\n\n")
-    #    # print("Labels shape:", next(iter(data.labels.take(1))).shape)
-    #     print("_" * 10 , "\n\n")
-    #     print("geospatial Feature tensor shape:",
-    #           next(iter(data.geospatial.take(1))).shape,
-    #           )
-    #     print("_" * 10 , "\n\n")
-    #    # print("Rainfall duration:", data.storm_duration)
-    #     print("")
-    #     print("-" * 20)
-        
         # # Validate the shape of the labels tensor
         # first_label = next(iter(data.take(1)))[0]  # Get the first label batch
         # expected_label_shape = list(first_label.shape)
@@ -232,7 +232,7 @@ def main():
         #     f"Actual shape: {first_label.shape}."  # Use first_label.shape
         # )
         # print("Labels are consistent with storm duration.")
-        # print("-" * 20) 
+        # print("-" * 20)
 
 
 if __name__ == "__main__":
