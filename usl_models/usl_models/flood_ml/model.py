@@ -142,7 +142,7 @@ class FloodModel:
             "temporal": flood_model_data.temporal,
         }
 
-        combined_dataset = tf.data.Dataset.from_tensor_slices(inputs)
+        inputs = tf.data.Dataset.from_tensor_slices(inputs)
         
         # Create a dataset that combines all inputs
         combined_dataset = tf.data.Dataset.zip((
