@@ -423,9 +423,15 @@ class IncrementalTrainDataGenerator:
         # Get the next batch of feature tensors
         print("Generating training data for sim_names: ", sim_name)
 
-        geospatial_tensor = functools.partial(self._generate_feature_tensors, sim_name)
-        label_tensor = functools.partial(self._generate_label_tensors, sim_name)
-        temporal_tensor = functools.partial(self._generate_temporal_tensors, sim_name)
+        # geospatial_tensor = functools.partial(self._generate_feature_tensors, sim_name)
+        # label_tensor = functools.partial(self._generate_label_tensors, sim_name)
+        # temporal_tensor = functools.partial(self._generate_temporal_tensors, sim_name)
+        # spatiotemporal_tensor = self._create_dummy_dataset([1, 1000, 1000, 1])
+        # storm_duration = self.rainfall_duration_generator(sim_name)
+
+        geospatial_tensor = self._generate_feature_tensors, sim_name
+        label_tensor = self._generate_label_tensors, sim_name
+        temporal_tensor = self._generate_temporal_tensors, sim_name
         spatiotemporal_tensor = self._create_dummy_dataset([1, 1000, 1000, 1])
         storm_duration = self.rainfall_duration_generator(sim_name)
 
