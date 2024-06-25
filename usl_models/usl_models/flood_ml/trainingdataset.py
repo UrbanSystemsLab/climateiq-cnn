@@ -264,7 +264,7 @@ class IncrementalTrainDataGenerator:
         )
         return serialized_examples_list
 
-    @staticmethod
+    #@staticmethod
     # def _parse_tf_example(serialized_example, feature_description, name):
     #     """
     #     Parse TFRecord example given a feature description and serialized example.
@@ -281,9 +281,10 @@ class IncrementalTrainDataGenerator:
     #     label_tensor = example[name]
 
     #     return label_tensor
-    def _parse_tf_example(self, serialized_example, feature_description):
+    @staticmethod
+    def _parse_tf_example(serialized_example, feature_description):
         # Before parsing, log the serialized example to inspect its structure (for debugging purposes)
-        print("Inspecting serialized example structure and data type...")  # Consider removing after debugging
+        print("Inspecting serialized example structure and data type...")  
         # Attempt to parse the serialized example
         try:
             example = tf.io.parse_single_example(serialized_example, feature_description)
@@ -302,7 +303,7 @@ class IncrementalTrainDataGenerator:
         print(f"Creating TFRecord dataset for feature: {name}")
         dataset = tf.data.Dataset.from_tensor_slices(serialized_examples_list)
         dataset = dataset.map(
-            lambda x: self._parse_tf_example(x, feature_description, name)
+            lambda x: self._parse_tf_example(x, feature_description)
         )
         return dataset
 
