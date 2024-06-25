@@ -398,6 +398,12 @@ class IncrementalTrainDataGenerator:
         print(f"Generating rainfall duration for sim_name: {sim_name}")
         return self._generate_rainfall_duration(sim_name)
 
+    # create a dummy dataset for Spatiotemporal tensors
+    def _create_dummy_dataset(input_shape):
+        # Create a dummy dataset with the correct shape
+        # Adjust the shape and dtype according to your needs
+        return tf.data.Dataset.from_tensor_slices(tf.zeros(input_shape)).batch(1)
+
     def get_next_batch(self, sim_names, batch_size) -> List[FloodModelData]:
         """
         Get the next batch of data for training.
@@ -436,10 +442,13 @@ class IncrementalTrainDataGenerator:
 
             print(f"Storm duration: {storm_duration}")
 
+            spatiotemporal_tensor = self._create_dummy_dataset([1, 1000, 1000, 1])
+
             # print type of these datasets
             print(f"feature_dataset type: {type(feature_dataset)}")
             print(f"label_dataset type: {type(label_dataset)}")
             print(f"temporal_dataset type: {type(temporal_dataset)}")
+            print(f"spatiotemporal_tensor type: {type(spatiotemporal_tensor)}")
 
             if (
                 label_dataset is None
@@ -455,6 +464,7 @@ class IncrementalTrainDataGenerator:
                     labels=label_dataset,
                     temporal=temporal_dataset,
                     storm_duration=storm_duration,
+                    spatiotemporal=spatiotemporal_tensor
                 )
                 flood_model_data_list.append(flood_model_data)
 
