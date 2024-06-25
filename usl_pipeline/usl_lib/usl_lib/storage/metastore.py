@@ -1,6 +1,8 @@
 import dataclasses
 import enum
+import itertools
 import math
+import random
 from typing import Iterable, Optional
 import urllib.parse
 
@@ -17,6 +19,8 @@ CITY_CAT_RAINFALL_CONFIG = "city_cat_rainfall_configs"
 
 SIMULATIONS = "simulations"
 SIMULATION_LABEL_CHUNKS = "label_chunks"
+
+RAND_SEED = 7401
 
 
 @dataclasses.dataclass(slots=True)
@@ -46,6 +50,8 @@ class StudyArea:
     chunk_size: Optional[int] = None
     chunk_x_count: Optional[int] = None
     chunk_y_count: Optional[int] = None
+    train_indices: Optional[list[dict[str, int]]] = None
+    test_indices: Optional[list[dict[str, int]]] = None
 
     def as_header(self) -> geo_data.ElevationHeader:
         """Represents the study area as a header describing a raster space."""
@@ -123,7 +129,7 @@ class StudyArea:
 
     @staticmethod
     def update_chunk_info(
-        db: firestore.Client, study_area_name: str, chunk_size: int
+        db: firestore.Client, study_area_name: str, chunk_size: int, seed=RAND_SEED
     ) -> None:
         """Sets chunk-related properties of study area if they weren't set before.
 
@@ -146,11 +152,28 @@ class StudyArea:
         x_count = math.ceil(study_area.col_count / chunk_size)
         y_count = math.ceil(study_area.row_count / chunk_size)
 
+        # We'll have one chunk for each (x, y) pair.
+        # We want to mark 20% of the chunks as part of the test set and the remaining
+        # chunks as part of the training set for ML. We want to set this in the data
+        # pipeline so ML can have consistent training and test sets for experiments.
+        all_chunks = [
+            {"x_index": x, "y_index": y}
+            for x, y in itertools.product(range(x_count), range(y_count))
+        ]
+        # Set a seed so we get consistent splits if we reprocess the study area.
+        random.seed(seed)
+        random.shuffle(all_chunks)
+        split = int(0.2 * len(all_chunks))
+        train = all_chunks[split:]
+        test = all_chunks[:split]
+
         db.collection(STUDY_AREAS).document(study_area_name).update(
             {
                 "chunk_size": chunk_size,
                 "chunk_x_count": x_count,
                 "chunk_y_count": y_count,
+                "train_indices": train,
+                "test_indices": test,
             },
         )
 

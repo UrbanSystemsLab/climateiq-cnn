@@ -218,3 +218,42 @@ def test_get_simulation_bad_name_raises_error(firestore_db):
         metastore.Simulation.get(
             firestore_db, "missing-study-area", "missing-config/name.txt"
         )
+
+
+def test_update_chunk_info(firestore_db):
+    metastore.StudyArea(
+        name="study-area",
+        col_count=10,
+        row_count=4,
+        x_ll_corner=3,
+        y_ll_corner=4,
+        cell_size=5,
+        crs="crs",
+    ).create(firestore_db)
+
+    metastore.StudyArea.update_chunk_info(firestore_db, "study-area", 2, seed=2)
+    assert metastore.StudyArea.get(firestore_db, "study-area") == metastore.StudyArea(
+        name="study-area",
+        col_count=10,
+        row_count=4,
+        x_ll_corner=3,
+        y_ll_corner=4,
+        cell_size=5,
+        crs="crs",
+        chunk_x_count=5,  # 10 / 2
+        chunk_y_count=2,  # 4 / 2
+        chunks_size=2,
+        #  8 / 10 chunks for training.
+        train_indices=[
+            {"x_index": 0, "y_index": 0},
+            {"x_index": 0, "y_index": 1},
+            {"x_index": 1, "y_index": 0},
+            {"x_index": 1, "y_index": 1},
+            {"x_index": 2, "y_index": 0},
+            {"x_index": 3, "y_index": 0},
+            {"x_index": 3, "y_index": 1},
+            {"x_index": 4, "y_index": 0},
+        ],
+        #  2 / 10 chunks for test.
+        test_indices=[{"x_index": 2, "y_index": 1}, {"x_index": 4, "y_index": 1}],
+    )
