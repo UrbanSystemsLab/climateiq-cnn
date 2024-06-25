@@ -110,27 +110,46 @@ class FloodModel:
         data = dataclasses.replace(data, spatiotemporal=st_input)
         return data
 
-    def _model_fit(self, data: FloodModelData) -> tf.keras.callbacks.History:
-        """Fits the model on a single batch of FloodModelData.
+    # def _model_fit(self, data: FloodModelData) -> tf.keras.callbacks.History:
+    #     """Fits the model on a single batch of FloodModelData.
 
-        Args:
-            data: A FloodModelData object.
+    #     Args:
+    #         data: A FloodModelData object.
 
-        Returns: A History object containing the training and validation loss
-            and metrics.
+    #     Returns: A History object containing the training and validation loss
+    #         and metrics.
+    #     """
+    #     inputs = {
+    #         "spatiotemporal": data.spatiotemporal,
+    #         "geospatial": data.geospatial,
+    #         "temporal": data.temporal,
+    #     }
+    #     self._model.set_n_predictions(data.storm_duration)
+    #     history = self._model.fit(
+    #         inputs,
+    #         data.labels,
+    #         batch_size=self._model_params.batch_size,
+    #         epochs=self._model_params.epochs,
+    #         #validation_split=0.2,
+    #     )
+    #     return history
+
+    def _model_fit(self, data:  tf.data.Dataset) -> tf.keras.callbacks.History:
+        """ Fits the model using a tf.data.Dataset.
+
+            Args:
+                dataset: A tf.data.Dataset object that yields tuples of (inputs, labels),
+                        where inputs is a dictionary with keys 'spatiotemporal', 'geospatial',
+                        and 'temporal'.
+
+            Returns: A History object containing the training and validation loss
+                    and metrics.
         """
-        inputs = {
-            "spatiotemporal": data.spatiotemporal,
-            "geospatial": data.geospatial,
-            "temporal": data.temporal,
-        }
         self._model.set_n_predictions(data.storm_duration)
         history = self._model.fit(
-            inputs,
-            data.labels,
+            data,
             batch_size=self._model_params.batch_size,
             epochs=self._model_params.epochs,
-            #validation_split=0.2,
         )
         return history
 
