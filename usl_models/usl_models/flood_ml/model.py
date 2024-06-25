@@ -158,9 +158,9 @@ class FloodModel:
             if applicable, validation loss and metrics.
         """
         model_history = []
-        processed = [self._validate_and_preprocess_data(x, training=True) for x in data]
+        #processed = [self._validate_and_preprocess_data(x, training=True) for x in data]
 
-        for x in processed:
+        for x in data:
             history = self._model_fit(x)
             model_history.append(history)
 
