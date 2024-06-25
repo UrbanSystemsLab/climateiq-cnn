@@ -164,21 +164,43 @@ def simple_training(
     # download npy temporal chunks locally
     generator.download_numpy_files(sim_names, "temporal")
 
-    # Get the next batch of data for one simulation
-    data_batch = generator.get_next_batch(sim_names, batch_size)
+    # declare empty tf.data.dataset
+    floodModelDataset = tf.data.Dataset()
 
-    print("\n")
+    # compare feature and label chunks
 
-    # print size of data_batch
-    print("Data batch size:", len(data_batch))
-    print("\n")
+    for sim_name in sim_names:
+        floodModelDataset, storm_duration = generator.get_dataset_from_tensors(sim_name, batch_size=batch_size)
+        print(type(floodModelDataset))
+        print(storm_duration)
 
-    print("Dataset generation completed, will hand over to model training..")
-    print("\n")
-    print("#######  Training model ##########")
-    model_history.append(model.train(data_batch))
-    print("Training complete")
-    return model_history
+    # look through floodModelDataset via iterator
+    iterator = iter(floodModelDataset)
+
+    while True:
+        try:
+            element = next(iterator)
+            print(element)
+        except StopIteration:
+            # End of dataset reached
+            break
+
+
+    # verify_labels_shape(dataset)
+
+    # print("\n")
+
+    # # print size of data_batch
+    # print("Data batch size:", len(data_batch))
+    # print("\n")
+
+    # print("Dataset generation completed, will hand over to model training..")
+    # print("\n")
+    # print("#######  Training model ##########")
+    # model_history.append(model.train(data_batch))
+    # print("Training complete")
+    # return model_history
+
 
 def set_tf_gpu():
     print(tf.__version__)
@@ -213,7 +235,7 @@ def main():
         print(history.history)
 
 
-        
+
     # generator = IncrementalTrainDataGenerator(
     #     batch_size=batch_size,
     # )
