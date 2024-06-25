@@ -150,14 +150,6 @@ class IncrementalTrainDataGenerator:
             print("GCS directory name is empty, returning...")
             return
 
-        # Example condition to decide on appending '_label' or '_feature'
-        # This is a placeholder condition and should be replaced with actual logic
-        # if "label" in gcs_urls[0]:  # Assuming gcs_urls contains relevant information
-        #     dir_name += "_label"
-        # else:
-        #     dir_name += "_feature"
-
-        # Now, dir_name has been adjusted, proceed with the existing checks
         if os.path.exists(dir_name):
             npy_files = glob.glob(os.path.join(dir_name, '*.npy'))
             if npy_files:
@@ -174,21 +166,27 @@ class IncrementalTrainDataGenerator:
         else:
             max_workers = 1
 
-        def _download_file(gcs_url, dir_name):
+        def _download_file(gcs_url, local_dir):
+            def download_single_file(single_gcs_url):
+                try:
+                    # print(f"Downloading file from GCS URL: {single_gcs_url}")
+                    bucket_name, blob_name = single_gcs_url.replace("gs://", "").split("/", 1)
+                    bucket = self.storage_client.bucket(bucket_name)
+                    blob = bucket.blob(blob_name)
+                    local_path = os.path.join(local_dir, os.path.basename(blob_name))
+                    blob.download_to_filename(local_path)
+                    # print(f"Downloaded {single_gcs_url} to {local_path}")
+                except Exception as e:
+                    print(f"Error downloading file {single_gcs_url}: {e}")
 
             if gcs_url is None:
                 return
 
-            try:
-                # print(f"Downloading file from GCS URL: {gcs_url}")
-                bucket_name, blob_name = gcs_url.replace("gs://", "").split("/", 1)
-                bucket = self.storage_client.bucket(bucket_name)
-                blob = bucket.blob(blob_name)
-                local_path = os.path.join(dir_name, os.path.basename(blob_name))
-                blob.download_to_filename(local_path)
-                # print(f"Downloaded {gcs_url} to {local_path}")
-            except Exception as e:
-                print(f"Error downloading file {gcs_url}: {e}")
+            if isinstance(gcs_url, str):
+                download_single_file(gcs_url)
+            elif isinstance(gcs_url, list):
+                for url in gcs_url:
+                    download_single_file(url)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
@@ -438,9 +436,9 @@ class IncrementalTrainDataGenerator:
             if chunktype == "feature":
                 dir_name = sim_name+"_feature"
                 for sim_name in sim_names:
-                    self._download_numpy_files(feature_chunks, dir_name)
+                    self.download_numpy_files_in_dir(feature_chunks, dir_name)
             if chunktype == "label":
-                dir_name = sim_name+"_feature"
+                dir_name = sim_name+"_label"
                 for sim_name in sim_names:
                     self.download_numpy_files_in_dir(label_chunks, dir_name)
             if chunktype == "temporal":
