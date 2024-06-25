@@ -628,7 +628,6 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
 
         features_matrix = numpy.dstack(features_components)
 
-    # TODO: Write to metastore
     return features_matrix, FeatureMetadata()
 
 

@@ -267,7 +267,37 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     )
     numpy.testing.assert_array_equal(uploaded_array, expected_array)
 
-    # TODO: Ensure we wrote firestore entries for the chunk.
+    # Ensure we wrote firestore entries for the chunk.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("study_area"),
+            mock.call().collection().document().collection("chunks"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document("met_em.d03_test"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document()
+            .set(
+                {
+                    # For heat, we process each WPS netcdf file as a chunk (un-tar'ed)
+                    "archive_path": "gs://bucket/study_area/met_em.d03_test.nc",
+                    "feature_matrix_path": (
+                        "gs://climateiq-study-area-feature-chunks/study_area/"
+                        + "met_em.d03_test.npy"
+                    ),
+                    "error": firestore.DELETE_FIELD,
+                },
+                merge=True,
+            ),
+        ]
+    )
 
 
 @mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
