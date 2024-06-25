@@ -207,16 +207,16 @@ def main():
     for data in data_batch:
         # Take the first element from tf dataset iterator and print shape of each tensors
         print("_" * 10, "\n\n")
-        # print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
+        print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
         print("_" * 10, "\n\n")
-        # print("Labels shape:", next(iter(data.labels.take(1))).shape)
+        print("Labels shape:", next(iter(data.labels.take(1))).shape)
         print("_" * 10, "\n\n")
         print(
             "geospatial Feature tensor shape:",
             next(iter(data.geospatial.take(1))).shape,
         )
         print("_" * 10, "\n\n")
-        # print("Rainfall duration:", data.storm_duration)
+        print("Rainfall duration:", data.storm_duration)
         print("")
         print("-" * 20)
 
