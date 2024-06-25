@@ -169,13 +169,13 @@ class IncrementalTrainDataGenerator:
         def _download_file(gcs_url, local_dir):
             def download_single_file(single_gcs_url):
                 try:
-                    # print(f"Downloading file from GCS URL: {single_gcs_url}")
+                    print(f"Downloading file from GCS URL: {single_gcs_url}")
                     bucket_name, blob_name = single_gcs_url.replace("gs://", "").split("/", 1)
                     bucket = self.storage_client.bucket(bucket_name)
                     blob = bucket.blob(blob_name)
                     local_path = os.path.join(local_dir, os.path.basename(blob_name))
                     blob.download_to_filename(local_path)
-                    # print(f"Downloaded {single_gcs_url} to {local_path}")
+                    print(f"Downloaded {single_gcs_url} to {local_path}")
                 except Exception as e:
                     print(f"Error downloading file {single_gcs_url}: {e}")
 
@@ -265,22 +265,33 @@ class IncrementalTrainDataGenerator:
         return serialized_examples_list
 
     @staticmethod
-    def _parse_tf_example(serialized_example, feature_description, name):
-        """
-        Parse TFRecord example given a feature description and serialized example.
-        Example refers to a single example in the TFRecord tf.train.Example protocol buffer.
+    # def _parse_tf_example(serialized_example, feature_description, name):
+    #     """
+    #     Parse TFRecord example given a feature description and serialized example.
+    #     Example refers to a single example in the TFRecord tf.train.Example protocol buffer.
 
-        This method is static since it parses the example using TensorFlow's
-        tf.io.parse_single_example function, and returns the parsed example.
-        """
-        #print(f"Parsing TFRecord example for feature: {name}")
+    #     This method is static since it parses the example using TensorFlow's
+    #     tf.io.parse_single_example function, and returns the parsed example.
+    #     """
+    #     #print(f"Parsing TFRecord example for feature: {name}")
 
-        # Parse the serialized example using the feature description
-        example = tf.io.parse_single_example(serialized_example, feature_description)
+    #     # Parse the serialized example using the feature description
+    #     example = tf.io.parse_single_example(serialized_example, feature_description)
 
-        label_tensor = example[name]
+    #     label_tensor = example[name]
 
-        return label_tensor
+    #     return label_tensor
+    def _parse_tf_example(self, serialized_example, feature_description):
+        # Before parsing, log the serialized example to inspect its structure (for debugging purposes)
+        print("Inspecting serialized example structure and data type...")  # Consider removing after debugging
+        # Attempt to parse the serialized example
+        try:
+            example = tf.io.parse_single_example(serialized_example, feature_description)
+            return example
+        except tf.errors.InvalidArgumentError as e:
+            print(f"Failed to parse serialized example: {e}")
+            # Optionally, add more detailed logging or error handling here
+            raise
 
     def _create_tfrecord_dataset(
         self, serialized_examples_list, feature_description, name

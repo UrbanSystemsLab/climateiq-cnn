@@ -182,8 +182,8 @@ def main():
     # # download npy label chunks locally
     # generator.download_numpy_files(sim_names_2, "label")
 
-    # # download npy feature chunks locally
-    # generator.download_numpy_files(sim_names_2, "feature")
+    # download npy feature chunks locally
+    generator.download_numpy_files(sim_names_2, "feature")
 
     # # download npy temporal chunks locally
     # generator.download_numpy_files(sim_names_2, "temporal")
@@ -204,19 +204,21 @@ def main():
     print("\n")
 
 
-    # Print the shapes of the tensors in the batch
-    for data in data_batch:
-        # Take the first element from tf dataset iterator and print shape of each tensors
-        
-        print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
-        print("Labels shape:", next(iter(data.labels.take(1))).shape)
-        print(
-            "geospatial Feature tensor shape:",
-            next(iter(data.geospatial.take(1))).shape,
-        )
-        print("Rainfall duration:", data.storm_duration)
-        print("")
-        print("-" * 20)
+    # # Print the shapes of the tensors in the batch
+    # for data in data_batch:
+    #     # Take the first element from tf dataset iterator and print shape of each tensors
+    #     print("_" * 10 , "\n\n")
+    #    # print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
+    #     print("_" * 10 , "\n\n")
+    #    # print("Labels shape:", next(iter(data.labels.take(1))).shape)
+    #     print("_" * 10 , "\n\n")
+    #     print("geospatial Feature tensor shape:",
+    #           next(iter(data.geospatial.take(1))).shape,
+    #           )
+    #     print("_" * 10 , "\n\n")
+    #    # print("Rainfall duration:", data.storm_duration)
+    #     print("")
+    #     print("-" * 20)
         
         # # Validate the shape of the labels tensor
         # first_label = next(iter(data.take(1)))[0]  # Get the first label batch
