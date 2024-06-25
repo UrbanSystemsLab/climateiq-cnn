@@ -130,7 +130,7 @@ class FloodModel:
             data.labels,
             batch_size=self._model_params.batch_size,
             epochs=self._model_params.epochs,
-            validation_split=0.2,
+            #validation_split=0.2,
         )
         return history
 
