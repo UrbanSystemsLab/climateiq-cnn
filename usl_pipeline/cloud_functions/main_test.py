@@ -165,9 +165,27 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
         mock_firestore_client().collection().document(),
         {"elevation_min": 2, "elevation_max": 6},
     )
-    mock_firestore_client().collection().document().update.assert_called_once_with(
-        {"chunk_size": 2, "chunk_x_count": 5, "chunk_y_count": 10}
-    ),
+
+    # Ensure we called update with the correct dictionary.
+    update_args = (
+        mock_firestore_client().collection().document().update.call_args.args[0]
+    )
+
+    assert update_args.keys() == {
+        "chunk_size",
+        "chunk_x_count",
+        "chunk_y_count",
+        "train_indices",
+        "test_indices",
+    }
+    assert update_args["chunk_size"] == 2
+    assert update_args["chunk_x_count"] == 5
+    assert update_args["chunk_y_count"] == 10
+
+    # 40 / 50 chunks for training
+    assert len(update_args["train_indices"]) == 40
+    # 10 / 50 chunks for training
+    assert len(update_args["test_indices"]) == 10
 
 
 def test_build_feature_matrix_from_archive_empty_polygons():
