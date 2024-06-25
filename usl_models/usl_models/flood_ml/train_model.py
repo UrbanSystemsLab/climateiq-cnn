@@ -179,30 +179,29 @@ def main():
     # slice sim_names to get the first two elements
     sim_names_2 = sim_names[:2]
 
-    # download npy label chunks locally
-    generator.download_numpy_files(sim_names_2, "label")
+    # # download npy label chunks locally
+    # generator.download_numpy_files(sim_names_2, "label")
 
-    # download npy feature chunks locally
-    generator.download_numpy_files(sim_names_2, "feature")
+    # # download npy feature chunks locally
+    # generator.download_numpy_files(sim_names_2, "feature")
 
-    # download npy temporal chunks locally
-    generator.download_numpy_files(sim_names_2, "temporal")
+    # # download npy temporal chunks locally
+    # generator.download_numpy_files(sim_names_2, "temporal")
 
     # print("Printing valid sims in metastore"))
 
+    for sim_name in sim_names_2:
+        print(f"Index: {sim_names_2.index(sim_name)} , Sim name: {sim_name}")
+        print("")
 
-    # for sim_name in sim_names_2:
-    #     print(f"Index: {sim_names_2.index(sim_name)} , Sim name: {sim_name}")
-    #     print("")
+    # Get the next batch of data for one simulation
+    data_batch = generator.get_next_batch(sim_names_2, batch_size)
 
-    # # Get the next batch of data for one simulation
-    # data_batch = generator.get_next_batch(sim_names_2, batch_size)
-
-    # print("\n")
+    print("\n")
     
-    # # print size of data_batch
-    # print("Data batch size:", len(data_batch))
-    # print("\n")
+    # print size of data_batch
+    print("Data batch size:", len(data_batch))
+    print("\n")
 
 
     # # Print the shapes of the tensors in the batch
