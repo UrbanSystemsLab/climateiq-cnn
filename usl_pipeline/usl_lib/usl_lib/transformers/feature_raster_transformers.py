@@ -1,3 +1,4 @@
+import typing
 from typing import Optional, Tuple
 
 import numpy
@@ -127,3 +128,41 @@ def transform_to_feature_raster_layers(
             infiltration_raster_layers,
         )
     )
+
+
+import pathlib
+
+from google.cloud import firestore
+from google.cloud import storage
+import numpy
+import numpy.typing as npt
+
+from usl_lib.storage import metastore
+
+
+def rescale_feature_blob(
+    feature_matrix_input_fd: typing.BinaryIO,
+    study_area_metadata: metastore.StudyArea,
+    feature_matrix_output_fd: typing.BinaryIO,
+):
+    unscaled_feature_matrix = numpy.load(feature_matrix_input_fd)
+    scaled_feature_matrix = rescale_feature_matrix(unscaled_feature_matrix, study_area_metadata)
+    numpy.save(feature_matrix_output_fd, scaled_feature_matrix)
+
+
+def rescale_feature_matrix(
+    unscaled_feature_matrix: npt.NDArray,
+    study_area_metadata: metastore.StudyArea,
+):
+    shape = unscaled_feature_matrix.shape
+    feature_layers = [
+        layer.reshape(shape[0], shape[1])
+        for layer in numpy.dsplit(unscaled_feature_matrix, shape[2])
+    ]
+    elevation_data = feature_layers[0]
+    presence_mask = feature_layers[1]
+    elevation_data[presence_mask == 1] = (
+                                             elevation_data[presence_mask == 1] - study_area_metadata.elevation_min
+                                         ) / (study_area_metadata.elevation_max - study_area_metadata.elevation_min)
+    elevation_data[presence_mask != 1] = -1
+    return numpy.dstack(feature_layers)

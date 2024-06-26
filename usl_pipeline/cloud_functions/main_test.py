@@ -1371,3 +1371,96 @@ def test_calculate_metadata_for_elevation_empty_area():
         geo_data.Elevation(header=header, data=data)
     )
     assert metadata == main.FeatureMetadata(elevation_min=None, elevation_max=None)
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_rescale_feature_matrices(mock_firestore_client):
+    # Return a study area geography from the mock firestore client.
+    mock_firestore_client().collection().document().get().to_dict.return_value = {
+        "col_count": 2,
+        "row_count": 4,
+        "x_ll_corner": 0.0,
+        "y_ll_corner": 0.0,
+        "cell_size": 1.0,
+        "elevation_min": 0.0,
+        "elevation_max": 10.0,
+        "chunk_size": 2,
+        "chunk_x_count": 1,
+        "chunk_y_count": 2,
+    }
+    unscaled_feature_matrix = numpy.array(
+        [
+            [
+                [1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [2.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            [
+                [9.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+        ],
+        dtype=numpy.float32,
+    )
+
+    feature_bucket = mock.MagicMock(spec=storage.Bucket)
+    feature_bucket.name = "features"
+    input1_mock_blob = mock.MagicMock(spec=storage.Blob)
+    input2_mock_blob = mock.MagicMock(spec=storage.Blob)
+    input_mock_blobs = [
+        input1_mock_blob,
+        input2_mock_blob,
+    ]
+    for i in range(2):
+        input_mock_blobs[i].path = f"TestArea/chunk_0_{i}"
+        input_mock_blobs[i].name = f"chunk_0_{i}"
+        feature_input_fd = io.BytesIO()
+        numpy.save(feature_input_fd, unscaled_feature_matrix)
+        feature_input_fd.seek(0)
+        input_mock_blobs[i].open.return_value = feature_input_fd
+
+    feature_bucket.list_blobs.return_value = input_mock_blobs
+    output1_mock_blob = mock.MagicMock(spec=storage.Blob)
+    output1_buffer = io.BytesIO()
+    output1_buffer.close = lambda: output1_buffer.flush()  # Want to check content
+    output1_mock_blob.open.return_value = output1_buffer
+    output2_mock_blob = mock.MagicMock(spec=storage.Blob)
+    output2_buffer = io.BytesIO()
+    output2_buffer.close = lambda: output2_buffer.flush()  # Want to check content
+    output2_mock_blob.open.return_value = output2_buffer
+    feature_bucket.blob.side_effect = [output1_mock_blob, output2_mock_blob]
+
+    main._start_feature_rescaling_if_ready(feature_bucket, "TestArea/chunk_0_0")
+
+    feature_bucket.assert_has_calls(
+        [
+            mock.call.list_blobs(prefix="TestArea/chunk_"),
+            mock.call.blob("TestArea/scaled_chunk_0_0"),
+            mock.call.blob("TestArea/scaled_chunk_0_1"),
+        ]
+    )
+    for i in range(2):
+        input_mock_blobs[i].assert_has_calls([mock.call.open("rb"), mock.call.delete()])
+    output1_mock_blob.open.assert_called_once_with("wb")
+    output2_mock_blob.open.assert_called_once_with("wb")
+
+    expected_scaled_feature_matrix = numpy.array(
+        [
+            [
+                [0.1, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.2, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            [
+                [0.9, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+        ],
+        dtype=numpy.float32,
+    )
+
+    output_buffers = [output1_buffer, output2_buffer]
+    for i in range(2):
+        output_buffer = output_buffers[i]
+        output_buffer.seek(0)
+        numpy.testing.assert_array_equal(
+            numpy.load(output_buffer), expected_scaled_feature_matrix
+        )

@@ -857,3 +857,80 @@ def _write_as_npy(blob: storage.Blob, array: NDArray) -> None:
     npy_file.flush()
     npy_file.seek(0)
     blob.upload_from_file(npy_file)
+
+
+def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path: str):
+    """Creates scaled version for every chunk file in the storage bucket parent folder.
+
+    Output files with scaled feature matrices will be placed to the same folder where
+    unscaled files (following "chunk_*" name pattern) are stored but will get "scaled_"
+    prefix. Rescaling only starts when metadata of study area (corresponding to the
+    parent folder name) contains chunks counters giving exactly the same number of
+    chunks as are currently stored in the bucket folder. This should happen when the
+    last feature chunk is stored.
+
+    Args:
+        feature_bucket: Storage bucket with feature matrices.
+        blob_path: Path pointing to one of unscaled feature matrix files with the name
+            following the "chunk_*" pattern. Other files are ignored.
+    """
+    feature_path = pathlib.PurePosixPath(blob_path)
+    if not feature_path.name.startswith("chunk_"):
+        return
+    feature_parent_path = feature_path.parent
+    study_area_name = feature_parent_path.parts[-1]
+
+    db = firestore.Client()
+    study_area = metastore.StudyArea.get(db, study_area_name)
+    if study_area.chunk_x_count is None or study_area.chunk_y_count is None:
+        logging.info(
+            f"[Feature Rescaler] Study area {study_area_name} has no chunk counts in "
+            + "metadata"
+        )
+        return
+
+    feature_blobs = list(
+        feature_bucket.list_blobs(prefix=f"{feature_parent_path}/chunk_")
+    )
+
+    chunk_count = study_area.chunk_x_count * study_area.chunk_y_count
+    if chunk_count != len(feature_blobs):
+        logging.info(
+            f"[Feature Rescaler] Study area {study_area_name} has chunk counts"
+            + f" in metadata ({chunk_count}) different from number of stored feature"
+            + f" chunks ({len(feature_blobs)})"
+        )
+        return
+
+    # We're at the final step when all unscaled feature matrices are ready
+    for feature_blob in feature_blobs:
+        logging.info(f"[Feature Rescaler] Rescaling feature matrix {feature_blob.path}")
+        output_blob = feature_bucket.blob(
+            f"{feature_parent_path}/scaled_{feature_blob.name}"
+        )
+        with feature_blob.open("rb") as in_fd, output_blob.open("wb") as out_fd:
+            feature_raster_transformers.rescale_feature_blob(in_fd, study_area, out_fd)
+    # Once all chunks are processed we can delete unscaled ones:
+    for feature_blob in feature_blobs:
+        feature_blob.delete()
+
+
+@functions_framework.cloud_event
+@_retry_and_report_errors()
+def rescale_feature_matrices(cloud_event: functions_framework.CloudEvent) -> None:
+    """Starts rescaling process once all unscaled feature matrix files are uploaded.
+
+    Output files with scaled feature matrices will be placed to the same folder where
+    unscaled files (following "chunk_*" name pattern) are stored but will get "scaled_"
+    prefix. Rescaling only starts when metadata of study area (corresponding to the
+    parent folder name) contains chunks counters giving exactly the same number of
+    chunks as are currently stored in the bucket folder. This should happen when the
+    last feature chunk is stored.
+
+    Args:
+        cloud_event: Cloud event pointing to one of unscaled feature matrix files with
+            name following the "chunk_*" pattern. Other files are ignored.
+    """
+    _start_feature_rescaling_if_ready(
+        storage.Client().bucket(cloud_event.data["bucket"]), cloud_event.data["name"]
+    )
