@@ -6,6 +6,7 @@ import numpy.typing as npt
 from shapely import geometry
 
 from usl_lib.shared import geo_data
+from usl_lib.storage import metastore
 from usl_lib.transformers import polygon_transformers, soil_classes_transformers
 
 # Default soil class value that is recognized a non-green area.
@@ -130,30 +131,40 @@ def transform_to_feature_raster_layers(
     )
 
 
-import pathlib
-
-from google.cloud import firestore
-from google.cloud import storage
-import numpy
-import numpy.typing as npt
-
-from usl_lib.storage import metastore
-
-
 def rescale_feature_blob(
     feature_matrix_input_fd: typing.BinaryIO,
     study_area_metadata: metastore.StudyArea,
     feature_matrix_output_fd: typing.BinaryIO,
-):
+) -> None:
+    """Performs scaling of elevation data in the 0-th layer of feature matrix.
+
+    Args:
+        feature_matrix_input_fd: Input stream to read unscaled feature matrix from.
+        study_area_metadata: Study Area metadata containing min/max elevation values
+            that are used for scaling.
+        feature_matrix_output_fd: Output stream to write scaled results to.
+    """
     unscaled_feature_matrix = numpy.load(feature_matrix_input_fd)
-    scaled_feature_matrix = rescale_feature_matrix(unscaled_feature_matrix, study_area_metadata)
+    scaled_feature_matrix = rescale_feature_matrix(
+        unscaled_feature_matrix, study_area_metadata
+    )
     numpy.save(feature_matrix_output_fd, scaled_feature_matrix)
 
 
 def rescale_feature_matrix(
     unscaled_feature_matrix: npt.NDArray,
     study_area_metadata: metastore.StudyArea,
-):
+) -> npt.NDArray:
+    """Performs scaling of elevation data in the 0-th layer of feature matrix.
+
+    Args:
+        unscaled_feature_matrix: Unscaled feature matrix to perform scaling for.
+        study_area_metadata: Study Area metadata containing min/max elevation values
+            that are used for scaling.
+
+    Returns:
+        Scaled feature matrix.
+    """
     shape = unscaled_feature_matrix.shape
     feature_layers = [
         layer.reshape(shape[0], shape[1])
@@ -161,8 +172,12 @@ def rescale_feature_matrix(
     ]
     elevation_data = feature_layers[0]
     presence_mask = feature_layers[1]
+    elevation_min = study_area_metadata.elevation_min
+    elevation_max = study_area_metadata.elevation_max
+    if elevation_min is None or elevation_max is None:
+        raise ValueError("Elevation min/max values are not set in study area metadata")
     elevation_data[presence_mask == 1] = (
-                                             elevation_data[presence_mask == 1] - study_area_metadata.elevation_min
-                                         ) / (study_area_metadata.elevation_max - study_area_metadata.elevation_min)
+        elevation_data[presence_mask == 1] - elevation_min
+    ) / (elevation_max - elevation_min)
     elevation_data[presence_mask != 1] = -1
     return numpy.dstack(feature_layers)
