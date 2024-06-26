@@ -307,24 +307,16 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     memfile = ncfile.close()
     ncfile_bytes = memfile.tobytes()
 
-    # Place the ncfile bytes into an archive.
-    archive = io.BytesIO()
-    with tarfile.open(fileobj=archive, mode="w") as tar:
-        nc = tarfile.TarInfo("met_em.d03_test.nc")
-        nc.size = len(ncfile_bytes)
-        tar.addfile(nc, io.BytesIO(ncfile_bytes))
-    # Seek to the beginning so the file can be read.
-    archive.seek(0)
-
-    # Create a mock blob for the archive which will return the above netcdf when opened.
+    # Create a mock blob for the input file which will return the above netcdf when
+    # opened.
     mock_archive_blob = mock.MagicMock()
-    mock_archive_blob.name = "study_area/name.tar"
+    mock_archive_blob.name = "study_area/met_em.d03_test.nc"
     mock_archive_blob.bucket.name = "bucket"
-    mock_archive_blob.open.return_value = archive
+    mock_archive_blob.open.return_value = io.BytesIO(ncfile_bytes)
 
     # Create a mock blob for feature matrix we will upload.
     mock_feature_blob = mock.MagicMock()
-    mock_feature_blob.name = "study_area/name.npy"
+    mock_feature_blob.name = "study_area/met_em.d03_test.npy"
     mock_feature_blob.bucket.name = "climateiq-study-area-feature-chunks"
 
     # Return the mock blobs.
@@ -339,7 +331,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
             {"source": "test", "type": "event"},
             data={
                 "bucket": "bucket",
-                "name": "study_area/name.tar",
+                "name": "study_area/met_em.d03_test.nc",
                 "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             },
         )
@@ -349,9 +341,9 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     mock_storage_client.assert_has_calls(
         [
             mock.call().bucket("bucket"),
-            mock.call().bucket().blob("study_area/name.tar"),
+            mock.call().bucket().blob("study_area/met_em.d03_test.nc"),
             mock.call().bucket("climateiq-study-area-feature-chunks"),
-            mock.call().bucket().blob("study_area/name.npy"),
+            mock.call().bucket().blob("study_area/met_em.d03_test.npy"),
         ]
     )
 
@@ -367,7 +359,37 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     )
     numpy.testing.assert_array_equal(uploaded_array, expected_array)
 
-    # TODO: Ensure we wrote firestore entries for the chunk.
+    # Ensure we wrote firestore entries for the chunk.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("study_area"),
+            mock.call().collection().document().collection("chunks"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document("met_em.d03_test"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document()
+            .set(
+                {
+                    # For heat, we process each WPS netcdf file as a chunk (un-tar'ed)
+                    "archive_path": "gs://bucket/study_area/met_em.d03_test.nc",
+                    "feature_matrix_path": (
+                        "gs://climateiq-study-area-feature-chunks/study_area/"
+                        + "met_em.d03_test.npy"
+                    ),
+                    "error": firestore.DELETE_FIELD,
+                },
+                merge=True,
+            ),
+        ]
+    )
 
 
 @mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
