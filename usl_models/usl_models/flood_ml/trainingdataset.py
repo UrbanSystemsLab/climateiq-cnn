@@ -365,7 +365,7 @@ class IncrementalTrainDataGenerator:
             for serialized_example in serialized_examples_list:
                 temporal_tensor = self._parse_tf_example(
                     serialized_example,
-                    {"temporal_feature": tf.io.FixedLenFeature([864], tf.float32)},
+                    {"temporal_feature": tf.io.FixedLenFeature([864, 1], tf.float32)},
                 )[
                     "temporal_feature"
                 ]  # Extract the 'temporal_tensor' tensor from the dictionary
@@ -418,86 +418,57 @@ class IncrementalTrainDataGenerator:
 
     def get_dataset_from_tensors(self, sim_name, batch_size):
         """
-        Get the next batch of data for training.
+        Get the dataset for training.
         """
         # Get the next batch of feature tensors
-        print("Generating training data for sim_names: ", sim_name)
+        print("Generating training data for sim_name: ", sim_name)
 
-        # geospatial_tensor = functools.partial(self._generate_feature_tensors, sim_name)
-        # label_tensor = functools.partial(self._generate_label_tensors, sim_name)
-        # temporal_tensor = functools.partial(self._generate_temporal_tensors, sim_name)
-        # spatiotemporal_tensor = self._create_dummy_dataset([1, 1000, 1000, 1])
-        # storm_duration = self.rainfall_duration_generator(sim_name)
-
-        geospatial_tensor = self._generate_feature_tensors(sim_name)
-        label_tensor = self._generate_label_tensors(sim_name)
-        temporal_tensor = self._generate_temporal_tensors(sim_name)
-        spatiotemporal_tensor = self._create_dummy_dataset([1, 1000, 1000, 1])
         storm_duration = self.rainfall_duration_generator(sim_name)
-
         print(f"Storm duration: {storm_duration}")
 
-        expected_geospatial_tensor_shape = [1000, 1000, 8]
-        expected_temporal_tensor_shape = [864]
-        expected_label_tensor_shape = [storm_duration, 1000, 1000]
-        expected_spatiotemporal_tensor_shape = [1, 1000, 1000, 1]
+        # Define output signature for features and labels
+        output_signature = (
+            {
+                "geospatial": tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
+                "temporal": tf.TensorSpec(shape=(864, 1), dtype=tf.float32),
+                "spatiotemporal": tf.TensorSpec(
+                    shape=(1, 1000, 1000, 1), dtype=tf.float32
+                ),
+            },
+            tf.TensorSpec(shape=(storm_duration, 1000, 1000), dtype=tf.float32),
+        )
 
-        # verify tensor shapes
-        try:
-            if (
-                geospatial_tensor is None
-                or temporal_tensor is None
-                or label_tensor is None
-            ):
-                print(f"Skipping sim_name: {sim_name}")
+        def combined_generator(self, simulations):
+            for sim in simulations:
+                gen_geospatial = self._generate_feature_tensors(sim["name"])
+                gen_temporal = self._generate_feature_tensors(sim["name"])
+                gen_spatiotemporal = self._generate_feature_tensors(sim["name"])
+                gen_labels = self._generate_feature_tensors(sim["name"])
 
-            else:
-                if geospatial_tensor.shape != expected_geospatial_tensor_shape:
-                    raise ValueError(
-                        "Geospatial tensor shapes do not match, received: ",
-                        geospatial_tensor.shape,
-                        "expected: ",
-                        expected_geospatial_tensor_shape,
+                for data_geospatial, data_temporal, data_spatiotemporal, labels in zip(
+                    gen_geospatial, gen_temporal, gen_spatiotemporal, gen_labels
+                ):
+                    yield (
+                        {
+                            "geospatial": data_geospatial,
+                            "temporal": data_temporal,
+                            "spatiotemporal": data_spatiotemporal,
+                        },
+                        labels,
                     )
-                if spatiotemporal_tensor.shape != expected_spatiotemporal_tensor_shape:
-                    raise ValueError(
-                        "Spatiotemporal tensor shapes do not match, received: ",
-                        spatiotemporal_tensor.shape,
-                        "expected: ",
-                        expected_spatiotemporal_tensor_shape,
-                    )
-                if label_tensor.shape != expected_label_tensor_shape:
-                    raise ValueError(
-                        "Label tensor shapes do not match, received: ",
-                        label_tensor.shape,
-                        "expected: ",
-                        expected_label_tensor_shape,
-                    )
-                if temporal_tensor.shape != expected_temporal_tensor_shape:
-                    raise ValueError(
-                        "Temporal tensor shapes do not match, received: ",
-                        temporal_tensor.shape,
-                        "expected: ",
-                        expected_temporal_tensor_shape,
-                    )
-        except Exception as e:
-            print(f"Error verifying tensor shapes for sim_name: {sim_name}")
-            print(e)
-            raise ValueError("Tensor shapes do not match.")
 
-        features_dict = {
-            "geospatial": geospatial_tensor,
-            "temporal": temporal_tensor,
-            "spatiotemporal": spatiotemporal_tensor,
-        }
+        # Create the dataset
+        dataset = tf.data.Dataset.from_generator(
+            functools.partial(
+                combined_generator, batch_size
+            ),  # Pass 'sim_name' to 'combined_generator'
+            output_signature=output_signature,
+        )
+        dataset = dataset.batch(batch_size)
 
-        # Create a tf.data.Dataset from the dictionary and labels
-        dataset = tf.data.Dataset.from_tensor_slices((features_dict, label_tensor))
-
-        batched_dataset = dataset.batch(batch_size)
-
+        print("Ended creating dataset, returning..")
         # Return the batched dataset and storm duration
-        return batched_dataset, storm_duration
+        return dataset, storm_duration
 
     # def get_next_batch(self, sim_names, batch_size) -> List[FloodModelData]:
     #     """

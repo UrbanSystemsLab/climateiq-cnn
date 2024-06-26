@@ -134,24 +134,10 @@ class FloodModel:
     #     )
     #     return history
 
-    def _model_fit(self, flood_model_data: FloodModelData):
+    def _model_fit(self, dataset: tf.data.Dataset, storm_duration):
 
-        inputs = {
-            "spatiotemporal": flood_model_data.spatiotemporal,
-            "geospatial": flood_model_data.geospatial,
-            "temporal": flood_model_data.temporal,
-        }
-
-        inputs = tf.data.Dataset.from_tensor_slices(inputs)
-        
-        # Create a dataset that combines all inputs
-        combined_dataset = tf.data.Dataset.zip((
-            inputs,
-            flood_model_data.labels
-        ))
-
-        # storm_duration handle separately
-        storm_duration = flood_model_data.storm_duration
+        # convert storm_duration to int
+        storm_duration = int(storm_duration)
 
         self._model.set_n_predictions(storm_duration)
 
@@ -159,42 +145,48 @@ class FloodModel:
         # combined_dataset = combined_dataset.prefetch(tf.data.AUTOTUNE)
 
         history = self._model.fit(
-            combined_dataset,
+            dataset,
             epochs=1,
         )
         return history
-
-    def train(
-        self,
-        data: list[FloodModelData],
-    ) -> list[tf.keras.callbacks.History]:
-        """Trains the model.
-
-        The internal flood model architecture is restricted to a single storm
-        duration for each training run. In order to train on varying storm durations,
-        the model must be trained incrementally via several `fit` calls.
-        This function provides a wrapper around the incremental training logic,
-        allowing the user to pass in data for multiple storm durations at once
-        via a list of FloodModelData objects.
-
-        Each FloodModelData instance is associated with a single storm duration.
-        In other words, data for different storm durations must be passed in as
-        separate FloodModelData objects.
-
-        Args:
-            data: A list of FloodModelData objects. Labels are required for training.
-
-        Returns: A list of History objects containing the record of training and,
-            if applicable, validation loss and metrics.
-        """
+    
+    def train(self, data: tf.data.Dataset, storm_duration):
         model_history = []
-        #processed = [self._validate_and_preprocess_data(x, training=True) for x in data]
-
-        for x in data:
-            history = self._model_fit(x)
-            model_history.append(history)
-
+        history = self._model_fit(data, storm_duration)
+        model_history.append(history)
         return model_history
+
+    # def train(
+    #     self,
+    #     data: list[FloodModelData],
+    # ) -> list[tf.keras.callbacks.History]:
+    #     """Trains the model.
+
+    #     The internal flood model architecture is restricted to a single storm
+    #     duration for each training run. In order to train on varying storm durations,
+    #     the model must be trained incrementally via several `fit` calls.
+    #     This function provides a wrapper around the incremental training logic,
+    #     allowing the user to pass in data for multiple storm durations at once
+    #     via a list of FloodModelData objects.
+
+    #     Each FloodModelData instance is associated with a single storm duration.
+    #     In other words, data for different storm durations must be passed in as
+    #     separate FloodModelData objects.
+
+    #     Args:
+    #         data: A list of FloodModelData objects. Labels are required for training.
+
+    #     Returns: A list of History objects containing the record of training and,
+    #         if applicable, validation loss and metrics.
+    #     """
+    #     model_history = []
+    #     #processed = [self._validate_and_preprocess_data(x, training=True) for x in data]
+
+    #     for x in data:
+    #         history = self._model_fit(x)
+    #         model_history.append(history)
+
+    #     return model_history
 
 
 ###############################################################################

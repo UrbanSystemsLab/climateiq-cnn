@@ -155,14 +155,14 @@ def simple_training(
         batch_size=batch_size,
     )
 
-    # download npy label chunks locally
-    generator.download_numpy_files(sim_names, "label")
+    # # download npy label chunks locally
+    # generator.download_numpy_files(sim_names, "label")
 
-    # download npy feature chunks locally
-    generator.download_numpy_files(sim_names, "feature")
+    # # download npy feature chunks locally
+    # generator.download_numpy_files(sim_names, "feature")
 
-    # download npy temporal chunks locally
-    generator.download_numpy_files(sim_names, "temporal")
+    # # download npy temporal chunks locally
+    # generator.download_numpy_files(sim_names, "temporal")
 
     # compare feature and label chunks
 
@@ -171,17 +171,23 @@ def simple_training(
         print(type(floodModelDataset))
         print(storm_duration)
 
-        # look through floodModelDataset via iterator
-        iterator = iter(floodModelDataset)
+    #    # Iterate through the dataset using an iterator
+    #     for element in floodModelDataset.take(2):  # Take only the first 10 elements
+    #         # Access the elements within the tuple
+    #         features, labels = element
+    #         print("Features:", features)
+    #         print("Labels:", labels)
+    #         print("-" * 20)
 
-        while True:
-            try:
-                element = next(iterator)
-                print(element)
-            except StopIteration:
-                # End of dataset reached
-                break
+        # Alternatively, use the `element_spec` to understand the structure
+        print("Dataset element spec:", floodModelDataset.element_spec)
 
+    print("Dataset generation completed, will hand over to model training..")
+    print("\n")
+    print("#######  Training model ##########")
+    model_history.append(model.train(floodModelDataset, storm_duration))
+    print("Training complete")
+    return model_history
 
     # verify_labels_shape(dataset)
 
