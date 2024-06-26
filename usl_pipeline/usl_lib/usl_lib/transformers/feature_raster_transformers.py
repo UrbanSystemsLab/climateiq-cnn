@@ -117,7 +117,7 @@ def transform_to_feature_raster_layers(
         infiltration_raster_layers = _build_soil_class_infiltration_layers(
             soil_classes_raster, soil_infiltration_configuration
         )
-
+'''
     return numpy.dstack(
         (
             elevation_raster.astype(dtype=numpy.float32),
@@ -127,3 +127,25 @@ def transform_to_feature_raster_layers(
             infiltration_raster_layers,
         )
     )
+'''
+    feature_dictionary = {
+        'elevation': elevation_raster.astype(dtype=numpy.float32),
+        'elevation_mask': elevation_mask_raster.astype(dtype=numpy.float32),
+        'buildings': buildings_raster.astype(dtype=numpy.float32),
+        'green_areas_mask': green_areas_mask_raster.astype(dtype=numpy.float32),
+        'infiltration_layers': infiltration_raster_layers,
+    }
+
+    return feature_dictionary
+
+def write_to_hdf5(data: dict, file_path: str):
+    """writes data to an HDF5 file and uploads it to GCS.
+
+    Args:
+        data: Feature dictionary to write to hdf5.
+        file_path: The file path to save the hdf5 file.
+    """
+    # Write data to HDF5
+    with h5py.File(file_path, 'w') as h5f:
+        for key, value in data.items():
+            h5f.create_dataset(key, data=value)
