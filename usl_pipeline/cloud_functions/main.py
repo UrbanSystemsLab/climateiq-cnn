@@ -811,11 +811,18 @@ def _write_flood_chunk_metastore_entry(
     """
     db = firestore.Client()
     study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
+    feature_blob_file_name = pathlib.PurePosixPath(feature_blob.name).name
 
     metastore.StudyAreaChunk(
         id_=chunk_name,
         archive_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
-        feature_matrix_path=f"gs://{feature_blob.bucket.name}/{feature_blob.name}",
+        unscaled_feature_matrix_path=(
+            f"gs://{feature_blob.bucket.name}/{feature_blob.name}"
+        ),
+        feature_matrix_path=(
+            f"gs://{feature_blob.bucket.name}/{study_area_name}/"
+            + f"scaled_{feature_blob_file_name}"
+        ),
         # Remove any errors from previous failed retries which have now succeeded.
         error=firestore.DELETE_FIELD,
     ).merge(db, study_area_name)

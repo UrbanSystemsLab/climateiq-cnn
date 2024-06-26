@@ -175,13 +175,19 @@ class StudyAreaChunk:
         id_: An ID unique within the study are for the chunk.
         archive_path: GCS location of an archive containing files describing the
             geography (e.g. tiff & shape files.)
+        unscaled_feature_matrix_path: GCS location of the derived unscaled feature (it
+            should be transformed into scaled matrix before it can be used for model
+            training and prediction).
         feature_matrix_path: GCS location of the derived feature matrix used for model
-            training and prediction.
+            training and prediction (scaled version that is built based on unscaled one
+            when all the feature chunks are stored and min/max elevation values are
+            updated in study area metadata).
         error: Any errors encountered while processing the chunk.
     """
 
     id_: str
     archive_path: Optional[str] = None
+    unscaled_feature_matrix_path: Optional[str] = None
     feature_matrix_path: Optional[str] = None
     error: Optional[str] = None
 
