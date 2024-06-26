@@ -831,6 +831,124 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(main.wrf, "getvar", autospec=True)
+def test_build_label_matrix_wrf(
+    mock_wrf_getvar, mock_storage_client, mock_firestore_client, _
+):
+    # Create an in-memory mock netcdf file and grab its bytes
+    ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile.createDimension("Time", None)
+     # Create new dim to represent length of datetime str
+    ncfile.createDimension("DateStrLen", 19)
+    time = ncfile.createVariable("Times", "S1", ("Time", "DateStrLen"))
+    time[0] = netCDF4.stringtochar(numpy.array(["2010-02-02_18:00:00"], dtype="S19"))
+
+    memfile = ncfile.close()
+    ncfile_bytes = memfile.tobytes()
+
+    # Create a mock blob for the input file which will return the above netcdf when
+    # opened.
+    mock_input_blob = mock.MagicMock()
+    mock_input_blob.name = "study_area/wrfout.d03_test"
+    mock_input_blob.bucket.name = "bucket"
+    mock_input_blob.open.return_value = io.BytesIO(ncfile_bytes)
+
+    # Create a mock blob for label matrix we will upload.
+    mock_label_blob = mock.MagicMock()
+    mock_label_blob.name = "study_area/wrfout.d03_test.npy"
+    mock_label_blob.bucket.name = "climateiq-study-area-label-chunks"
+
+    # Return the mock blobs.
+    mock_storage_client().bucket("").blob.side_effect = [
+        mock_input_blob,
+        mock_label_blob,
+    ]
+    mock_storage_client.reset_mock()
+
+    # Mock out the values that wrf-python will derive and return
+    rh2 = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+    t2 = [[10, 20, 30], [40, 50, 60], [70, 80, 90]]
+    wspd_wdir10 = [
+        [[11, 11, 11], [11, 11, 11], [11, 11, 11]],
+        [[22, 22, 22], [22, 22, 22], [22, 22, 22]],
+    ]
+
+    mock_wrf_getvar.side_effect = [
+        rh2,
+        t2,
+        wspd_wdir10,
+    ]
+    mock_wrf_getvar.reset_mock()
+
+    main.build_label_matrix(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "study_area/wrfout.d03_test",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we worked with the right GCP paths.
+    mock_storage_client.assert_has_calls(
+        [
+            mock.call().bucket("bucket"),
+            mock.call().bucket().blob("study_area/wrfout.d03_test"),
+            mock.call().bucket("climateiq-study-area-label-chunks"),
+            mock.call().bucket().blob("study_area/wrfout.d03_test.npy"),
+        ]
+    )
+
+    mock_input_blob.open.assert_called_once_with("rb")
+
+    # Ensure we attempted to upload a serialized label matrix
+    mock_label_blob.upload_from_file.assert_called_once_with(mock.ANY)
+    uploaded_array = numpy.load(mock_label_blob.upload_from_file.call_args[0][0])
+    # Expected array should be all required vars extracted, lon/lat axis reordered, and
+    # stacked
+    expected_array = numpy.dstack(
+        [
+            numpy.swapaxes(rh2, 0, 1),
+            numpy.swapaxes(t2, 0, 1),
+            numpy.swapaxes(wspd_wdir10[0], 0, 1),
+            numpy.swapaxes(wspd_wdir10[1], 0, 1),
+        ]
+    )
+    numpy.testing.assert_array_equal(uploaded_array, expected_array)
+
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call().collection("simulations"),
+            mock.call().collection().document("study_area-None"),
+            mock.call().collection().document().collection("label_chunks"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document("2010-02-02 18:00:00"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document()
+            .set(
+                {
+                    "gcs_uri": (
+                        "gs://climateiq-study-area-label-chunks/study_area/"
+                        "wrfout.d03_test.npy"
+                    ),
+                    "time": datetime.datetime(2010, 2, 2, 18, 0, 0),
+                }
+            ),
+        ]
+    )
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
 def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_client, _):
     """Ensure we sync config uploads to the metastore."""
     config_blob = mock.Mock(spec=storage.Blob)
