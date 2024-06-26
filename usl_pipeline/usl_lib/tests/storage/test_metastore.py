@@ -120,6 +120,39 @@ def test_study_area_as_header():
     )
 
 
+def test_study_area_update_chunk_info():
+    mock_db = mock.MagicMock()
+    mock_db.collection().document().get().to_dict.return_value = {
+        "col_count": 10001,
+        "row_count": 20999,
+        "x_ll_corner": 0.0,
+        "y_ll_corner": 0.0,
+        "cell_size": 1.0,
+    }
+
+    metastore.StudyArea.update_chunk_info(mock_db, "TestArea", 1000)
+
+    mock_db.collection().document().update.assert_called_once_with(
+        {"chunk_size": 1000, "chunk_x_count": 11, "chunk_y_count": 21}
+    )
+
+
+def test_study_area_update_chunk_info_no_need():
+    mock_db = mock.MagicMock()
+    mock_db.collection().document().get().to_dict.return_value = {
+        "col_count": 10500,
+        "row_count": 20500,
+        "x_ll_corner": 0.0,
+        "y_ll_corner": 0.0,
+        "cell_size": 1.0,
+        "chunk_size": 1000,
+    }
+
+    metastore.StudyArea.update_chunk_info(mock_db, "TestArea", 1000)
+
+    mock_db.transaction().update.assert_not_called()
+
+
 def test_flood_scenario_config_set():
     mock_db = mock.MagicMock()
     metastore.FloodScenarioConfig(

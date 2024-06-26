@@ -33,8 +33,8 @@ def _add_to_tar(tar: tarfile.TarFile, file_name: str, content_bytes: bytes):
 def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, _):
     # Get some random data to place in a tiff file.
     height = 2
-    width = 3
-    tiff_array = numpy.array([[1, 2, 3], [4, 5, 6]], dtype=numpy.uint8)
+    width = 2
+    tiff_array = numpy.array([[1, 2], [5, 6]], dtype=numpy.uint8)
 
     # Build an in-memory tiff file and grab its bytes.
     with rasterio.io.MemoryFile() as memfile:
@@ -78,6 +78,14 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
     ]
     mock_storage_client.reset_mock()
 
+    mock_firestore_client().collection().document().get().to_dict.return_value = {
+        "col_count": 10,
+        "row_count": 20,
+        "x_ll_corner": 0.0,
+        "y_ll_corner": 0.0,
+        "cell_size": 1.0,
+    }
+
     # Simulate empty elevation min & max on the study area.
     mock_firestore_client().collection().document().get().get.side_effect = KeyError
 
@@ -115,11 +123,9 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
                 [
                     [1, 0, 0, 0, 0, 0, 0, 0],
                     [2, 1, 0, 0, 0, 0, 0, 0],
-                    [3, 1, 0, 0, 0, 0, 0, 0],
                 ],
                 # Row 2
                 [
-                    [4, 1, 0, 0, 0, 0, 0, 0],
                     [5, 1, 0, 0, 0, 0, 0, 0],
                     [6, 1, 0, 0, 0, 0, 0, 0],
                 ],
@@ -159,6 +165,9 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
         mock_firestore_client().collection().document(),
         {"elevation_min": 2, "elevation_max": 6},
     )
+    mock_firestore_client().collection().document().update.assert_called_once_with(
+        {"chunk_size": 2, "chunk_x_count": 5, "chunk_y_count": 10}
+    ),
 
 
 def test_build_feature_matrix_from_archive_empty_polygons():
@@ -216,7 +225,9 @@ def test_build_feature_matrix_from_archive_empty_polygons():
     )
 
     # Ensure we set the elevation min & max
-    assert metadata == main.FeatureMetadata(elevation_min=2, elevation_max=6)
+    assert metadata == main.FeatureMetadata(
+        elevation_min=2, elevation_max=6, chunk_size=2
+    )
 
 
 def test_build_feature_matrix_from_archive_elevation_file_missing():
@@ -1352,18 +1363,20 @@ def test_collapse_city_cat_output_chunks_deleted_chunks(mock_firestore_client):
 
 def test_calculate_metadata_for_elevation_happy_path():
     header = geo_data.ElevationHeader(
-        col_count=3,
+        col_count=2,
         row_count=2,
         x_ll_corner=0.0,
         y_ll_corner=2.0,
         cell_size=1.0,
         nodata_value=0.0,
     )
-    data = numpy.array([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
+    data = numpy.array([[0.0, 1.0], [4.0, 5.0]])
     metadata = main._calculate_metadata_for_elevation(
         geo_data.Elevation(header=header, data=data)
     )
-    assert metadata == main.FeatureMetadata(elevation_min=1.0, elevation_max=5.0)
+    assert metadata == main.FeatureMetadata(
+        elevation_min=1.0, elevation_max=5.0, chunk_size=2
+    )
 
 
 def test_calculate_metadata_for_elevation_empty_area():
