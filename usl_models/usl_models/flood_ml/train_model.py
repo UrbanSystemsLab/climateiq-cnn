@@ -189,20 +189,69 @@ def simple_training(
     print("Training complete")
     return model_history
 
-    # verify_labels_shape(dataset)
 
-    # print("\n")
+def check_generator_tensor_shape(generator):
+    """
+    Check the shape of the tensors returned by the generator.
+    """
+    # Check shape of each generator
+    sim_names = ["Manhattan-config_v1%2FRainfall_Data_2.txt"]
+    input_shape = [1000, 1000, 1]
+    for sim_name in sim_names:
+        geospatial_tensor = generator._generate_feature_tensors(sim_name)
+        temporal_tensor = generator._generate_temporal_tensors(sim_name)
+        label_tensor = generator._generate_label_tensors(sim_name)
+        geotemporal_tensor = generator._generate_spatiotemporal_tensor(input_shape)
 
-    # # print size of data_batch
-    # print("Data batch size:", len(data_batch))
-    # print("\n")
+        # Get one object from each generator
+        geospatial_tensor = next(geospatial_tensor)
+        temporal_tensor = next(temporal_tensor)
+        label_tensor = next(label_tensor)
+        geotemporal_tensor = next(geotemporal_tensor)
 
-    # print("Dataset generation completed, will hand over to model training..")
-    # print("\n")
-    # print("#######  Training model ##########")
-    # model_history.append(model.train(data_batch))
-    # print("Training complete")
-    # return model_history
+        print("Geospatial tensor shape:", geospatial_tensor.shape)
+        print("Temporal tensor shape:", temporal_tensor.shape)
+        print("Label tensor shape:", label_tensor.shape)
+        print("Geotemporal tensor shape:", geotemporal_tensor.shape)
+
+
+def check_tensorflow_dataset(generator):
+    sim_name = "Manhattan-config_v1%2FRainfall_Data_2.txt"
+    dataset, storm_duration = generator.get_dataset_from_tensors(sim_name, batch_size=32)
+    print(type(dataset))
+    print(storm_duration)
+
+    print(f"Number of elements in dataset: {tf.data.experimental.cardinality(dataset).numpy()}")
+
+    # Iterate through the entire dataset
+    count = 0
+    for features, labels in dataset:
+        print(f"Element {count}:")
+        for key, value in features.items():
+            print(f"  {key} shape: {value.shape}")
+        print(f"  Labels shape: {labels.shape}")
+        count += 1
+        if count >= 66:  # or some other large number
+            break
+
+    print(f"Total elements in dataset: {count}")
+
+    # # Iterate through the dataset using an iterator
+    # for element in dataset.take(2):  # Take only the first 2 elements
+    #     # Access the elements within the tuple
+    #     features, labels = element
+    #     print("Features:", features)
+    #     print("Labels:", labels)
+    #     print("-" * 20)
+
+    #    # Print the shapes of the tensors within the features dictionary
+    #     for key, value in features.items():
+    #         print(f"Feature {key} shape: {value.shape}")
+    #     print("-" * 20)
+
+    #     # Print the shape of the labels tensor
+    #     print("Labels shape:", labels.shape)
+    #     print("-" * 20)
 
 
 def set_tf_gpu():
@@ -230,13 +279,28 @@ def set_tf_gpu():
 
 
 def main():
+    batch_size = 32
 
-    set_tf_gpu()
+    generator = IncrementalTrainDataGenerator(
+        batch_size=batch_size,
+    )
+
+    # set_tf_gpu()
+    
+    #check_generator_tensor_shape(generator)
+
+    #check_tensorflow_dataset(generator)
+    
+    #
+
     model_histories = simple_training()
 
     for history in model_histories:
         print(history.history)
+   
+    
 
+    
 
 
     # generator = IncrementalTrainDataGenerator(

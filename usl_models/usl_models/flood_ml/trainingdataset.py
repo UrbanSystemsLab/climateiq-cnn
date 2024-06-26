@@ -9,10 +9,10 @@ import numpy as np
 import tensorflow as tf
 from google.cloud import firestore, storage
 
-from usl_models.flood_ml.data_utils import FloodModelData
 from usl_models.flood_ml.metastore import FirestoreDataHandler
 from usl_models.flood_ml.settings import Settings
 from usl_models.flood_ml.featurelabelchunks import GenerateFeatureLabelChunks
+from usl_models.flood_ml import constants
 
 """
     This class is used to generate the training data for the flood model.
@@ -166,7 +166,7 @@ class IncrementalTrainDataGenerator:
         List[tf.train.Example]: List of TFRecord examples.
 
         """
-        print("Creating TFRecord from numpy files for: ", dir_name)
+        print(f"Creating TFRecord from numpy files for: {name} from directory: {dir_name}")
         serialized_examples_list = []
 
         # check if the LOCAL_NUMPY_DIR is not empty
@@ -179,11 +179,12 @@ class IncrementalTrainDataGenerator:
                 try:
                     file_path = os.path.join(dir_name, file_name)
                     data = np.load(file_path)
-                    # print(f"Loaded numpy file: {file_path}")
-
-                    # **Shape Validation**
-                    # Get the shape of the loaded NumPy array
-                    data_shape = data.shape
+                    
+                    # reshape temporal npy to match expected shape of 
+                    # constants.MAX_RAINFALL_DURATION x constants.M_RAINFALL
+                    if name == "temporal_feature":
+                        data = np.tile(data, (6, 1)).T
+                        print("Temporal npy modified, shape: ", data.shape)
 
                     # Flatten the numpy array and convert it to a list of floats
                     data_list = data.flatten().tolist()
@@ -201,7 +202,7 @@ class IncrementalTrainDataGenerator:
 
                     # Serialize to string and add to the list
                     serialized_examples_list.append(example.SerializeToString())
-                    # print(f"Serialized example for file: {file_name}")
+
                 except Exception as e:
                     print(f"Error processing numpy file {file_name}: {e}")
         if self.settings.DEBUG:
@@ -222,6 +223,7 @@ class IncrementalTrainDataGenerator:
     def _parse_tf_example(serialized_example, feature_description):
         # Before parsing, log the serialized example to inspect its structure (for debugging purposes)
         print("Inspecting serialized example structure and data type...")
+        print(f"Feature description: {feature_description}")
         # Attempt to parse the serialized example
         try:
             example = tf.io.parse_single_example(
@@ -245,6 +247,7 @@ class IncrementalTrainDataGenerator:
         return dataset
 
     def _generate_rainfall_duration(self, sim_name):
+        print("Get rainfall duration...")
         rainfall_duration, rainfaill_dict = (
             self.featurelabelchunksgenerator.get_rainfall_config(sim_name)
         )
@@ -257,6 +260,7 @@ class IncrementalTrainDataGenerator:
         """
         Create feature tensors from the feature chunks.
         """
+        print("Generating feature tensors...")
         # Get GCS URLs for npy chunks
         feature_chunks, sim_dict = self.featurelabelchunksgenerator.get_feature_chunks(
             sim_name
@@ -295,6 +299,7 @@ class IncrementalTrainDataGenerator:
         """
         Create label tensors from the label chunks.
         """
+        print("Generating label tensors...")
         # get the storm duration for the simulation
         rainfall_duration = self._generate_rainfall_duration(sim_name)
         if rainfall_duration is None:
@@ -345,6 +350,7 @@ class IncrementalTrainDataGenerator:
         """
         Create temporal tensors from the temporal chunks.
         """
+        print("Generating temporal tensors...")
         # Get GCS URLs for npy chunks
         temporal_chunks, sim_dict = (
             self.featurelabelchunksgenerator.get_temporal_chunks(sim_name)
@@ -365,10 +371,12 @@ class IncrementalTrainDataGenerator:
             for serialized_example in serialized_examples_list:
                 temporal_tensor = self._parse_tf_example(
                     serialized_example,
-                    {"temporal_feature": tf.io.FixedLenFeature([864, 1], tf.float32)},
+                    {"temporal_feature": tf.io.FixedLenFeature([864, constants.M_RAINFALL], tf.float32)},
                 )[
                     "temporal_feature"
                 ]  # Extract the 'temporal_tensor' tensor from the dictionary
+                # Yield the same tensor infinitely
+            while True:
                 yield temporal_tensor  # Yield only the temporal_tensor tensor
 
         else:
@@ -414,8 +422,17 @@ class IncrementalTrainDataGenerator:
     def _create_dummy_dataset(self, input_shape):
         # Create a dummy dataset with the correct shape
         # Adjust the shape and dtype according to your needs
-        return tf.data.Dataset.from_tensor_slices(tf.zeros(input_shape)).batch(1)
-
+        return tf.data.Dataset.from_tensor_slices(tf.zeros(input_shape))
+    
+    # create a dummy *generator* for Spatiotemporal tensors
+    def _generate_spatiotemporal_tensor(self, input_shape):
+        """
+        Create a dummy dataset for Spatiotemporal tensors.
+        This function yields an infinite number of zero tensors.
+        """
+        while True:
+            yield tf.zeros(input_shape)
+    
     def get_dataset_from_tensors(self, sim_name, batch_size):
         """
         Get the dataset for training.
@@ -430,45 +447,50 @@ class IncrementalTrainDataGenerator:
         output_signature = (
             {
                 "geospatial": tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
-                "temporal": tf.TensorSpec(shape=(864, 1), dtype=tf.float32),
-                "spatiotemporal": tf.TensorSpec(
-                    shape=(1, 1000, 1000, 1), dtype=tf.float32
-                ),
+                "temporal": tf.TensorSpec(shape=(864, constants.M_RAINFALL), dtype=tf.float32),
+                "spatiotemporal": tf.TensorSpec(shape=(1000, 1000, 1), dtype=tf.float32),
             },
-            tf.TensorSpec(shape=(storm_duration, 1000, 1000), dtype=tf.float32),
+            tf.TensorSpec(shape=(storm_duration, 1000, 1000), dtype=tf.float32)
         )
+        
+        def combined_generator(sim_name, batch_size):  # Pass 'sim_name' as an argument
+            geospatial_tensor_generator = self._generate_feature_tensors(sim_name)
+            label_tensor_generator = self._generate_label_tensors(sim_name)
+            temporal_tensor_generator = self._generate_temporal_tensors(sim_name)
+            spatiotemporal_tensor_generator = self._generate_spatiotemporal_tensor([1000, 1000, 1])
+            storm_duration = self.rainfall_duration_generator(sim_name)
 
-        def combined_generator(self, simulations):
-            for sim in simulations:
-                gen_geospatial = self._generate_feature_tensors(sim["name"])
-                gen_temporal = self._generate_feature_tensors(sim["name"])
-                gen_spatiotemporal = self._generate_feature_tensors(sim["name"])
-                gen_labels = self._generate_feature_tensors(sim["name"])
-
-                for data_geospatial, data_temporal, data_spatiotemporal, labels in zip(
-                    gen_geospatial, gen_temporal, gen_spatiotemporal, gen_labels
-                ):
-                    yield (
-                        {
-                            "geospatial": data_geospatial,
-                            "temporal": data_temporal,
-                            "spatiotemporal": data_spatiotemporal,
-                        },
-                        labels,
-                    )
-
+            print("Starting combined generator")
+            count = 0
+            print(f"Storm duration: {storm_duration}")
+            
+            # Combine the generators into a single generator
+            for geo, temp, spatemp, labels in zip(
+                geospatial_tensor_generator,
+                temporal_tensor_generator,
+                spatiotemporal_tensor_generator,
+                label_tensor_generator,
+            ):
+                yield ({
+                    "geospatial": geo,
+                    "temporal": temp,
+                    "spatiotemporal": spatemp,
+                    },
+                    labels
+                )
+            print(f"Combined generator finished after {count} elements")
         # Create the dataset
         dataset = tf.data.Dataset.from_generator(
-            functools.partial(
-                combined_generator, batch_size
-            ),  # Pass 'sim_name' to 'combined_generator'
-            output_signature=output_signature,
+            functools.partial(combined_generator, sim_name, batch_size),  # Pass 'sim_name' to 'combined_generator'
+            output_signature=output_signature
+         
         )
         dataset = dataset.batch(batch_size)
 
         print("Ended creating dataset, returning..")
         # Return the batched dataset and storm duration
         return dataset, storm_duration
+
 
     # def get_next_batch(self, sim_names, batch_size) -> List[FloodModelData]:
     #     """
