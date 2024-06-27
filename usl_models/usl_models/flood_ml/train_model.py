@@ -16,7 +16,7 @@ import tensorflow as tf
 from usl_models.flood_ml.model import FloodModel, FloodModelParams
 from usl_models.flood_ml.trainingdataset import IncrementalTrainDataGenerator
 from usl_models.flood_ml.featurelabelchunks import GenerateFeatureLabelChunks
-
+from usl_models.flood_ml import constants
 
 """
 THis is a method that is used to train the flood model.
@@ -41,69 +41,6 @@ Returns:
 """
 
 
-# def train_model(
-#     model_dir: str,
-#     batch_size: int,
-#     lstm_units: int,
-#     lstm_kernel_size: int,
-#     lstm_dropout: float,
-#     lstm_recurrent_dropout: float,
-#     epochs: int,
-# ):
-
-#     # Create FloodModelParams from hyperparameters
-#     model_params = FloodModelParams(
-#         batch_size=batch_size,
-#         lstm_units=lstm_units,
-#         lstm_kernel_size=lstm_kernel_size,
-#         lstm_dropout=lstm_dropout,
-#         lstm_recurrent_dropout=lstm_recurrent_dropout,
-#         epochs=epochs,
-#     )
-#     model_history = []
-
-#     # Instantiate FloodModel class
-#     model = FloodModel(model_params)
-#     # model = model.compile(tf.keras.optimizers.Adam(learning_rate=learning_rate))
-
-#     class_label = GenerateFeatureLabelChunks()
-#     sim_names = class_label._get_sim_names_from_metastore()
-#     print(sim_names)
-#     batch_size = 32
-
-#     generator = IncrementalTrainDataGenerator(
-#         batch_size=batch_size,
-#     )
-
-#     # compare feature and label chunks
-#     for sim_name in sim_names:
-#         print(f"Comparing feature and label chunks for {sim_name}")
-#         label_compare = class_label.compare_study_area_sim_chunks(sim_name)
-#         if label_compare:
-#             print("Feature and label chunks are equal for", sim_name)
-#             print("")
-#         else:
-#             print("Feature and label chunks are not equal")
-#             sim_names.remove(sim_name)
-
-#     print("**** Length of sim_names: ", len(sim_names))
-
-#     # Get the next batch of data
-#     if len(sim_names) > 0:
-#         data = generator.get_next_batch(sim_names, batch_size)
-#         print("\n")
-#         print("Dataset generation completed, will hand over to model training..")
-#         print("\n")
-#         print("Training model")
-#         model_history.append(model.train(data))
-#         print("Training complete")
-
-#     else:
-#         print("No valid sims found for training data generation")
-
-#     return model_history
-
-
 def verify_labels_shape(flood_model_data_list):
     """
     Verify that the labels tensor shape matches the storm duration.
@@ -126,7 +63,7 @@ def verify_labels_shape(flood_model_data_list):
 
 def simple_training(
     model_dir="gs://usl_models_bucket/flood_model",
-    batch_size=32,
+    batch_size=1,
     lstm_units=128,
     lstm_kernel_size=3,
     lstm_dropout=0.2,
@@ -166,26 +103,28 @@ def simple_training(
 
     # compare feature and label chunks
 
+    def set_shapes(features, labels):
+        features["geospatial"].set_shape([None, 1000, 1000, 8])
+        features["temporal"].set_shape([None, 864, constants.M_RAINFALL])
+        features["spatiotemporal"].set_shape([None, 19, 1000, 1000, 1])
+        labels.set_shape([None, 19, 1000, 1000])
+        return features, labels
+
     for sim_name in sim_names:
-        floodModelDataset, storm_duration = generator.get_dataset_from_tensors(sim_name, batch_size=batch_size)
-        print(type(floodModelDataset))
+        dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
+        print("BEFORE BATCH: Dataset element spec:", dataset.element_spec)
+
+        dataset = dataset.batch(batch_size)
+
+        print("AFTER BATCH: Dataset element spec:", dataset.element_spec)
+        print(type(dataset))
         print(storm_duration)
-
-    #    # Iterate through the dataset using an iterator
-    #     for element in floodModelDataset.take(2):  # Take only the first 10 elements
-    #         # Access the elements within the tuple
-    #         features, labels = element
-    #         print("Features:", features)
-    #         print("Labels:", labels)
-    #         print("-" * 20)
-
         # Alternatively, use the `element_spec` to understand the structure
-        print("Dataset element spec:", floodModelDataset.element_spec)
-
+    
     print("Dataset generation completed, will hand over to model training..")
     print("\n")
     print("#######  Training model ##########")
-    model_history.append(model.train(floodModelDataset, storm_duration))
+    model_history = model.train(dataset, storm_duration)
     print("Training complete")
     return model_history
 
@@ -217,11 +156,15 @@ def check_generator_tensor_shape(generator):
 
 def check_tensorflow_dataset(generator):
     sim_name = "Manhattan-config_v1%2FRainfall_Data_2.txt"
-    dataset, storm_duration = generator.get_dataset_from_tensors(sim_name, batch_size=32)
+    dataset, storm_duration = generator.get_dataset_from_tensors(
+        sim_name, batch_size=11
+    )
     print(type(dataset))
     print(storm_duration)
 
-    print(f"Number of elements in dataset: {tf.data.experimental.cardinality(dataset).numpy()}")
+    print(
+        f"Number of elements in dataset: {tf.data.experimental.cardinality(dataset).numpy()}"
+    )
 
     # Iterate through the entire dataset
     count = 0
@@ -236,22 +179,74 @@ def check_tensorflow_dataset(generator):
 
     print(f"Total elements in dataset: {count}")
 
-    # # Iterate through the dataset using an iterator
-    # for element in dataset.take(2):  # Take only the first 2 elements
-    #     # Access the elements within the tuple
-    #     features, labels = element
-    #     print("Features:", features)
-    #     print("Labels:", labels)
-    #     print("-" * 20)
 
-    #    # Print the shapes of the tensors within the features dictionary
-    #     for key, value in features.items():
-    #         print(f"Feature {key} shape: {value.shape}")
-    #     print("-" * 20)
+def test_feature_label_tensors(generator):
+    sim_name = "Manhattan-config_v1%2FRainfall_Data_2.txt"
+    generator = generator._generate_feature_label_tensors(sim_name)
+    for feature_tensor, label_tensor in generator:
+        print("Feature tensor shape:", feature_tensor.shape)
+        print("Label tensor shape:", label_tensor.shape)
 
-    #     # Print the shape of the labels tensor
-    #     print("Labels shape:", labels.shape)
-    #     print("-" * 20)
+
+def test_temporal_tensor(generator):
+    sim_name = "Manhattan-config_v1%2FRainfall_Data_2.txt"
+    generator = generator._generate_temporal_tensors(sim_name)
+    for temporal_tensor in generator:
+        print("Temporal tensor shape:", temporal_tensor.shape)
+
+
+def investigate_dataset(generator, sim_name):
+    try:
+        # Get the dataset without specifying a batch size
+        dataset, _ = generator.get_dataset_from_tensors(sim_name)
+
+        print(f"Successfully created dataset for {sim_name}")
+
+        # Try to get the first element
+        try:
+            first_element = next(iter(dataset))
+            if isinstance(first_element, tuple) and len(first_element) == 2:
+                features, labels = first_element
+                print("First element shapes:")
+                if isinstance(features, dict):
+                    for key, value in features.items():
+                        print(f"  {key} shape: {value.shape}")
+                        print(f"  {key} dtype: {value.dtype}")
+                else:
+                    print(f"  Features shape: {features.shape}")
+                    print(f"  Features dtype: {features.dtype}")
+                print(f"  Labels shape: {labels.shape}")
+                print(f"  Labels dtype: {labels.dtype}")
+            else:
+                print(f"Unexpected element structure: {type(first_element)}")
+        except tf.errors.OutOfRangeError:
+            print("Dataset is empty or cannot access first element")
+        except Exception as e:
+            print(f"Error accessing first element: {str(e)}")
+
+        # Estimate total elements (this might be slow for large datasets)
+        try:
+            total_elements = dataset.cardinality().numpy()
+            if total_elements == tf.data.INFINITE_CARDINALITY:
+                print("Dataset is infinite")
+            elif total_elements == tf.data.UNKNOWN_CARDINALITY:
+                print("Dataset cardinality is unknown")
+            else:
+                print(f"Total number of elements in dataset: {total_elements}")
+        except Exception as e:
+            print(f"Error estimating dataset size: {str(e)}")
+
+        # Suggest a conservative batch size
+        suggested_batch_size = 1
+        print(f"Suggested starting batch size: {suggested_batch_size}")
+        print(
+            "Note: Increase batch size gradually in your training loop, monitoring for OOM errors"
+        )
+
+        return suggested_batch_size
+    except Exception as e:
+        print(f"Error investigating dataset: {str(e)}")
+        return 0
 
 
 def set_tf_gpu():
@@ -260,48 +255,55 @@ def set_tf_gpu():
     print("TensorFlow built with CUDA support:", tf.test.is_built_with_cuda())
 
     # List available GPUs
-    gpus = tf.config.list_physical_devices('GPU')
+    gpus = tf.config.list_physical_devices("GPU")
     if gpus:
         print("Num GPUs Available: ", len(gpus))
     else:
         print("No GPUs found")
 
     # Configure TensorFlow for GPU usage
-    gpus = tf.config.list_physical_devices('GPU')
+    gpus = tf.config.list_physical_devices("GPU")
     if gpus:
         try:
             # Use only the first GPU (T4 in your case)
-            tf.config.set_visible_devices(gpus[0], 'GPU')
-            logical_gpus = tf.config.list_logical_devices('GPU')
-            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logicalexpand_more GPUs")
+            tf.config.set_visible_devices(gpus[0], "GPU")
+            logical_gpus = tf.config.list_logical_devices("GPU")
+            print(
+                len(gpus),
+                "Physical GPUs,",
+                len(logical_gpus),
+                "Logicalexpand_more GPUs",
+            )
         except RuntimeError as e:
             print(e)  # Handle potent
 
 
 def main():
-    batch_size = 32
+    batch_size = 1
+    sim_name = "Manhattan-config_v1%2FRainfall_Data_2.txt"
 
     generator = IncrementalTrainDataGenerator(
         batch_size=batch_size,
     )
 
     # set_tf_gpu()
-    
-    #check_generator_tensor_shape(generator)
 
-    #check_tensorflow_dataset(generator)
-    
-    #
+    # check_generator_tensor_shape(generator)
+
+    # test_temporal_tensor(generator)
+
+    # test_feature_label_tensors(generator)
+
+    # check_tensorflow_dataset(generator)
+
+    # # Use this function with your generator and sim_name
+    # max_batch = investigate_dataset(generator, sim_name)
+    # print(f"**** Recommended batch size for {sim_name} is {max_batch}")
 
     model_histories = simple_training()
 
     for history in model_histories:
-        print(history.history)
-   
-    
-
-    
-
+        print(history)
 
     # generator = IncrementalTrainDataGenerator(
     #     batch_size=batch_size,
@@ -390,8 +392,6 @@ def main():
     #     # )
     #     # print("Labels are consistent with storm duration.")
     #     # print("-" * 20)
-
-
 
 
 if __name__ == "__main__":

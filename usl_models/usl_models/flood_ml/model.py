@@ -393,6 +393,9 @@ class FloodConvLSTM(tf.keras.Model):
             st_input, temp_input = self._update_temporal_inputs(
                 flood_maps, full_temp_input, t
             )
+            print("st_input shape:", tf.shape(st_input))
+            print("geo_input shape:", tf.shape(geo_input))
+            print("temp_input shape:", tf.shape(temp_input))
             prediction = self.forward(st_input, geo_input, temp_input)
             flood_maps = flood_maps.write(t, prediction)
 
