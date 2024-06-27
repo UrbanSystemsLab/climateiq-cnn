@@ -1490,3 +1490,12 @@ def test_rescale_feature_matrices(mock_firestore_client):
         numpy.testing.assert_array_equal(
             numpy.load(output_buffer), expected_scaled_feature_matrix
         )
+
+
+def test_rescale_feature_matrices_for_wrong_file():
+    feature_bucket = mock.MagicMock(spec=storage.Bucket)
+    feature_bucket.name = "features"
+
+    main._start_feature_rescaling_if_ready(feature_bucket, "TestArea/scaled_chunk_0_0")
+
+    feature_bucket.assert_not_called()
