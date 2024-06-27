@@ -178,7 +178,7 @@ class IncrementalTrainDataGenerator:
             if file_name.endswith(".npy"):
                 try:
                     file_path = os.path.join(dir_name, file_name)
-                    data = np.load(file_path)
+                    data = np.load(file_path, mmap_mode='r')
                     
                     # reshape temporal npy to match expected shape of 
                     # constants.MAX_RAINFALL_DURATION x constants.M_RAINFALL
