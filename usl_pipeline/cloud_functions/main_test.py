@@ -537,6 +537,10 @@ def test_compute_custom_wps_variables_wind():
     vv = ncfile.createVariable(
         "VV", "float32", ("Time", "num_metgrid_levels", "south_north_stag", "west_east")
     )
+    # TODO add some example lat & lons
+    lat = ncfile.createVariable(
+        "XLAT_M", "float32", ("Time", "south_north", "west_east")
+    )
 
     uu[:] = numpy.array(
         [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]], dtype=numpy.float32
@@ -545,6 +549,7 @@ def test_compute_custom_wps_variables_wind():
         [[22, 33, 44], [55, 66, 77], [88, 99, 111], [222, 333, 444]],
         dtype=numpy.float32,
     )
+    lat[:] = numpy.array([[1, 10], [30, 60]])
 
     memfile = ncfile.close()
     ncfile_bytes = memfile.tobytes()
@@ -556,6 +561,11 @@ def test_compute_custom_wps_variables_wind():
     assert all(var in processed_ds.keys() for var in ["WSPD10", "WDIR10"])
     # Check expected shape of computed variable
     assert processed_ds.data_vars["WSPD10"].values.shape == (1, 3, 3, 3)
+
+    # TOD some assert like
+    numpy.testing.assert_array_equal(
+        processed_ds.data_vars["SOLAR_SIN"], numpy.array([[1, -1], [0, 1]])
+    )
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
