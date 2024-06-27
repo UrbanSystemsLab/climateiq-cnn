@@ -144,30 +144,49 @@ def _retry_and_report_errors(
 def build_and_upload_study_area_chunk(
     cloud_event: functions_framework.CloudEvent,
 ) -> None:
-    """Creates a study area chunk and uploads it to GCS.
+    """Creates a study area chunk, uploads to bucket, and writes to metastore.
 
     This function is triggered when files containing raw geo data for a study area
-    are uploaded to GCS. It will group the files into TAR-files and upload it to a
-    bucket.
+    are uploaded to GCS. It will load the file into study area chunks bucket and
+    write a new study area to metastore.
     """
-    file_name = cloud_event.data["name"]
+    file_name = pathlib.PurePosixPath(cloud_event.data["name"])
     bucket_name = cloud_event.data["bucket"]
 
-    if re.search(file_names.WPS_DOMAIN3_NC_REGEX, file_name):
+    # For AtmoML, only 3rd domain (500m) output files will be used
+    if re.search(file_names.WPS_DOMAIN3_NC_REGEX, file_name.name):
         storage_client = storage.Client()
+        db = firestore.Client()
+
         bucket = storage_client.bucket(bucket_name)
-        file_blob = bucket.blob(file_name)
+        file_blob = bucket.blob(str(file_name))
 
         # For WRF, we can treat each snapshot output file as its own chunk. If
         # multiple snapshots must be processed together, we can choose to group
         # the files together in a TAR before uploading.
-        with file_blob.open("rb") as f:
+        with file_blob.open("rb") as fd:
             study_area_chunk_bucket = storage_client.bucket(
                 cloud_storage.STUDY_AREA_CHUNKS_BUCKET
             )
-            study_area_chunk_bucket.blob(file_name).upload_from_file(f)
+            study_area_chunk_bucket.blob(str(file_name)).upload_from_file(fd)
 
-        # TODO: Write to metastore - create new chunk entry
+            # File names should be in the form <study_area_name>/<file_name>
+            study_area_name = file_name.parent.name
+
+            with xarray.open_dataset(fd) as ds:
+                study_area = metastore.StudyArea(
+                    name=study_area_name,
+                    # Grid dimension will always be 200x200 for all cities
+                    col_count=200,
+                    row_count=200,
+                    x_ll_corner=ds.attrs["corner_lons"][0],
+                    y_ll_corner=ds.attrs["corner_lats"][0],
+                    # https://www2.mmm.ucar.edu/wrf/users/namelist_best_prac_wps.html#dx_dy
+                    cell_size=int(ds.attrs["DX"]),
+                    # https://www2.mmm.ucar.edu/wrf/users/namelist_best_prac_wps.html#map_proj
+                    crs=ds.attrs["MAP_PROJ"],
+                )
+                study_area.set(db)
 
 
 @functions_framework.cloud_event
