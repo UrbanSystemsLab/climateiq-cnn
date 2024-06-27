@@ -103,12 +103,12 @@ def simple_training(
 
     # compare feature and label chunks
 
-    def set_shapes(features, labels):
-        features["geospatial"].set_shape([None, 1000, 1000, 8])
-        features["temporal"].set_shape([None, 864, constants.M_RAINFALL])
-        features["spatiotemporal"].set_shape([None, 19, 1000, 1000, 1])
-        labels.set_shape([None, 19, 1000, 1000])
-        return features, labels
+    # def set_shapes(features, labels):
+    #     features["geospatial"].set_shape([None, 1000, 1000, 8])
+    #     features["temporal"].set_shape([None, 864, constants.M_RAINFALL])
+    #     features["spatiotemporal"].set_shape([None, 19, 1000, 1000, 1])
+    #     labels.set_shape([None, 19, 1000, 1000])
+    #     return features, labels
 
     for sim_name in sim_names:
         dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
@@ -278,6 +278,42 @@ def set_tf_gpu():
             print(e)  # Handle potent
 
 
+def download_sims_locally(class_label, generator, sim_names):
+    print("**** Length of sim_names: ", len(sim_names))
+    print("Checking if feature and label chunks are equal")
+    # compare feature and label chunks
+    for sim_name in sim_names:
+        print(f"Comparing feature and label chunks for {sim_name}")
+        label_compare = class_label.compare_study_area_sim_chunks(sim_name)
+        if label_compare:
+            print("Feature and label chunks are equal for", sim_name)
+            print("")
+        else:
+            print("Feature and label chunks are not equal")
+            sim_names.remove(sim_name)
+
+    print("**** Length of *valid* sim_names: ", len(sim_names))
+    print("Printing valid sims in metastore")
+    for sim_name in sim_names:
+        print(f"Index: {sim_names.index(sim_name)} , Sim name: {sim_name}")
+        print("")
+
+    # download npy temporal chunks locally
+    print("Downloading numpy temporal chunks locally")
+    generator.download_numpy_files(sim_names, "temporal")
+    print("Temporals downloaded successfully")
+
+    # download npy label chunks locally
+    print("Downloading numpy label chunks locally")
+    generator.download_numpy_files(sim_names, "label")
+    print("Labels downloaded successfully")
+
+    # download npy feature chunks locally
+    print("Downloading numpy feature chunks locally")
+    generator.download_numpy_files(sim_names, "feature")
+    print("Features downloaded successfully")
+
+
 def main():
     batch_size = 1
     sim_name = "Manhattan-config_v1%2FRainfall_Data_2.txt"
@@ -300,98 +336,34 @@ def main():
     # max_batch = investigate_dataset(generator, sim_name)
     # print(f"**** Recommended batch size for {sim_name} is {max_batch}")
 
-    model_histories = simple_training()
+    # model_histories = simple_training()
 
-    for history in model_histories:
-        print(history)
+    # for history in model_histories:
+    #     print(history)
 
-    # generator = IncrementalTrainDataGenerator(
-    #     batch_size=batch_size,
-    # )
+    generator = IncrementalTrainDataGenerator(
+        batch_size=batch_size,
+    )
+    class_label = GenerateFeatureLabelChunks()
 
-    # sim_names = [
-    #     "Manhattan-config_v1%2FRainfall_Data_2.txt",
-    #     "Manhattan-config_v1%2FRainfall_Data_13.txt",
-    #     "Manhattan-config_v1%2FRainfall_Data_14.txt",
-    #     "Manhattan-config_v1%2FRainfall_Data_15.txt",
-    #     "Manhattan-config_v1%2FRainfall_Data_17.txt",
-    # ]
-    # # compare feature and label chunks
-    # # for sim_name in sim_names:
-    # #     print(f"Comparing feature and label chunks for {sim_name}")
-    # #     label_compare = class_label.compare_study_area_sim_chunks(sim_name)
-    # #     if label_compare:
-    # #         print("Feature and label chunks are equal for", sim_name)
-    # #         print("")
-    # #     else:
-    # #         print("Feature and label chunks are not equal")
-    # #         sim_names.remove(sim_name)
+    sim_names = [
+        "Manhattan-config_v1%2FRainfall_Data_1.txt",
+        "Manhattan-config_v1%2FRainfall_Data_2.txt",
+        "Manhattan-config_v1%2FRainfall_Data_3.txt",
+        "Manhattan-config_v1%2FRainfall_Data_4.txt",
+        "Manhattan-config_v1%2FRainfall_Data_5.txt",
+        "Manhattan-config_v1%2FRainfall_Data_7.txt",
+        "Manhattan-config_v1%2FRainfall_Data_8.txt",
+        "Manhattan-config_v1%2FRainfall_Data_13.txt",
+        "Manhattan-config_v1%2FRainfall_Data_14.txt",
+        "Manhattan-config_v1%2FRainfall_Data_15.txt",
+        "Manhattan-config_v1%2FRainfall_Data_17.txt",
+        "Manhattan-config_v1%2FRainfall_Data_22.txt",
+        "Manhattan-config_v1%2FRainfall_Data_24.txt"    
+    ]
+    
+    download_sims_locally(class_label, generator, sim_names)
 
-    # print("**** Length of sim_names: ", len(sim_names))
-    # print("Printing valid sims in metastore")
-    # for sim_name in sim_names:
-    #     print(f"Index: {sim_names.index(sim_name)} , Sim name: {sim_name}")
-    #     print("")
-
-    # # first_sim_name = sim_names[0]
-
-    # # slice sim_names to get the first two elements
-    # sim_names_2 = sim_names[:2]
-
-    # # # download npy label chunks locally
-    # # generator.download_numpy_files(sim_names_2, "label")
-
-    # # download npy feature chunks locally
-    # generator.download_numpy_files(sim_names_2, "feature")
-
-    # # # download npy temporal chunks locally
-    # # generator.download_numpy_files(sim_names_2, "temporal")
-
-    # # print("Printing valid sims in metastore"))
-
-    # for sim_name in sim_names_2:
-    #     print(f"Index: {sim_names_2.index(sim_name)} , Sim name: {sim_name}")
-    #     print("")
-
-    # # Get the next batch of data for one simulation
-    # data_batch = generator.get_next_batch(sim_names_2, batch_size)
-
-    # print("\n")
-
-    # # print size of data_batch
-    # print("Data batch size:", len(data_batch))
-    # print("\n")
-
-    # # Print the shapes of the tensors in the batch
-    # for data in data_batch:
-    #     # Take the first element from tf dataset iterator and print shape of each tensors
-    #     print("_" * 10, "\n\n")
-    #     print("Temporal data shape:", next(iter(data.temporal.take(1))).shape)
-    #     print("_" * 10, "\n\n")
-    #     print("Labels shape:", next(iter(data.labels.take(1))).shape)
-    #     print("_" * 10, "\n\n")
-    #     print(
-    #         "geospatial Feature tensor shape:",
-    #         next(iter(data.geospatial.take(1))).shape,
-    #     )
-    #     print("_" * 10, "\n\n")
-    #     print("Rainfall duration:", data.storm_duration)
-    #     print("")
-    #     print("-" * 20)
-
-    #     # # Validate the shape of the labels tensor
-    #     # first_label = next(iter(data.take(1)))[0]  # Get the first label batch
-    #     # expected_label_shape = list(first_label.shape)
-    #     # expected_label_shape[-1] = rainfall_duration
-
-    #     # # Labels must match the storm duration.
-    #     # assert first_label.shape[-1] == rainfall_duration, (  # Compare the shape of the first label tensor
-    #     #     "Provided labels are inconsistent with storm duration. "
-    #     #     f"Labels are expected to have shape {expected_label_shape}. "
-    #     #     f"Actual shape: {first_label.shape}."  # Use first_label.shape
-    #     # )
-    #     # print("Labels are consistent with storm duration.")
-    #     # print("-" * 20)
 
 
 if __name__ == "__main__":
