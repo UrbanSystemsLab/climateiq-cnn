@@ -1,7 +1,7 @@
 """Flood model definition."""
 
 import dataclasses
-from typing import TypeAlias
+from typing import Optional, TypeAlias
 
 import tensorflow as tf
 from tensorflow.keras import layers
@@ -102,11 +102,16 @@ class FloodModel:
         data = dataclasses.replace(data, spatiotemporal=st_input)
         return data
 
-    def _model_fit(self, data: FloodModelData) -> tf.keras.callbacks.History:
+    def _model_fit(
+        self, data: FloodModelData, early_stopping: Optional[int]
+    ) -> tf.keras.callbacks.History:
         """Fits the model on a single batch of FloodModelData.
 
         Args:
             data: A FloodModelData object.
+            early_stopping: Optional integer representing the number of epochs to assign
+                as the patience when enabling early stopping. See the train method for
+                more details.
 
         Returns: A History object containing the training and validation loss
             and metrics.
@@ -117,18 +122,28 @@ class FloodModel:
             "temporal": data.temporal,
         }
         self._model.set_n_predictions(data.storm_duration)
+
+        callbacks = None
+        if early_stopping:
+            es_callback = tf.keras.callbacks.EarlyStopping(
+                monitor="val_loss", mode="min", patience=early_stopping
+            )
+            callbacks = [es_callback]
+
         history = self._model.fit(
             inputs,
             data.labels,
             batch_size=self._model_params.batch_size,
             epochs=self._model_params.epochs,
             validation_split=0.2,
+            callbacks=callbacks,
         )
         return history
 
     def train(
         self,
         data: list[FloodModelData],
+        early_stopping: Optional[int] = None,
     ) -> list[tf.keras.callbacks.History]:
         """Trains the model.
 
@@ -145,6 +160,10 @@ class FloodModel:
 
         Args:
             data: A list of FloodModelData objects. Labels are required for training.
+            early_stopping: Optional integer representing the number of epochs to assign
+                as the patience when enabling early stopping. The model will stop
+                training if the validation loss doesn't improve after that many
+                epochs, up until the total number of epochs set for training.
 
         Returns: A list of History objects containing the record of training and,
             if applicable, validation loss and metrics.
@@ -153,7 +172,7 @@ class FloodModel:
         processed = [self._validate_and_preprocess_data(x, training=True) for x in data]
 
         for x in processed:
-            history = self._model_fit(x)
+            history = self._model_fit(x, early_stopping=early_stopping)
             model_history.append(history)
 
         return model_history

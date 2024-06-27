@@ -1,5 +1,6 @@
 """Tests for Flood model."""
 
+import dataclasses
 import pytest
 
 import tensorflow as tf
@@ -183,3 +184,38 @@ def test_bad_labels():
 
     with pytest.raises(AssertionError):
         model.train([fake_data])
+
+
+def test_early_stopping():
+    """Tests early stopping during model training.
+
+    Since inputs are random, the model will not continually improve (there's no real
+    training). Setting a reasonably large number of epochs makes it likely that the
+    validation loss stops improving before training is complete. Enabling early stopping
+    with a patience of 1 epoch means that the model should stop training as soon as the
+    validaton loss goes up.
+
+    Note that this test is nondeterministic and possibly flaky. But with a large enough
+    number of epochs, this test is expected to pass with high likelihood. Empirically,
+    the model usually stops after 3-4 epochs.
+    """
+    batch_size = 16
+    height, width = 100, 100
+    # Set a large number of epochs to increase the odds of triggering early stopping.
+    params = dataclasses.replace(model_params.test_model_params, epochs=20)
+
+    model = flood_model.FloodModel(params, spatial_dims=(height, width))
+
+    storm_duration = 4
+    fake_input = fake_flood_input_batch(
+        batch_size,
+        height=height,
+        width=width,
+        storm_duration=storm_duration,
+        include_labels=True,
+    )
+    fake_data = flood_model.FloodModelData(storm_duration=storm_duration, **fake_input)
+
+    history = model.train([fake_data], early_stopping=1)
+    # Check whether the model history indicates early stopping.
+    assert len(history[0].history["val_loss"]) < params.epochs
