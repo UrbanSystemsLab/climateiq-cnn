@@ -384,13 +384,9 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
                 {
                     # For heat, we process each WPS netcdf file as a chunk (un-tar'ed)
                     "archive_path": "gs://bucket/study_area/met_em.d03_test.nc",
-                    "unscaled_feature_matrix_path": (
-                        "gs://climateiq-study-area-feature-chunks/study_area/"
-                        + "met_em.d03_test.npy"
-                    ),
                     "feature_matrix_path": (
                         "gs://climateiq-study-area-feature-chunks/study_area/"
-                        + "scaled_met_em.d03_test.npy"
+                        + "met_em.d03_test.npy"
                     ),
                     "error": firestore.DELETE_FIELD,
                 },

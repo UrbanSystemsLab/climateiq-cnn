@@ -319,6 +319,7 @@ def _build_feature_matrix(
     bucket = storage_client.bucket(bucket_name)
     chunk_blob = bucket.blob(chunk_name)
 
+    is_flood_case = True
     # TODO: Refactor to better handle both tar'ed + un-tarred chunks
     with chunk_blob.open("rb") as chunk:
         # Flood (CityCat)
@@ -329,6 +330,7 @@ def _build_feature_matrix(
                 raise ValueError(f"Empty archive found in {chunk_blob}")
         # Heat (WRF) - treat one WPS outout file as one chunk
         elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_name):
+            is_flood_case = False
             feature_matrix, metadata = _build_wps_feature_matrix(chunk)
         else:
             raise ValueError(f"Unexpected file {chunk_name}")
@@ -340,7 +342,9 @@ def _build_feature_matrix(
     # matrix file that will trigger rescaling post-processing.
     _update_study_area_metastore_entry(chunk_blob, metadata)
     _write_as_npy(feature_blob, feature_matrix)
-    _write_flood_chunk_metastore_entry(chunk_blob, feature_blob)
+    _write_chunk_metastore_entry(
+        chunk_blob, feature_blob, support_scaled_features=is_flood_case
+    )
 
 
 @functions_framework.cloud_event
@@ -798,8 +802,8 @@ def _update_study_area_metastore_entry(
         metastore.StudyArea.update_chunk_info(db, study_area_name, metadata.chunk_size)
 
 
-def _write_flood_chunk_metastore_entry(
-    chunk_blob: storage.Blob, feature_blob: storage.Blob
+def _write_chunk_metastore_entry(
+    chunk_blob: storage.Blob, feature_blob: storage.Blob, support_scaled_features=False
 ) -> None:
     """Updates the metastore with new information for the given chunks.
 
@@ -808,24 +812,33 @@ def _write_flood_chunk_metastore_entry(
     Args:
       chunk_blob: The GCS blob containing the raw chunk archive.
       feature_blob: The GCS blob containing the feature tensor for the chunk.
+      support_scaled_features: Indicates that `feature_matrix_path` metadata field
+        should point to scaled version of feature matrices.
     """
     db = firestore.Client()
     study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
-    feature_blob_file_name = pathlib.PurePosixPath(feature_blob.name).name
 
-    metastore.StudyAreaChunk(
+    study_area_chunk = metastore.StudyAreaChunk(
         id_=chunk_name,
         archive_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
-        unscaled_feature_matrix_path=(
-            f"gs://{feature_blob.bucket.name}/{feature_blob.name}"
-        ),
-        feature_matrix_path=(
-            f"gs://{feature_blob.bucket.name}/{study_area_name}/"
-            + f"scaled_{feature_blob_file_name}"
-        ),
         # Remove any errors from previous failed retries which have now succeeded.
         error=firestore.DELETE_FIELD,
-    ).merge(db, study_area_name)
+    )
+    if support_scaled_features:
+        study_area_chunk.unscaled_feature_matrix_path = (
+            f"gs://{feature_blob.bucket.name}/{feature_blob.name}"
+        )
+        feature_blob_file_name = pathlib.PurePosixPath(feature_blob.name).name
+        study_area_chunk.feature_matrix_path = (
+            f"gs://{feature_blob.bucket.name}/{study_area_name}/"
+            + f"scaled_{feature_blob_file_name}"
+        )
+    else:
+        study_area_chunk.feature_matrix_path = (
+            f"gs://{feature_blob.bucket.name}/{feature_blob.name}"
+        )
+
+    study_area_chunk.merge(db, study_area_name)
 
 
 def _write_chunk_metastore_error(chunk_path: str, error_message: str) -> None:
