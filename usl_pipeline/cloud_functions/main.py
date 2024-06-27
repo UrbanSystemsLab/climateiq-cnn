@@ -665,12 +665,6 @@ def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
         dataset = dataset.assign(WSPD10=(new_dims, wind_speed))
         dataset = dataset.assign(WDIR10=(new_dims, wind_direction))
 
-    # TODO: add solar time to dataset
-    utc_time = dataset["LAT"].coords.get("Time")
-    # extract hour from full date-time string in utc_time
-    dataset = dataset.assign(SOLAR_SIN=...)
-    dataset = dataset.assign(SOLAR_COS=...)
-
     return dataset
 
 

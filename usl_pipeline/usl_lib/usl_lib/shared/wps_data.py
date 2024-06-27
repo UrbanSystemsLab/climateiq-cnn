@@ -27,9 +27,7 @@ class Unit(Enum):
 
 ML_REQUIRED_VARS_REPO = dict(
     {
-        # TODO: add scaling for new solar time features
         # Surface pressure FNL level 0
-        "SOLAR_SIN": {},
         "PRES": {
             "unit": Unit.PASCALS,
             "scaling": {
