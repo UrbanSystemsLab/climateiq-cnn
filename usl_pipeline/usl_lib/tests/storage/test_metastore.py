@@ -69,35 +69,6 @@ def test_study_area_set():
     )
 
 
-def test_study_area_chunk_merge():
-    mock_db = mock.MagicMock()
-    chunk = metastore.StudyAreaChunk(
-        id_="id",
-        archive_path="archive",
-        feature_matrix_path="matrix",
-    )
-    chunk.merge(mock_db, "study_area_name")
-    mock_db.assert_has_calls(
-        [
-            mock.call.collection("study_areas"),
-            mock.call.collection().document("study_area_name"),
-            mock.call.collection().document().collection("chunks"),
-            mock.call.collection().document().collection().document("id"),
-            mock.call.collection()
-            .document()
-            .collection()
-            .document()
-            .set(
-                {
-                    "archive_path": "archive",
-                    "feature_matrix_path": "matrix",
-                },
-                merge=True,
-            ),
-        ]
-    )
-
-
 def test_study_area_as_header():
     """Ensures the StudyArea as_header method works."""
     study_area = metastore.StudyArea(

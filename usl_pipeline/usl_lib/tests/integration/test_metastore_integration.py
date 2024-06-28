@@ -1,3 +1,4 @@
+import datetime
 import os
 import unittest
 
@@ -218,3 +219,62 @@ def test_get_simulation_bad_name_raises_error(firestore_db):
         metastore.Simulation.get(
             firestore_db, "missing-study-area", "missing-config/name.txt"
         )
+
+
+def test_create_get_study_area_spatial_chunk(firestore_db):
+    """Ensures a study area spatial chunk can be created and retrieved."""
+    study_area = metastore.StudyArea(
+        name="study_area_name",
+        col_count=1,
+        row_count=2,
+        x_ll_corner=3,
+        y_ll_corner=4,
+        cell_size=5,
+        crs="crs",
+    )
+    study_area.create(firestore_db)
+
+    chunk = metastore.StudyAreaSpatialChunk(
+        id_="chunk_name",
+        raw_path="gcs://raw_file.tar",
+        feature_matrix_path="gcs://feautre_file.npy",
+        x_index=1,
+        y_index=2,
+    )
+    chunk.merge(firestore_db, "study_area_name")
+
+    assert (
+        metastore.StudyAreaSpatialChunk.get(
+            firestore_db, "study_area_name", "chunk_name"
+        )
+        == chunk
+    )
+
+
+def test_create_get_study_area_temporal_chunk(firestore_db):
+    """Ensures a study area spatial chunk can be created and retrieved."""
+    study_area = metastore.StudyArea(
+        name="study_area_name",
+        col_count=1,
+        row_count=2,
+        x_ll_corner=3,
+        y_ll_corner=4,
+        cell_size=5,
+        crs="crs",
+    )
+    study_area.create(firestore_db)
+
+    chunk = metastore.StudyAreaTemporalChunk(
+        id_="chunk_name",
+        raw_path="gcs://raw_file.tar",
+        feature_matrix_path="gcs://feautre_file.npy",
+        time=datetime.datetime(2012, 12, 21, 0, 0, 0, tzinfo=datetime.timezone.utc),
+    )
+    chunk.merge(firestore_db, "study_area_name")
+
+    assert (
+        metastore.StudyAreaTemporalChunk.get(
+            firestore_db, "study_area_name", "chunk_name"
+        )
+        == chunk
+    )
