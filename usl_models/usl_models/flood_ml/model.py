@@ -136,27 +136,20 @@ class FloodModel:
     #     )
     #     return history
 
-    def _model_fit(self, dataset: tf.data.Dataset, storm_duration):
-        history_list = []
+    def _model_fit(self, features, labels, storm_duration):
+        # convert storm_duration to int
+        storm_duration = int(storm_duration)
 
-        for (x, y), storm_duration in dataset:
-            # convert storm_duration to int
-            storm_duration = int(storm_duration)
+        self._model.set_n_predictions(storm_duration)
 
-            self._model.set_n_predictions(storm_duration)
-
-            # Fit the model for this batch
-            history = self._model.fit(
-                x=x,
-                y=y,
-                epochs=self._model_params.epochs,
-            )
-            history_list.append(history)
-
-        # Combine histories if needed
-        combined_history = self._combine_histories(history_list)
+        # Fit the model for this batch
+        history = self._model.fit(
+            features,
+            labels,
+            epochs=self._model_params.epochs,
+        )
         
-        return combined_history
+        return history
 
     def _combine_histories(self, history_list):
         combined_history = {}
@@ -171,10 +164,13 @@ class FloodModel:
         model_history = []
         for (features, labels), storm_duration in dataset:
             history = self._model_fit(
-                x=features, y=labels, storm_duration=storm_duration
+                features, labels, storm_duration=storm_duration
             )
             model_history.append(history)
-            return model_history
+        
+        # Combine all histories after processing all batches
+        combined_history = self._combine_histories(model_history)
+        return combined_history
 
     # def train(
     #     self,
