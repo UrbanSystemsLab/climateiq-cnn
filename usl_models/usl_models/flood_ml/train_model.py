@@ -130,7 +130,7 @@ def simple_training(
 
 
 def full_training(
-    sim_names,generator,
+    sim_names, generator,
     model_dir="gs://usl_models_bucket/flood_model",
     batch_size=1,
     lstm_units=128,
@@ -139,8 +139,6 @@ def full_training(
     lstm_recurrent_dropout=0.2,
     epochs=1,
 ):
-
-    # Create FloodModelParams from hyperparameters
     model_params = FloodModelParams(
         batch_size=batch_size,
         lstm_units=lstm_units,
@@ -151,31 +149,41 @@ def full_training(
     )
     model_history = []
 
-    # Instantiate FloodModel class
     model = FloodModel(model_params)
-    # model = model.compile(tf.keras.optimizers.Adam(learning_rate=learning_rate))
 
-    # Override batch size for testing
-    batch_size = 1
+    sim_names_len = len(sim_names)
+    print(f"Number of simulations: {sim_names_len}")
 
-    for sim_name in sim_names:
-        dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
-        print("BEFORE BATCH: Dataset element spec:", dataset.element_spec)
+    # Create a dataset that yields data from all simulations
+    def data_generator():
+        for sim_name in sim_names:
+            dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
+            for element in dataset:
+                yield element, storm_duration
 
-        # dataset = dataset.batch(batch_size)
-        
-        # # Add prefetching here
-        # dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+    # Create a tf.data.Dataset from the generator
+    full_dataset = tf.data.Dataset.from_generator(
+        data_generator,
+        output_signature=(
+            {
+                'geospatial': tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
+                'temporal': tf.TensorSpec(shape=(864, constants.M_RAINFALL), dtype=tf.float32),
+                'spatiotemporal': tf.TensorSpec(shape=(1000, 1000, 1), dtype=tf.float32)
+            },
+            tf.TensorSpec(shape=(None, 1000, 1000), dtype=tf.float32),
+            tf.TensorSpec(shape=(), dtype=tf.int32)  # for storm_duration
+        )
+    )
 
-        print("AFTER BATCH: Dataset element spec:", dataset.element_spec)
-        print(type(dataset))
-        print(storm_duration)
-        
-        print("Dataset generation completed, will hand over to model training..")
-        print("\n")
+    # Apply batching, shuffling, and prefetching
+    full_dataset = full_dataset.batch(batch_size)
+    full_dataset = full_dataset.shuffle(buffer_size=1000)
+    full_dataset = full_dataset.prefetch(tf.data.AUTOTUNE)
+
+    print("Dataset preparation completed, starting model training...")
 
     print("#######  Training the model ##########")
-    model_history = model.train(dataset, storm_duration)
+    model_history = model.train(full_dataset)
     print("Training complete")
     
     return model_history
