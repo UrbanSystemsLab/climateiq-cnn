@@ -342,9 +342,10 @@ def _build_feature_matrix(
     # matrix file that will trigger rescaling post-processing.
     _update_study_area_metastore_entry(chunk_blob, metadata)
     _write_as_npy(feature_blob, feature_matrix)
-    _write_chunk_metastore_entry(
-        chunk_blob, feature_blob, support_scaled_features=is_flood_case
-    )
+    if is_flood_case:
+        _write_chunk_metastore_entry(chunk_blob, None, needs_scaling=True)
+    else:
+        _write_chunk_metastore_entry(chunk_blob, feature_blob)
 
 
 @functions_framework.cloud_event
@@ -803,17 +804,17 @@ def _update_study_area_metastore_entry(
 
 
 def _write_chunk_metastore_entry(
-    chunk_blob: storage.Blob, feature_blob: storage.Blob, support_scaled_features=False
+    chunk_blob: storage.Blob, feature_blob: Optional[storage.Blob], needs_scaling=False
 ) -> None:
     """Updates the metastore with new information for the given chunks.
 
     Writes a Firestore entry for the new feature matrix chunk.
 
     Args:
-      chunk_blob: The GCS blob containing the raw chunk archive.
-      feature_blob: The GCS blob containing the feature tensor for the chunk.
-      support_scaled_features: Indicates that `feature_matrix_path` metadata field
-        should point to scaled version of feature matrices.
+        chunk_blob: The GCS blob containing the raw chunk archive.
+        feature_blob: Optional GCS blob containing the feature tensor for the chunk.
+        needs_scaling: Indicates that feature matrix should be scaled before it can be
+            used.
     """
     db = firestore.Client()
     study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
@@ -824,16 +825,9 @@ def _write_chunk_metastore_entry(
         # Remove any errors from previous failed retries which have now succeeded.
         error=firestore.DELETE_FIELD,
     )
-    if support_scaled_features:
-        study_area_chunk.unscaled_feature_matrix_path = (
-            f"gs://{feature_blob.bucket.name}/{feature_blob.name}"
-        )
-        feature_blob_file_name = pathlib.PurePosixPath(feature_blob.name).name
-        study_area_chunk.feature_matrix_path = (
-            f"gs://{feature_blob.bucket.name}/{study_area_name}/"
-            + f"scaled_{feature_blob_file_name}"
-        )
-    else:
+    if needs_scaling:
+        study_area_chunk.needs_scaling = True
+    if feature_blob is not None:
         study_area_chunk.feature_matrix_path = (
             f"gs://{feature_blob.bucket.name}/{feature_blob.name}"
         )
@@ -899,13 +893,20 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
         blob_path: Path pointing to one of unscaled feature matrix files with the name
             following the "chunk_*" pattern. Other files are ignored.
     """
-    feature_path = pathlib.PurePosixPath(blob_path)
-    if not feature_path.name.startswith("chunk_"):
-        return
-    feature_parent_path = feature_path.parent
-    study_area_name = feature_parent_path.parts[-1]
-
+    study_area_name, chunk_name = _parse_chunk_path(blob_path)
+    # Let's look up chunk metadata and check if scaling is needed
     db = firestore.Client()
+    chunk_metadata = metastore.StudyAreaChunk.get_if_exists(
+        db, study_area_name, chunk_name
+    )
+    if chunk_metadata is None:
+        logging.info(f"Chunk metadata was not found for {study_area_name}/{chunk_name}")
+        return
+
+    if not chunk_metadata.needs_scaling:
+        logging.info(f"Chunk {study_area_name}/{chunk_name} doesn't need scaling")
+        return
+
     study_area = metastore.StudyArea.get(db, study_area_name)
     if study_area.chunk_x_count is None or study_area.chunk_y_count is None:
         logging.info(
@@ -914,9 +915,7 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
         )
         return
 
-    feature_blobs = list(
-        feature_bucket.list_blobs(prefix=f"{feature_parent_path}/chunk_")
-    )
+    feature_blobs = list(feature_bucket.list_blobs(prefix=f"{study_area_name}/chunk_"))
 
     chunk_count = study_area.chunk_x_count * study_area.chunk_y_count
     if chunk_count != len(feature_blobs):
@@ -929,13 +928,26 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
 
     # We're at the final step when all unscaled feature matrices are ready
     for feature_blob in feature_blobs:
-        logging.info(f"[Feature Rescaler] Rescaling feature matrix {feature_blob.path}")
+        logging.info(f"[Feature Rescaler] Rescaling feature matrix {feature_blob.name}")
+        _, blob_chunk_name = _parse_chunk_path(feature_blob.name)
         output_blob = feature_bucket.blob(
-            f"{feature_parent_path}/scaled_{feature_blob.name}"
+            f"{study_area_name}/scaled_{blob_chunk_name}.npy"
         )
         with feature_blob.open("rb") as in_fd, output_blob.open("wb") as out_fd:
             feature_raster_transformers.rescale_feature_blob(in_fd, study_area, out_fd)
-    # Once all chunks are processed we can delete unscaled ones:
+
+    logging.info("[Feature Rescaler] Updating feature matrix path in chunk metadata...")
+    for feature_blob in feature_blobs:
+        _, blob_chunk_name = _parse_chunk_path(feature_blob.name)
+        scaled_feature_matrix_path = (
+            f"gs://{feature_bucket.name}/{study_area_name}/scaled_{blob_chunk_name}.npy"
+        )
+        metastore.StudyAreaChunk.update_scaling_done(
+            db, study_area_name, blob_chunk_name, scaled_feature_matrix_path
+        )
+
+    # Once all chunks are processed we can delete unscaled ones
+    logging.info("[Feature Rescaler] Deleting unscaled feature matrix files...")
     for feature_blob in feature_blobs:
         feature_blob.delete()
 

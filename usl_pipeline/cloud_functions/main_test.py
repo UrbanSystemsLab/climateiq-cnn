@@ -151,13 +151,7 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
             .set(
                 {
                     "archive_path": "gs://bucket/study_area/name.tar",
-                    "unscaled_feature_matrix_path": (
-                        "gs://climateiq-study-area-feature-chunks/study_area/name.npy"
-                    ),
-                    "feature_matrix_path": (
-                        "gs://climateiq-study-area-feature-chunks/study_area/"
-                        + "scaled_name.npy"
-                    ),
+                    "needs_scaling": True,
                     "error": firestore.DELETE_FIELD,
                 },
                 merge=True,
@@ -1402,7 +1396,8 @@ def test_calculate_metadata_for_elevation_empty_area():
 @mock.patch.object(main.firestore, "Client", autospec=True)
 def test_rescale_feature_matrices(mock_firestore_client):
     # Return a study area geography from the mock firestore client.
-    mock_firestore_client().collection().document().get().to_dict.return_value = {
+    mock_db = mock_firestore_client()
+    mock_db.collection().document().get().to_dict.return_value = {
         "col_count": 2,
         "row_count": 4,
         "x_ll_corner": 0.0,
@@ -1414,6 +1409,14 @@ def test_rescale_feature_matrices(mock_firestore_client):
         "chunk_x_count": 1,
         "chunk_y_count": 2,
     }
+    chunk_ref = mock_db.collection().document().collection().document().get()
+    chunk_ref.exists = True
+    chunk_ref.to_dict.return_value = {
+        "id_": "chunk_id",
+        "archive_path": "a/b",
+        "needs_scaling": True,
+    }
+
     unscaled_feature_matrix = numpy.array(
         [
             [
@@ -1437,8 +1440,7 @@ def test_rescale_feature_matrices(mock_firestore_client):
         input2_mock_blob,
     ]
     for i in range(2):
-        input_mock_blobs[i].path = f"TestArea/chunk_0_{i}"
-        input_mock_blobs[i].name = f"chunk_0_{i}"
+        input_mock_blobs[i].name = f"TestArea/chunk_0_{i}.npy"
         feature_input_fd = io.BytesIO()
         numpy.save(feature_input_fd, unscaled_feature_matrix)
         feature_input_fd.seek(0)
@@ -1460,8 +1462,8 @@ def test_rescale_feature_matrices(mock_firestore_client):
     feature_bucket.assert_has_calls(
         [
             mock.call.list_blobs(prefix="TestArea/chunk_"),
-            mock.call.blob("TestArea/scaled_chunk_0_0"),
-            mock.call.blob("TestArea/scaled_chunk_0_1"),
+            mock.call.blob("TestArea/scaled_chunk_0_0.npy"),
+            mock.call.blob("TestArea/scaled_chunk_0_1.npy"),
         ]
     )
     for i in range(2):
@@ -1491,8 +1493,47 @@ def test_rescale_feature_matrices(mock_firestore_client):
             numpy.load(output_buffer), expected_scaled_feature_matrix
         )
 
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("study_areas"),
+            mock.call.collection().document("TestArea"),
+            mock.call.collection().document().collection("chunks"),
+            mock.call.collection().document().collection().document("chunk_0_0"),
+            mock.call.collection()
+            .document()
+            .collection()
+            .document()
+            .update(
+                {
+                    "needs_scaling": False,
+                    "feature_matrix_path": "gs://features/TestArea/"
+                    + "scaled_chunk_0_0.npy",
+                },
+            ),
+            mock.call.collection("study_areas"),
+            mock.call.collection().document("TestArea"),
+            mock.call.collection().document().collection("chunks"),
+            mock.call.collection().document().collection().document("chunk_0_1"),
+            mock.call.collection()
+            .document()
+            .collection()
+            .document()
+            .update(
+                {
+                    "needs_scaling": False,
+                    "feature_matrix_path": "gs://features/TestArea/"
+                    + "scaled_chunk_0_1.npy",
+                },
+            ),
+        ]
+    )
 
-def test_rescale_feature_matrices_for_wrong_file():
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_rescale_feature_matrices_for_wrong_file(mock_firestore_client):
+    ref = mock_firestore_client().collection().document().collection().document().get()
+    ref.exists = False
+
     feature_bucket = mock.MagicMock(spec=storage.Bucket)
     feature_bucket.name = "features"
 
