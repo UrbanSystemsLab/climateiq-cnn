@@ -53,6 +53,7 @@ class FeatureMetadata:
     elevation_min: Optional[float] = None
     elevation_max: Optional[float] = None
     chunk_size: Optional[int] = None
+    time: Optional[datetime.datetime] = None
 
 
 def _retry_and_report_errors(
@@ -319,28 +320,31 @@ def _build_feature_matrix(
     bucket = storage_client.bucket(bucket_name)
     chunk_blob = bucket.blob(chunk_name)
 
+    feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
+    feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
+
     # TODO: Refactor to better handle both tar'ed + un-tarred chunks
     with chunk_blob.open("rb") as chunk:
         # Flood (CityCat)
         if chunk_name.endswith(".tar"):
-            feature_matrix, metadata = _build_feature_matrix_from_archive(chunk)
+            feature_matrix, metadata = _build_flood_feature_matrix_from_archive(chunk)
 
             if feature_matrix is None:
                 raise ValueError(f"Empty archive found in {chunk_blob}")
+
+            # Updating min/max elevation in the study area metadata first before storing
+            # feature matrix file that will trigger rescaling post-processing.
+            _update_study_area_metastore_entry(chunk_blob, metadata)
+            _write_as_npy(feature_blob, feature_matrix)
+            _write_flood_chunk_metastore_entry(chunk_blob, feature_blob)
+
         # Heat (WRF) - treat one WPS outout file as one chunk
         elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_name):
             feature_matrix, metadata = _build_wps_feature_matrix(chunk)
+            _write_as_npy(feature_blob, feature_matrix)
+            _write_wps_chunk_metastore_entry(chunk_blob, feature_blob, metadata)
         else:
             raise ValueError(f"Unexpected file {chunk_name}")
-
-    feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
-    feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
-
-    # Updating min/max elevation in the study area metadata first before storing feature
-    # matrix file that will trigger rescaling post-processing.
-    _update_study_area_metastore_entry(chunk_blob, metadata)
-    _write_as_npy(feature_blob, feature_matrix)
-    _write_flood_chunk_metastore_entry(chunk_blob, feature_blob)
 
 
 @functions_framework.cloud_event
@@ -547,7 +551,7 @@ def _read_polygons_from_byte_stream(
     return list(polygon_readers.read_polygons_from_text_file(io.TextIOWrapper(stream)))
 
 
-def _build_feature_matrix_from_archive(
+def _build_flood_feature_matrix_from_archive(
     archive: BinaryIO,
 ) -> Tuple[Optional[NDArray], FeatureMetadata]:
     """Builds a feature matrix for the given archive.
@@ -586,9 +590,6 @@ def _build_feature_matrix_from_archive(
                 green_areas = _read_polygons_from_byte_stream(fd)
             elif name == file_names.SOIL_CLASSES_TXT:
                 soil_classes = _read_polygons_from_byte_stream(fd)
-            # Handle heat model input files (WPS) (if tarred)
-            elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, name):
-                return _build_wps_feature_matrix(fd)
             else:
                 logging.warning(f"Unexpected member name: {name}")
 
@@ -635,7 +636,9 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
 
         features_matrix = numpy.dstack(features_components)
 
-    return features_matrix, FeatureMetadata()
+    return features_matrix, FeatureMetadata(
+        time=datetime.datetime.fromisoformat(str(ds.Times.values[0]))
+    )
 
 
 def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
@@ -801,21 +804,49 @@ def _update_study_area_metastore_entry(
 def _write_flood_chunk_metastore_entry(
     chunk_blob: storage.Blob, feature_blob: storage.Blob
 ) -> None:
-    """Updates the metastore with new information for the given chunks.
+    """Updates the metastore with new information for the given flood chunks.
 
     Writes a Firestore entry for the new feature matrix chunk.
 
     Args:
-      chunk_blob: The GCS blob containing the raw chunk archive.
+      chunk_blob: The GCS blob containing the raw chunk.
       feature_blob: The GCS blob containing the feature tensor for the chunk.
     """
     db = firestore.Client()
     study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
+    x_index, y_index = _parse_spatial_chunk_indices_from_name(chunk_blob.name)
 
-    metastore.StudyAreaChunk(
+    metastore.StudyAreaSpatialChunk(
         id_=chunk_name,
-        archive_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
+        raw_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
         feature_matrix_path=f"gs://{feature_blob.bucket.name}/{feature_blob.name}",
+        x_index=x_index,
+        y_index=y_index,
+        # Remove any errors from previous failed retries which have now succeeded.
+        error=firestore.DELETE_FIELD,
+    ).merge(db, study_area_name)
+
+
+def _write_wps_chunk_metastore_entry(
+    chunk_blob: storage.Blob, feature_blob: storage.Blob, metadata: FeatureMetadata
+) -> None:
+    """Updates the metastore with new information for the given wps chunks.
+
+    Writes a Firestore entry for the new feature matrix chunk.
+
+    Args:
+      chunk_blob: The GCS blob containing the raw chunk.
+      feature_blob: The GCS blob containing the feature tensor for the chunk.
+      metadata: Additional metadata describing the features.
+    """
+    db = firestore.Client()
+    study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
+
+    metastore.StudyAreaTemporalChunk(
+        id_=chunk_name,
+        raw_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
+        feature_matrix_path=f"gs://{feature_blob.bucket.name}/{feature_blob.name}",
+        time=metadata.time,
         # Remove any errors from previous failed retries which have now succeeded.
         error=firestore.DELETE_FIELD,
     ).merge(db, study_area_name)
@@ -847,6 +878,16 @@ def _parse_chunk_path(chunk_path: str) -> Tuple[str, str]:
     """
     as_path = pathlib.PurePosixPath(chunk_path)
     return str(as_path.parent), as_path.stem
+
+
+def _parse_spatial_chunk_indices_from_name(chunk_name: str) -> Tuple[int, int]:
+    """Extract the x, y indices from a name like "chunk_x_y.tar"."""
+    indices = re.search(r"(\d+)_(\d+)", chunk_name)
+    if indices is None:
+        raise ValueError(
+            f"Unexpected chunk name {chunk_name} does not contain chunk indices"
+        )
+    return (int(indices.group(1)), int(indices.group(2)))
 
 
 def _write_as_npy(blob: storage.Blob, array: NDArray) -> None:

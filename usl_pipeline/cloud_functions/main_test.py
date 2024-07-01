@@ -62,13 +62,13 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
 
     # Create a mock blob for the archive which will return the above tiff when opened.
     mock_archive_blob = mock.MagicMock()
-    mock_archive_blob.name = "study_area/name.tar"
+    mock_archive_blob.name = "study_area/chunk_1_2.tar"
     mock_archive_blob.bucket.name = "bucket"
     mock_archive_blob.open.return_value = archive
 
     # Create a mock blob for feature matrix we will upload.
     mock_feature_blob = mock.MagicMock()
-    mock_feature_blob.name = "study_area/name.npy"
+    mock_feature_blob.name = "study_area/chunk_1_2.npy"
     mock_feature_blob.bucket.name = "climateiq-study-area-feature-chunks"
 
     # Return the mock blobs.
@@ -94,7 +94,7 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
             {"source": "test", "type": "event"},
             data={
                 "bucket": "bucket",
-                "name": "study_area/name.tar",
+                "name": "study_area/chunk_1_2.tar",
                 "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             },
         )
@@ -104,9 +104,9 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
     mock_storage_client.assert_has_calls(
         [
             mock.call().bucket("bucket"),
-            mock.call().bucket().blob("study_area/name.tar"),
+            mock.call().bucket().blob("study_area/chunk_1_2.tar"),
             mock.call().bucket("climateiq-study-area-feature-chunks"),
-            mock.call().bucket().blob("study_area/name.npy"),
+            mock.call().bucket().blob("study_area/chunk_1_2.npy"),
         ]
     )
 
@@ -142,7 +142,7 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
             mock.call().collection("study_areas"),
             mock.call().collection().document("study_area"),
             mock.call().collection().document().collection("chunks"),
-            mock.call().collection().document().collection().document("name"),
+            mock.call().collection().document().collection().document("chunk_1_2"),
             mock.call()
             .collection()
             .document()
@@ -150,11 +150,14 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
             .document()
             .set(
                 {
-                    "archive_path": "gs://bucket/study_area/name.tar",
+                    "raw_path": "gs://bucket/study_area/chunk_1_2.tar",
                     "feature_matrix_path": (
-                        "gs://climateiq-study-area-feature-chunks/study_area/name.npy"
+                        "gs://climateiq-study-area-feature-chunks"
+                        "/study_area/chunk_1_2.npy"
                     ),
                     "error": firestore.DELETE_FIELD,
+                    "x_index": 1,
+                    "y_index": 2,
                 },
                 merge=True,
             ),
@@ -200,7 +203,7 @@ def test_build_feature_matrix_from_archive_empty_polygons():
     # Seek to the beginning so the file can be read.
     archive.seek(0)
 
-    feature_matrix, metadata = main._build_feature_matrix_from_archive(archive)
+    feature_matrix, metadata = main._build_flood_feature_matrix_from_archive(archive)
 
     numpy.testing.assert_array_equal(
         feature_matrix,
@@ -241,7 +244,7 @@ def test_build_feature_matrix_from_archive_elevation_file_missing():
     archive.seek(0)
 
     try:
-        main._build_feature_matrix_from_archive(archive)
+        main._build_flood_feature_matrix_from_archive(archive)
     except Exception as e:
         # Check expected error:
         assert isinstance(e, ValueError)
@@ -286,7 +289,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     ncfile.createDimension("south_north", 3)
 
     # In WPS/WRF files, 'Times'->dimension and 'Time'->variable
-    time = ncfile.createVariable("Times", "f8", ("Time",))
+    time = ncfile.createVariable("Times", "str", ("Time",))
     lat = ncfile.createVariable("lat", "float32", ("south_north",))
     lon = ncfile.createVariable("lon", "float32", ("west_east",))
     # Create dataset entries for all variables in mock
@@ -297,7 +300,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
         "NOT_REQUIRED_VAR", "float32", ("Time", "south_north", "west_east")
     )
 
-    time[:] = 100
+    time[0] = "2010-02-02_18:00:00"
     lat[:] = [200, 200, 200]
     lon[:] = [300, 300, 300]
     ncfile.variables["GHT"][:] = netcdf_array1
@@ -379,11 +382,12 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
             .set(
                 {
                     # For heat, we process each WPS netcdf file as a chunk (un-tar'ed)
-                    "archive_path": "gs://bucket/study_area/met_em.d03_test.nc",
+                    "raw_path": "gs://bucket/study_area/met_em.d03_test.nc",
                     "feature_matrix_path": (
                         "gs://climateiq-study-area-feature-chunks/study_area/"
-                        + "met_em.d03_test.npy"
+                        "met_em.d03_test.npy"
                     ),
+                    "time": datetime.datetime(2010, 2, 2, 18, 0, 0),
                     "error": firestore.DELETE_FIELD,
                 },
                 merge=True,
@@ -576,7 +580,7 @@ def test_build_feature_matrix_errors(
                 {"source": "test", "type": "event"},
                 data={
                     "bucket": "bucket",
-                    "name": "study_area/name.tar",
+                    "name": "study_area/chunk_1_2.tar",
                     "timeCreated": datetime.datetime.now(
                         datetime.timezone.utc
                     ).isoformat(),
@@ -595,7 +599,7 @@ def test_build_feature_matrix_errors(
             mock.call().collection("study_areas"),
             mock.call().collection().document("study_area"),
             mock.call().collection().document().collection("chunks"),
-            mock.call().collection().document().collection().document("name"),
+            mock.call().collection().document().collection().document("chunk_1_2"),
             mock.call()
             .collection()
             .document()
