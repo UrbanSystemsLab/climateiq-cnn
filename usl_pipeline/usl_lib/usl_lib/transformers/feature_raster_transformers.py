@@ -152,32 +152,31 @@ def rescale_feature_blob(
 
 
 def rescale_feature_matrix(
-    unscaled_feature_matrix: npt.NDArray,
+    feature_matrix: npt.NDArray,
     study_area_metadata: metastore.StudyArea,
 ) -> npt.NDArray:
     """Performs scaling of elevation data in the 0-th layer of feature matrix.
 
+    Note: This logic updates feature_matrix values in place so please don't rely on
+    the assumption that input matrix won't change.
+
     Args:
-        unscaled_feature_matrix: Unscaled feature matrix to perform scaling for.
+        feature_matrix: Feature matrix to perform scaling for.
         study_area_metadata: Study Area metadata containing min/max elevation values
             that are used for scaling.
 
     Returns:
         Scaled feature matrix.
     """
-    shape = unscaled_feature_matrix.shape
-    feature_layers = [
-        layer.reshape(shape[0], shape[1])
-        for layer in numpy.dsplit(unscaled_feature_matrix, shape[2])
-    ]
-    elevation_data = feature_layers[0]
-    presence_mask = feature_layers[1]
     elevation_min = study_area_metadata.elevation_min
     elevation_max = study_area_metadata.elevation_max
     if elevation_min is None or elevation_max is None:
         raise ValueError("Elevation min/max values are not set in study area metadata")
+
+    elevation_data = feature_matrix[:, :, 0]
+    presence_mask = feature_matrix[:, :, 1]
     elevation_data[presence_mask == 1] = (
         elevation_data[presence_mask == 1] - elevation_min
     ) / (elevation_max - elevation_min)
     elevation_data[presence_mask != 1] = -1
-    return numpy.dstack(feature_layers)
+    return feature_matrix
