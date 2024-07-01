@@ -177,10 +177,10 @@ class FloodModel:
     def _combine_histories(self, history_list):
         combined_history = {}
         for history in history_list:
-            for key, value in history.history.items():
+            for key, value in history.items():  # Changed from history.history.items()
                 if key not in combined_history:
                     combined_history[key] = []
-                combined_history[key].extend(value)
+                combined_history[key].extend(value if isinstance(value, list) else [value])
         return combined_history
 
     # def train(
