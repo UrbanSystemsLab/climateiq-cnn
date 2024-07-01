@@ -194,11 +194,10 @@ def test_early_stopping():
     validation loss stops improving before training is complete. Enabling early stopping
     with a patience of 1 epoch means that the model should stop training as soon as the
     validaton loss goes up.
-
-    Note that this test is nondeterministic and possibly flaky. But with a large enough
-    number of epochs, this test is expected to pass with high likelihood. Empirically,
-    the model usually stops after 3-4 epochs.
     """
+    # To ensure determinism, we set a random seed so the model is reproducible.
+    tf.keras.utils.set_random_seed(1)
+
     batch_size = 16
     height, width = 100, 100
     # Set a large number of epochs to increase the odds of triggering early stopping.
