@@ -266,7 +266,7 @@ def test_create_get_study_area_temporal_chunk(firestore_db):
 
     chunk = metastore.StudyAreaTemporalChunk(
         id_="chunk_name",
-        raw_path="gcs://raw_file.tar",
+        raw_path="gcs://raw_file.nc",
         feature_matrix_path="gcs://feautre_file.npy",
         time=datetime.datetime(2012, 12, 21, 0, 0, 0, tzinfo=datetime.timezone.utc),
     )
