@@ -21,10 +21,9 @@ class FloodModelParams:
     lstm_recurrent_dropout: float = 0.2
 
     # Keras parameters.
-    # While Keras models support (valid) string names, we choose to only accept
-    # the appropriate object instances for better type checking and to be
-    # explicit about hyperparameters (e.g., within the optimizer).
-    optimizer: tf.keras.Optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
+    # Keras models support both Optimizer objects and (valid) string names.
+    # It is the user's responsibility to pass in a valid optimizer value.
+    optimizer: tf.keras.Optimizer | str = "adam"
     epochs: int = 10
 
 
