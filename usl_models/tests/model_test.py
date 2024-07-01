@@ -2,7 +2,9 @@
 
 import dataclasses
 import pytest
+import tempfile
 
+import numpy as np
 import tensorflow as tf
 
 from usl_models.flood_ml import data_utils
@@ -218,3 +220,34 @@ def test_early_stopping():
     history = model.train([fake_data], early_stopping=1)
     # Check whether the model history indicates early stopping.
     assert len(history[0].history["val_loss"]) < params.epochs
+
+
+def test_model_checkpoint():
+    """Tests saving and loading a model checkpoint."""
+    batch_size = 16
+    height, width = 100, 100
+    params = model_params.test_model_params
+
+    model = flood_model.FloodModel(params, spatial_dims=(height, width))
+
+    storm_duration = 4
+    fake_input = fake_flood_input_batch(
+        batch_size,
+        height=height,
+        width=width,
+        storm_duration=storm_duration,
+        include_labels=True,
+    )
+    fake_data = flood_model.FloodModelData(storm_duration=storm_duration, **fake_input)
+    model.train([fake_data])
+
+    with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
+        model.save_model(tmp.name, overwrite=True)
+
+        new_model = flood_model.FloodModel(params, spatial_dims=(height, width))
+        new_model.load_model(tmp.name)
+
+    old_weights = model._model.get_weights()
+    new_weights = new_model._model.get_weights()
+    for old, new in zip(old_weights, new_weights):
+        np.testing.assert_array_equal(old, new)

@@ -1,6 +1,7 @@
 """Flood model definition."""
 
 import dataclasses
+import logging
 from typing import Optional, TypeAlias
 
 import tensorflow as tf
@@ -176,6 +177,27 @@ class FloodModel:
             model_history.append(history)
 
         return model_history
+
+    def load_model(self, filepath: str) -> None:
+        """Loads weights from an existing file.
+
+        Args:
+            filepath: Path to the weights file to load into the current model.
+        """
+        self._model.load_weights(filepath)
+        logging.info("Loaded model weights from %s", filepath)
+
+    def save_model(self, filepath: str, overwrite: bool = False) -> None:
+        """Saves a .keras model to the specified path.
+
+        Args:
+            filepath: Path to which to save the model. Must end in ".keras".
+            overwrite: If True and the specified filepath already exists, the model
+                will overwrite the existing file. Otherwise, the user will be prompted
+                on whether to overwrite any existing model.
+        """
+        self._model.save(filepath, overwrite=overwrite)
+        logging.info("Saved model to %s", filepath)
 
 
 ###############################################################################
