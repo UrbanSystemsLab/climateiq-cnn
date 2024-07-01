@@ -1,8 +1,6 @@
-from typing import List
 import os
 import glob
 from concurrent.futures import ThreadPoolExecutor
-from io import BytesIO
 import functools
 import re
 
@@ -82,21 +80,7 @@ class IncrementalTrainDataGenerator:
             print("Local Numpy Directory is not set, will create the directory.")
             os.makedirs(self.settings.LOCAL_NUMPY_DIR, exist_ok=True)
 
-    # def _download_npy_from_gcs_in_memory(self, gcs_url):
-    #     """
-    #     Download a numpy file from GCS and return it as a BytesIO object.
-    #     """
-    #     if gcs_url is None:
-    #         raise ValueError("GCS URL is empty.")
-    #     bucket_name, blob_name = gcs_url.replace("gs://", "").split("/", 1)
-    #     bucket = self.storage_client.bucket(bucket_name)
-    #     blob = bucket.blob(blob_name)
-    #     file_obj = BytesIO()
-    #     blob.download_to_file(file_obj)
-    #     file_obj.seek(0)
-    #     return file_obj
-
-    def download_numpy_files_in_dir(self, gcs_urls, dir_name, max_workers=5):
+    def download_numpy_files_in_dir(self, gcs_urls, dir_name, max_workers=25):
         """
         Download all numpy files from a directory in GCS to local storage.
         """
@@ -159,51 +143,6 @@ class IncrementalTrainDataGenerator:
                     print(f"Error downloading chunk numpy files: {e}")
         print("Finished downloading numpy files.")
 
-
-    def _generate_rainfall_duration(self, sim_name):
-        print("Get rainfall duration...")
-        rainfall_duration, rainfaill_dict = (
-            self.featurelabelchunksgenerator.get_rainfall_config(sim_name)
-        )
-        if rainfall_duration is None:
-            print(f"No rainfall duration found for sim {sim_name}.")
-            return None
-        return rainfall_duration
-
-    def _generate_temporal_tensors(self, sim_name):
-        """
-        Create temporal tensors from the temporal chunks.
-        """
-        print("Generating temporal tensors...")
-        # Get GCS URLs for npy chunks
-        temporal_chunks, sim_dict = (
-            self.featurelabelchunksgenerator.get_temporal_chunks(sim_name)
-        )
-
-        if temporal_chunks:
-            if self.settings.DEBUG == 2:
-                print(f"GCS URLs for sim {sim_name}: {temporal_chunks}")
-        
-        temporal_dir = sim_name + "_temporal"
-
-        if os.path.exists(temporal_dir):
-            print(f"Loading temporal tensors from {temporal_dir}...")
-            for file_name in os.listdir(temporal_dir):
-                if file_name.endswith(".npy"):
-                    file_path = os.path.join(temporal_dir, file_name)
-                    temporal_npy = np.load(file_path)
-                    temporal_npy_tiled = np.tile(temporal_npy, (6, 1)).T
-                    temporal_tensor = tf.convert_to_tensor(
-                        temporal_npy_tiled,
-                        dtype=tf.float32,
-                    )
-                    # Yield the same tensor infinitely
-                    while True:
-                        yield temporal_tensor
-        else:
-            print(f"No temporal chunks found for sim {sim_name}.")
-            return None
-
     def download_numpy_files(self, sim_names, chunktype):
         """
         Download numpy files for the given sim_names.
@@ -235,15 +174,53 @@ class IncrementalTrainDataGenerator:
                 for sim_name in sim_names:
                     self.download_numpy_files_in_dir(temporal_chunks, dir_name)
 
+    def _generate_rainfall_duration(self, sim_name):
+        print("Get rainfall duration...")
+        rainfall_duration, rainfaill_dict = (
+            self.featurelabelchunksgenerator.get_rainfall_config(sim_name)
+        )
+        if rainfall_duration is None:
+            print(f"No rainfall duration found for sim {sim_name}.")
+            return None
+        return rainfall_duration
+
+    def _generate_temporal_tensors(self, sim_name):
+        """
+        Create temporal tensors from the temporal chunks.
+        """
+        print("Generating temporal tensors...")
+        # Get GCS URLs for npy chunks
+        temporal_chunks, sim_dict = (
+            self.featurelabelchunksgenerator.get_temporal_chunks(sim_name)
+        )
+
+        if temporal_chunks:
+            if self.settings.DEBUG == 2:
+                print(f"GCS URLs for sim {sim_name}: {temporal_chunks}")
+
+        temporal_dir = sim_name + "_temporal"
+
+        if os.path.exists(temporal_dir):
+            print(f"Loading temporal tensors from {temporal_dir}...")
+            for file_name in os.listdir(temporal_dir):
+                if file_name.endswith(".npy"):
+                    file_path = os.path.join(temporal_dir, file_name)
+                    temporal_npy = np.load(file_path)
+                    temporal_npy_tiled = np.tile(temporal_npy, (6, 1)).T
+                    temporal_tensor = tf.convert_to_tensor(
+                        temporal_npy_tiled,
+                        dtype=tf.float32,
+                    )
+                    # Yield the same tensor infinitely
+                    while True:
+                        yield temporal_tensor
+        else:
+            print(f"No temporal chunks found for sim {sim_name}.")
+            return None
+
     def rainfall_duration_generator(self, sim_name):
         print(f"Generating rainfall duration for sim_name: {sim_name}")
         return self._generate_rainfall_duration(sim_name)
-
-    # # create a dummy dataset for Spatiotemporal tensors
-    # def _create_dummy_dataset(self, input_shape):
-    #     # Create a dummy dataset with the correct shape
-    #     # Adjust the shape and dtype according to your needs
-    #     return tf.data.Dataset.from_tensor_slices(tf.zeros(input_shape))
 
     # create a dummy *generator* for Spatiotemporal tensors
     def _generate_spatiotemporal_tensor(self, input_shape):
@@ -285,8 +262,12 @@ class IncrementalTrainDataGenerator:
             [1000, 1000, rainfall_duration],
         )
         if not self.common_indices:
-            feature_chunks, _ = self.featurelabelchunksgenerator.get_feature_chunks(sim_name)
-            label_chunks, _ = self.featurelabelchunksgenerator.get_label_chunks(sim_name)
+            feature_chunks, _ = self.featurelabelchunksgenerator.get_feature_chunks(
+                sim_name
+            )
+            label_chunks, _ = self.featurelabelchunksgenerator.get_label_chunks(
+                sim_name
+            )
 
             if not feature_chunks or not label_chunks:
                 print(f"No chunks found for sim {sim_name}.")
@@ -305,29 +286,39 @@ class IncrementalTrainDataGenerator:
             self.label_dict = {self._extract_index(f): f for f in label_chunks}
 
             # Ensure both dictionaries have the same keys (i.e., they are matched)
-            self.common_indices = sorted(set(self.feature_dict.keys()).intersection(set(self.label_dict.keys())))
+            self.common_indices = sorted(
+                set(self.feature_dict.keys()).intersection(set(self.label_dict.keys()))
+            )
             print("Length of common indices:", len(self.common_indices))
 
-            if len(self.common_indices) != len(feature_chunks) or len(self.common_indices) != len(label_chunks):
-                raise ValueError("Number of matching feature chunks and label chunks do not match.")
+            if len(self.common_indices) != len(feature_chunks) or len(
+                self.common_indices
+            ) != len(label_chunks):
+                raise ValueError(
+                    "Number of matching feature chunks and label chunks do not match."
+                )
 
-        # Generate feature and label tensors in matched pairs
+            # Generate feature and label tensors in matched pairs
             for _ in range(len(self.common_indices)):
                 # Get current index
                 if self.current_index >= len(self.common_indices):
-                    self.current_index = 0  # Reset index if it exceeds the number of available pairs
+                    self.current_index = (
+                        0  # Reset index if it exceeds the number of available pairs
+                    )
 
                 index = self.common_indices[self.current_index]
                 self.current_index += 1
 
-                print(f"Using index: {index} (current_index: {self.current_index - 1})")  # Print the current index being used
+                print(
+                    f"\n Using index: {index} (current_index: {self.current_index - 1})"
+                )  # Print the current index being used
                 feature_dir = sim_name + "_feature"
                 label_dir = sim_name + "_label"
 
                 feature_path = os.path.join(feature_dir, self.feature_dict[index])
                 label_path = os.path.join(label_dir, self.label_dict[index])
-                
-                print(f"Feature file: {self.feature_dict[index]}")
+
+                print(f"\n Feature file: {self.feature_dict[index]}")
                 print(f"Label file: {self.label_dict[index]}")
 
                 # Load and yield feature and label tensors in matched pairs
@@ -381,7 +372,7 @@ class IncrementalTrainDataGenerator:
             for (geo, labels), temp, spatemp in zip(
                 feature_label_generator,
                 temporal_tensor_generator,
-                spatiotemporal_tensor_generator
+                spatiotemporal_tensor_generator,
             ):
                 yield (
                     {

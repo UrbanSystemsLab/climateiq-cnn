@@ -129,6 +129,59 @@ def simple_training(
     return model_history
 
 
+def full_training(
+    sim_names,
+    model_dir="gs://usl_models_bucket/flood_model",
+    batch_size=1,
+    lstm_units=128,
+    lstm_kernel_size=3,
+    lstm_dropout=0.2,
+    lstm_recurrent_dropout=0.2,
+    epochs=1,
+):
+
+    # Create FloodModelParams from hyperparameters
+    model_params = FloodModelParams(
+        batch_size=batch_size,
+        lstm_units=lstm_units,
+        lstm_kernel_size=lstm_kernel_size,
+        lstm_dropout=lstm_dropout,
+        lstm_recurrent_dropout=lstm_recurrent_dropout,
+        epochs=epochs,
+    )
+    model_history = []
+
+    # Instantiate FloodModel class
+    model = FloodModel(model_params)
+    # model = model.compile(tf.keras.optimizers.Adam(learning_rate=learning_rate))
+
+    sim_names = ["Manhattan-config_v1%2FRainfall_Data_2.txt"]
+
+    generator = IncrementalTrainDataGenerator(
+        batch_size=batch_size,
+    )
+
+    # Override batch size for testing
+    batch_size = 5
+
+    for sim_name in sim_names:
+        dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
+        print("BEFORE BATCH: Dataset element spec:", dataset.element_spec)
+
+        dataset = dataset.batch(batch_size)
+
+        print("AFTER BATCH: Dataset element spec:", dataset.element_spec)
+        print(type(dataset))
+        print(storm_duration)
+
+    print("Dataset generation completed, will hand over to model training..")
+    print("\n")
+    print("#######  Training model ##########")
+    model_history = model.train(dataset, storm_duration)
+    print("Training complete")
+    return model_history
+
+
 def check_generator_tensor_shape(generator):
     """
     Check the shape of the tensors returned by the generator.
@@ -341,9 +394,6 @@ def main():
     # for history in model_histories:
     #     print(history)
 
-    generator = IncrementalTrainDataGenerator(
-        batch_size=batch_size,
-    )
     class_label = GenerateFeatureLabelChunks()
 
     sim_names = [
@@ -362,9 +412,13 @@ def main():
         "Manhattan-config_v1%2FRainfall_Data_24.txt"    
     ]
     
-    download_sims_locally(class_label, generator, sim_names)
+    # download_sims_locally(class_label, generator, sim_names)
+
+    model_histories = full_training(sim_names)
+    for history in model_histories:
+        print(history)
 
 
-
+# Run the main function
 if __name__ == "__main__":
     main()
