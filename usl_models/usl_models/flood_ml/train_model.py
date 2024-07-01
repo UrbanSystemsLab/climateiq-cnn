@@ -130,7 +130,7 @@ def simple_training(
 
 
 def full_training(
-    sim_names,
+    sim_names,generator,
     model_dir="gs://usl_models_bucket/flood_model",
     batch_size=1,
     lstm_units=128,
@@ -155,12 +155,6 @@ def full_training(
     model = FloodModel(model_params)
     # model = model.compile(tf.keras.optimizers.Adam(learning_rate=learning_rate))
 
-    sim_names = ["Manhattan-config_v1%2FRainfall_Data_2.txt"]
-
-    generator = IncrementalTrainDataGenerator(
-        batch_size=batch_size,
-    )
-
     # Override batch size for testing
     batch_size = 5
 
@@ -169,17 +163,21 @@ def full_training(
         print("BEFORE BATCH: Dataset element spec:", dataset.element_spec)
 
         dataset = dataset.batch(batch_size)
+        
+        # Add prefetching here
+        dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
 
         print("AFTER BATCH: Dataset element spec:", dataset.element_spec)
         print(type(dataset))
         print(storm_duration)
-
-    print("Dataset generation completed, will hand over to model training..")
-    print("\n")
-    print("#######  Training model ##########")
-    model_history = model.train(dataset, storm_duration)
-    print("Training complete")
-    return model_history
+        
+        print("Dataset generation completed, will hand over to model training..")
+        print("\n")
+        print("#######  Training the model ##########")
+        model_history = model.train(dataset, storm_duration)
+        print("Training complete")
+        
+        return model_history
 
 
 def check_generator_tensor_shape(generator):
@@ -414,7 +412,7 @@ def main():
     
     # download_sims_locally(class_label, generator, sim_names)
 
-    model_histories = full_training(sim_names)
+    model_histories = full_training(sim_names, generator)
     for history in model_histories:
         print(history)
 
