@@ -155,11 +155,13 @@ def full_training(
 
     # Function to get dataset for each simulation
     def get_sim_dataset(sim_name):
-        dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
+        # Convert tensor to string
+        sim_name_str = sim_name.numpy().decode('utf-8')
+        dataset, storm_duration = generator.get_dataset_from_tensors(sim_name_str)
         return dataset.map(lambda x, y: ((x, y), storm_duration))
 
     # Create the full dataset
-    full_dataset = sim_dataset.flat_map(get_sim_dataset)
+    full_dataset = sim_dataset.flat_map(lambda x: tf.data.Dataset.from_tensor_slices(get_sim_dataset(x)))
     
     # Shuffle and batch the dataset
     full_dataset = full_dataset.shuffle(buffer_size=1000)
