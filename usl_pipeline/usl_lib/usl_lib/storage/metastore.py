@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import enum
 import math
 from typing import Iterable, Optional
@@ -169,21 +170,21 @@ class StudyArea:
 
 @dataclasses.dataclass(slots=True)
 class StudyAreaChunk:
-    """A sub-area chunk of a larger study area.
+    """A chunk of a data within a larger study area.
 
     Attributes:
-        id_: An ID unique within the study area for the chunk.
-        archive_path: GCS location of an archive containing files describing the
-            geography (e.g. tiff & shape files.)
-        feature_matrix_path: GCS location of the derived feature matrix used for model
-            training and prediction
+        id_: An ID unique within the study are for the chunk.
+        raw_path: GCS location containing the original, raw files describing the
+            geography (e.g. tiff & shape files, NetCDF files.)
+        feature_matrix_path: Optional GCS location of the derived feature matrix used
+            for model training and prediction
         needs_scaling: If true, means that unscaled version of feature matrix should be
-            scaled before it can be used.
+            scaled before it can be used (default is false).
         error: Any errors encountered while processing the chunk.
     """
 
     id_: str
-    archive_path: Optional[str] = None
+    raw_path: Optional[str] = None
     feature_matrix_path: Optional[str] = None
     needs_scaling: Optional[bool] = None
     error: Optional[str] = None
@@ -202,12 +203,29 @@ class StudyAreaChunk:
             if value is not None:
                 as_dict[field] = value
 
-        (
+        self.get_ref(db, study_area_name, self.id_).set(as_dict, merge=True)
+
+    @classmethod
+    def get(
+        cls, db: firestore.Client, study_area_name: str, chunk_name: str
+    ) -> "StudyAreaChunk":
+        """Retrieve the chunk with the given name within the given study area."""
+        ref = cls.get_ref(db, study_area_name, chunk_name).get()
+        if not ref.exists:
+            raise ValueError(f'No such chunk {chunk_name} within {study_area_name}"')
+
+        return cls(id_=chunk_name, **ref.to_dict())
+
+    @staticmethod
+    def get_ref(
+        db: firestore.Client, study_area_name: str, chunk_name: str
+    ) -> firestore.DocumentReference:
+        """Retrieve a reference for the chunk with the given name and study area."""
+        return (
             db.collection(STUDY_AREAS)
             .document(study_area_name)
             .collection(STUDY_AREA_CHUNKS)
-            .document(self.id_)
-            .set(as_dict, merge=True)
+            .document(chunk_name)
         )
 
     @classmethod
@@ -225,20 +243,12 @@ class StudyAreaChunk:
           A StudyAreaChunk object representing the database's contents if it exists, or
           None otherwise.
         """
-        ref = (
-            db.collection(STUDY_AREAS)
-            .document(study_area_name)
-            .collection(STUDY_AREA_CHUNKS)
-            .document(chunk_name)
-            .get()
-        )
-        if not ref.exists:
-            return None
+        ref = cls.get_ref(db, study_area_name, chunk_name).get()
+        return None if not ref.exists else cls(**ref.to_dict())
 
-        return cls(**ref.to_dict())
-
-    @staticmethod
+    @classmethod
     def update_scaling_done(
+        cls,
         db: firestore.Client,
         study_area_name: str,
         chunk_name: str,
@@ -252,14 +262,33 @@ class StudyAreaChunk:
             chunk_name: Name of chunk to look up chunk metadata.
             scaled_feature_matrix_path: New GCS path pointing to scaled feature matrix.
         """
-        db.collection(STUDY_AREAS).document(study_area_name).collection(
-            STUDY_AREA_CHUNKS
-        ).document(chunk_name).update(
-            {
-                "needs_scaling": False,
-                "feature_matrix_path": scaled_feature_matrix_path,
-            },
+        cls.get_ref(db, study_area_name, chunk_name).update(
+            {"needs_scaling": False, "feature_matrix_path": scaled_feature_matrix_path},
         )
+
+
+@dataclasses.dataclass(slots=True)
+class StudyAreaSpatialChunk(StudyAreaChunk):
+    """A sub-area chunk of a larger study area.
+
+    Attributes:
+        x_index: The x index of the chunk relative to other chunks in the study area.
+        y_index: The y index of the chunk relative to other chunks in the study area.
+    """
+
+    x_index: Optional[int] = None
+    y_index: Optional[int] = None
+
+
+@dataclasses.dataclass(slots=True)
+class StudyAreaTemporalChunk(StudyAreaChunk):
+    """A sub-area chunk of a larger study area.
+
+    Attributes:
+        time: The timestep represented by the data in this chunk.
+    """
+
+    time: Optional[datetime.datetime] = None
 
 
 @firestore.transactional

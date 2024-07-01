@@ -69,35 +69,6 @@ def test_study_area_set():
     )
 
 
-def test_study_area_chunk_merge():
-    mock_db = mock.MagicMock()
-    chunk = metastore.StudyAreaChunk(
-        id_="id",
-        archive_path="archive",
-        feature_matrix_path="matrix",
-    )
-    chunk.merge(mock_db, "study_area_name")
-    mock_db.assert_has_calls(
-        [
-            mock.call.collection("study_areas"),
-            mock.call.collection().document("study_area_name"),
-            mock.call.collection().document().collection("chunks"),
-            mock.call.collection().document().collection().document("id"),
-            mock.call.collection()
-            .document()
-            .collection()
-            .document()
-            .set(
-                {
-                    "archive_path": "archive",
-                    "feature_matrix_path": "matrix",
-                },
-                merge=True,
-            ),
-        ]
-    )
-
-
 def test_study_area_as_header():
     """Ensures the StudyArea as_header method works."""
     study_area = metastore.StudyArea(
@@ -159,14 +130,14 @@ def test_study_area_chunk_get_if_exists():
     chunk_doc_mock.exists = True
     chunk_doc_mock.to_dict.return_value = {
         "id_": "chunk_1",
-        "archive_path": "a/b",
+        "raw_path": "a/b",
         "needs_scaling": True,
     }
 
     chunk = metastore.StudyAreaChunk.get_if_exists(mock_db, "TestStudyArea", "chunk_1")
     assert chunk == metastore.StudyAreaChunk(
         id_="chunk_1",
-        archive_path="a/b",
+        raw_path="a/b",
         feature_matrix_path=None,
         needs_scaling=True,
     )
@@ -176,6 +147,7 @@ def test_study_area_chunk_get_if_exists():
             mock.call.collection().document("TestStudyArea"),
             mock.call.collection().document().collection("chunks"),
             mock.call.collection().document().collection().document("chunk_1"),
+            mock.call.collection().document().collection().document().get(),
         ]
     )
 
