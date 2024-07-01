@@ -156,16 +156,16 @@ def full_training(
     # model = model.compile(tf.keras.optimizers.Adam(learning_rate=learning_rate))
 
     # Override batch size for testing
-    batch_size = 5
+    batch_size = 1
 
     for sim_name in sim_names:
         dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
         print("BEFORE BATCH: Dataset element spec:", dataset.element_spec)
 
-        dataset = dataset.batch(batch_size)
+        # dataset = dataset.batch(batch_size)
         
-        # Add prefetching here
-        dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+        # # Add prefetching here
+        # dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
 
         print("AFTER BATCH: Dataset element spec:", dataset.element_spec)
         print(type(dataset))
@@ -173,11 +173,12 @@ def full_training(
         
         print("Dataset generation completed, will hand over to model training..")
         print("\n")
-        print("#######  Training the model ##########")
-        model_history = model.train(dataset, storm_duration)
-        print("Training complete")
-        
-        return model_history
+
+    print("#######  Training the model ##########")
+    model_history = model.train(dataset, storm_duration)
+    print("Training complete")
+    
+    return model_history
 
 
 def check_generator_tensor_shape(generator):
