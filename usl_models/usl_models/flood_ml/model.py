@@ -137,50 +137,39 @@ class FloodModel:
     #     return history
 
     def _model_fit(self, features, labels, storm_duration):
+        # convert storm_duration to int
+        storm_duration = int(storm_duration)
+
         self._model.set_n_predictions(storm_duration)
 
+        # Fit the model for this batch
         history = self._model.fit(
             features,
             labels,
-            epochs=1,
-            verbose=1,
+            epochs=self._model_params.epochs,
         )
         
         return history
 
-    def train(self, dataset: tf.data.Dataset, num_sims: int):
-        model_history = []
-        
-        for epoch in range(self._model_params.epochs):
-            print(f"Epoch {epoch + 1}/{self._model_params.epochs}")
-            epoch_history = []
-            sim_count = 0
-
-            for (features, labels), storm_duration in dataset:
-                print(f"Processing simulation {sim_count + 1}/{num_sims}")
-                
-                history = self._model_fit(features, labels, storm_duration)
-                epoch_history.append(history)
-
-                sim_count += 1
-                if sim_count >= num_sims:
-                    break
-
-            # Combine histories for this epoch
-            combined_epoch_history = self._combine_histories(epoch_history)
-            model_history.append(combined_epoch_history)
-
-        # Combine all epoch histories
-        final_history = self._combine_histories(model_history)
-        return final_history
-
     def _combine_histories(self, history_list):
         combined_history = {}
         for history in history_list:
-            for key, value in history.items():  # Changed from history.history.items()
+            for key, value in history.history.items():
                 if key not in combined_history:
                     combined_history[key] = []
-                combined_history[key].extend(value if isinstance(value, list) else [value])
+                combined_history[key].extend(value)
+        return combined_history
+
+    def train(self, dataset: tf.data.Dataset):
+        model_history = []
+        for (features, labels), storm_duration in dataset:
+            history = self._model_fit(
+                features, labels, storm_duration=storm_duration
+            )
+            model_history.append(history)
+        
+        # Combine all histories after processing all batches
+        combined_history = self._combine_histories(model_history)
         return combined_history
 
     # def train(
