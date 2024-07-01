@@ -77,13 +77,15 @@ class FloodModel:
             expected_label_shape[1] = data.storm_duration
 
             # Labels must match the storm duration.
-            assert first_label.shape[1] == data.storm_duration, (  # Compare the shape of the first label tensor
+            assert (
+                first_label.shape[1] == data.storm_duration
+            ), (  # Compare the shape of the first label tensor
                 "Provided labels are inconsistent with storm duration. "
                 f"Labels are expected to have shape {expected_label_shape}. "
                 # f"Actual shape: {data.labels.shape}."
                 f"Actual shape: {first_label.shape}."  # Use first_label.shape
             )
-        
+
         # Check whether the temporal data is already windowed. If it is, checks
         # the expected shape. Otherwise, create the window view.
         # Updates to support tf.dataset
@@ -135,26 +137,44 @@ class FloodModel:
     #     return history
 
     def _model_fit(self, dataset: tf.data.Dataset, storm_duration):
+        history_list = []
 
-        # convert storm_duration to int
-        storm_duration = int(storm_duration)
+        for (x, y), storm_duration in dataset:
+            # convert storm_duration to int
+            storm_duration = int(storm_duration)
 
-        self._model.set_n_predictions(storm_duration)
+            self._model.set_n_predictions(storm_duration)
 
-        # # Prefetch for performance
-        # combined_dataset = combined_dataset.prefetch(tf.data.AUTOTUNE)
+            # Fit the model for this batch
+            history = self._model.fit(
+                x=x,
+                y=y,
+                epochs=self._model_params.epochs,
+            )
+            history_list.append(history)
 
-        history = self._model.fit(
-            dataset,
-            epochs=1,
-        )
-        return history
-    
-    def train(self, data: tf.data.Dataset, storm_duration):
+        # Combine histories if needed
+        combined_history = self._combine_histories(history_list)
+        
+        return combined_history
+
+    def _combine_histories(self, history_list):
+        combined_history = {}
+        for history in history_list:
+            for key, value in history.history.items():
+                if key not in combined_history:
+                    combined_history[key] = []
+                combined_history[key].extend(value)
+        return combined_history
+
+    def train(self, dataset: tf.data.Dataset):
         model_history = []
-        history = self._model_fit(data, storm_duration)
-        model_history.append(history)
-        return model_history
+        for (features, labels), storm_duration in dataset:
+            history = self._model_fit(
+                x=features, y=labels, storm_duration=storm_duration
+            )
+            model_history.append(history)
+            return model_history
 
     # def train(
     #     self,

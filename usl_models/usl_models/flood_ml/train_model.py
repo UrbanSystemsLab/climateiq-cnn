@@ -154,23 +154,24 @@ def full_training(
     sim_names_len = len(sim_names)
     print(f"Number of simulations: {sim_names_len}")
 
-    # Create a dataset that yields data from all simulations
     def data_generator():
         for sim_name in sim_names:
             dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
-            for element in dataset:
-                yield element, storm_duration
+            for features, labels in dataset:
+                yield (features, labels), storm_duration
 
     # Create a tf.data.Dataset from the generator
     full_dataset = tf.data.Dataset.from_generator(
         data_generator,
         output_signature=(
-            {
-                'geospatial': tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
-                'temporal': tf.TensorSpec(shape=(864, constants.M_RAINFALL), dtype=tf.float32),
-                'spatiotemporal': tf.TensorSpec(shape=(1000, 1000, 1), dtype=tf.float32)
-            },
-            tf.TensorSpec(shape=(None, 1000, 1000), dtype=tf.float32),
+            (
+                {
+                    'geospatial': tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
+                    'temporal': tf.TensorSpec(shape=(864, constants.M_RAINFALL), dtype=tf.float32),
+                    'spatiotemporal': tf.TensorSpec(shape=(1000, 1000, 1), dtype=tf.float32)
+                },
+                tf.TensorSpec(shape=(None, 1000, 1000), dtype=tf.float32)
+            ),
             tf.TensorSpec(shape=(), dtype=tf.int32)  # for storm_duration
         )
     )
