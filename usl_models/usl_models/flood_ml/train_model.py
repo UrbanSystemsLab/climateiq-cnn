@@ -147,31 +147,44 @@ def full_training(
         lstm_recurrent_dropout=lstm_recurrent_dropout,
         epochs=epochs,
     )
+    model_history = []
 
     model = FloodModel(model_params)
 
-    # Create a dataset of simulation names
-    sim_dataset = tf.data.Dataset.from_tensor_slices(sim_names)
+    sim_names_len = len(sim_names)
+    print(f"Number of simulations: {sim_names_len}")
 
-    # Function to get dataset for each simulation
-    def get_sim_dataset(sim_name):
-        # Convert tensor to string
-        sim_name_str = sim_name.numpy().decode('utf-8')
-        dataset, storm_duration = generator.get_dataset_from_tensors(sim_name_str)
-        return dataset.map(lambda x, y: ((x, y), storm_duration))
+    def data_generator():
+        for sim_name in sim_names:
+            dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
+            for features, labels in dataset:
+                yield (features, labels), storm_duration
 
-    # Create the full dataset
-    full_dataset = sim_dataset.flat_map(lambda x: tf.data.Dataset.from_tensor_slices(get_sim_dataset(x)))
-    
-    # Shuffle and batch the dataset
-    full_dataset = full_dataset.shuffle(buffer_size=1000)
+    # Create a tf.data.Dataset from the generator
+    full_dataset = tf.data.Dataset.from_generator(
+        data_generator,
+        output_signature=(
+            (
+                {
+                    'geospatial': tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
+                    'temporal': tf.TensorSpec(shape=(864, constants.M_RAINFALL), dtype=tf.float32),
+                    'spatiotemporal': tf.TensorSpec(shape=(1000, 1000, 1), dtype=tf.float32)
+                },
+                tf.TensorSpec(shape=(None, 1000, 1000), dtype=tf.float32)
+            ),
+            tf.TensorSpec(shape=(), dtype=tf.int32)  # for storm_duration
+        )
+    )
+
+    # Apply batching, shuffling, and prefetching
     full_dataset = full_dataset.batch(batch_size)
+    full_dataset = full_dataset.shuffle(buffer_size=1000)
     full_dataset = full_dataset.prefetch(tf.data.AUTOTUNE)
 
     print("Dataset preparation completed, starting model training...")
 
     print("#######  Training the model ##########")
-    model_history = model.train(full_dataset, len(sim_names))
+    model_history = model.train(full_dataset)
     print("Training complete")
     
     return model_history
