@@ -721,9 +721,9 @@ def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray
         scaling_config is not None
         and scaling_config.get("type") == wps_data.ScalingType.GLOBAL
     ):
-        min = scaling_config.get("min")
-        max = scaling_config.get("max")
-        feature_values = _apply_minmax_scaler(feature_values, min, max)
+        scaling_min = scaling_config.get("min")
+        scaling_max = scaling_config.get("max")
+        feature_values = _apply_minmax_scaler(feature_values, scaling_min, scaling_max)
 
     return feature_values
 
