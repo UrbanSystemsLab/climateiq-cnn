@@ -44,7 +44,7 @@ kiwisolver==1.4.5
 MarkupSafe==2.1.5
 matplotlib==3.8.4
 netCDF4==1.6.5
-numpy==1.26.4
+numpy==1.25.2
 packaging==23.2
 pandas==2.2.2
 pillow==10.4.0
