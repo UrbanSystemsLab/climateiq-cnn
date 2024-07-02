@@ -5,6 +5,7 @@ import numpy.typing as npt
 from shapely import geometry
 
 from usl_lib.shared import geo_data
+from usl_lib.storage import metastore
 from usl_lib.transformers import polygon_transformers, soil_classes_transformers
 
 # Default soil class value that is recognized a non-green area.
@@ -127,3 +128,29 @@ def transform_to_feature_raster_layers(
             infiltration_raster_layers,
         )
     )
+
+
+def rescale_feature_matrix(
+    feature_matrix: npt.NDArray,
+    study_area_metadata: metastore.StudyArea,
+) -> None:
+    """Performs scaling of elevation data in the 0-th layer of feature matrix.
+
+    Note: This logic updates feature_matrix values in place.
+
+    Args:
+        feature_matrix: Feature matrix to perform scaling for.
+        study_area_metadata: Study Area metadata containing min/max elevation values
+            that are used for scaling.
+    """
+    elevation_min = study_area_metadata.elevation_min
+    elevation_max = study_area_metadata.elevation_max
+    if elevation_min is None or elevation_max is None:
+        raise ValueError("Elevation min/max values are not set in study area metadata")
+
+    elevation_data = feature_matrix[:, :, 0]
+    presence_mask = feature_matrix[:, :, 1]
+    elevation_data[presence_mask == 1] = (
+        elevation_data[presence_mask == 1] - elevation_min
+    ) / (elevation_max - elevation_min)
+    elevation_data[presence_mask != 1] = -1
