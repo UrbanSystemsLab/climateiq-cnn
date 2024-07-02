@@ -404,15 +404,6 @@ class SimulationLabelChunk:
     """
 
     gcs_uri: str
-    x_index: int
-    y_index: int
-
-    def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
-        """Adds the label chunk to the given simulation."""
-        id_ = f"{self.x_index}_{self.y_index}"
-        Simulation.get_ref(db, study_area_name, config_path).collection(
-            SIMULATION_LABEL_CHUNKS
-        ).document(id_).set(dataclasses.asdict(self))
 
     @classmethod
     def list_chunks(
@@ -432,3 +423,40 @@ class SimulationLabelChunk:
         )
         for chunk_ref in ref.list_documents():
             yield cls(**chunk_ref.get().to_dict())
+
+@dataclasses.dataclass(slots=True)
+class SimulationLabelSpatialChunk(SimulationLabelChunk):
+    """A sub-area chunk of a larger study area.
+
+    Attributes:
+        x_index: The x index of the chunk relative to other chunks in the study area.
+        y_index: The y index of the chunk relative to other chunks in the study area.
+    """
+
+    x_index: Optional[int] = None
+    y_index: Optional[int] = None
+
+    def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
+        """Adds the label chunk to the given simulation."""
+        id_ = f"{self.x_index}_{self.y_index}"
+        Simulation.get_ref(db, study_area_name, config_path).collection(
+            SIMULATION_LABEL_CHUNKS
+        ).document(id_).set(dataclasses.asdict(self))
+
+@dataclasses.dataclass(slots=True)
+class SimulationLabelTemporalChunk(SimulationLabelChunk):
+    """A sub-area chunk of a larger study area.
+
+    Attributes:
+        time: The timestep represented by the data in this chunk.
+    """
+
+    time: Optional[datetime.datetime] = None
+
+    def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
+        """Adds the label chunk to the given simulation."""
+        Simulation.get_ref(db, study_area_name, config_path).collection(
+                SIMULATION_LABEL_CHUNKS
+            ).document(str(self.time)).set(dataclasses.asdict(self))
+
+    
