@@ -1,4 +1,3 @@
-import typing
 from typing import Optional, Tuple
 
 import numpy
@@ -129,24 +128,6 @@ def transform_to_feature_raster_layers(
             infiltration_raster_layers,
         )
     )
-
-
-def rescale_feature_blob(
-    feature_matrix_input_fd: typing.BinaryIO,
-    study_area_metadata: metastore.StudyArea,
-    feature_matrix_output_fd: typing.BinaryIO,
-) -> None:
-    """Performs scaling of elevation data in the 0-th layer of feature matrix.
-
-    Args:
-        feature_matrix_input_fd: Input stream to read unscaled feature matrix from.
-        study_area_metadata: Study Area metadata containing min/max elevation values
-            that are used for scaling.
-        feature_matrix_output_fd: Output stream to write scaled results to.
-    """
-    feature_matrix = numpy.load(feature_matrix_input_fd)
-    rescale_feature_matrix(feature_matrix, study_area_metadata)
-    numpy.save(feature_matrix_output_fd, feature_matrix)
 
 
 def rescale_feature_matrix(

@@ -908,17 +908,23 @@ def _write_as_npy(blob: storage.Blob, array: NDArray) -> None:
 def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path: str):
     """Creates scaled version for every chunk file in the storage bucket parent folder.
 
-    Output files with scaled feature matrices will be placed to the same folder where
-    unscaled files (following "chunk_*" name pattern) are stored but will get "scaled_"
-    prefix. Rescaling only starts when metadata of study area (corresponding to the
-    parent folder name) contains chunks counters giving exactly the same number of
-    chunks as are currently stored in the bucket folder. This should happen when the
-    last feature chunk is stored.
+    Scaling is done in two stages: (1) appearance of each unscaled feature matrix file
+    (with name following "chunk_{x}_{y}.npy" pattern) triggers the logic checking if all
+    the chunks are processed and min/max elevation values aggregated in study are
+    metadata are updated to their final values; if yes, empty trigger files (with names
+    following "chunk_{x}_{y}.scale_trigger" pattern) are placed next to each unscaled
+    feature matrix file in order to trigger separate processing for each matrix; then
+    (2) each trigger file triggers parallel run of this cloud function scaling unscaled
+    feature matrix file producing scaled version of it as output (file name follows
+    "scaled_chunk_{x}_{y}.npy" pattern); metadata of a given chunk is updated to reflect
+    that scaling is done; unscaled input file together with trigger file for this matrix
+    are deleted at the end.
 
     Args:
         feature_bucket: Storage bucket with feature matrices.
         blob_path: Path pointing to one of unscaled feature matrix files with the name
-            following the "chunk_*" pattern. Other files are ignored.
+            following the "chunk_*.npy" pattern or one of trigger files with the name
+            following the "chunk_*.scale_trigger" pattern. Other files are ignored.
     """
     study_area_name, chunk_name = _parse_chunk_path(blob_path)
     # Let's look up chunk metadata and check if scaling is needed
@@ -950,10 +956,14 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
 
         chunk_count = study_area.chunk_x_count * study_area.chunk_y_count
         if chunk_count != len(feature_blobs):
-            raise ValueError(
-                f"[Feature Rescaler] Study area {study_area_name} has chunk counts"
-                + f" in metadata ({chunk_count}) different from number of stored"
-                + f" feature chunks ({len(feature_blobs)})"
+            # Not all the chunks are ready, so we're just waiting for the rest of the
+            # files to be written.
+            logging.info(
+                "[Feature Rescaler] Study area %s has chunk counts in metadata (%s)"
+                + " different from number of stored feature chunks (%s)",
+                study_area_name,
+                chunk_count,
+                len(feature_blobs),
             )
 
         # We're at the final step when all unscaled feature matrices are ready
@@ -970,9 +980,20 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
             chunk_name,
         )
         feature_blob = feature_bucket.blob(f"{study_area_name}/{chunk_name}.npy")
+        try:
+            with feature_blob.open("rb") as feature_matrix_input_fd:
+                feature_matrix = numpy.load(feature_matrix_input_fd)
+        except exceptions.NotFound:
+            # Another invocation of this function has rescaled the feature matrix while
+            # this invocation was running.
+            logging.info("Feature matrix scaling in process, halting.")
+            return
+
+        feature_raster_transformers.rescale_feature_matrix(feature_matrix, study_area)
         output_blob = feature_bucket.blob(f"{study_area_name}/scaled_{chunk_name}.npy")
-        with feature_blob.open("rb") as in_fd, output_blob.open("wb") as out_fd:
-            feature_raster_transformers.rescale_feature_blob(in_fd, study_area, out_fd)
+        with output_blob.open("wb") as feature_matrix_output_fd:
+            numpy.save(feature_matrix_output_fd, feature_matrix)
+
         scaled_feature_matrix_path = (
             f"gs://{feature_bucket.name}/{study_area_name}/scaled_{chunk_name}.npy"
         )
