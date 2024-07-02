@@ -176,14 +176,17 @@ class StudyAreaChunk:
         id_: An ID unique within the study are for the chunk.
         raw_path: GCS location containing the original, raw files describing the
             geography (e.g. tiff & shape files, NetCDF files.)
-        feature_matrix_path: GCS location of the derived feature matrix used for model
-            training and prediction.
+        feature_matrix_path: Optional GCS location of the derived feature matrix used
+            for model training and prediction
+        needs_scaling: If true, means that unscaled version of feature matrix should be
+            scaled before it can be used (default is false).
         error: Any errors encountered while processing the chunk.
     """
 
     id_: str
     raw_path: Optional[str] = None
     feature_matrix_path: Optional[str] = None
+    needs_scaling: Optional[bool] = None
     error: Optional[str] = None
 
     def merge(self, db: firestore.Client, study_area_name: str) -> None:
@@ -223,6 +226,44 @@ class StudyAreaChunk:
             .document(study_area_name)
             .collection(STUDY_AREA_CHUNKS)
             .document(chunk_name)
+        )
+
+    @classmethod
+    def get_if_exists(
+        cls, db: firestore.Client, study_area_name: str, chunk_name: str
+    ) -> Optional["StudyAreaChunk"]:
+        """Retrieve the study area chunk with the given study area name and chunk name.
+
+        Args:
+          db: The firestore database client to use for the read.
+          study_area_name: The study area to retrieve the chunk metadata from.
+          chunk_name: Chunk name to retrieve the metadata for.
+
+        Returns:
+          A StudyAreaChunk object representing the database's contents if it exists, or
+          None otherwise.
+        """
+        ref = cls.get_ref(db, study_area_name, chunk_name).get()
+        return None if not ref.exists else cls(**ref.to_dict())
+
+    @classmethod
+    def update_scaling_done(
+        cls,
+        db: firestore.Client,
+        study_area_name: str,
+        chunk_name: str,
+        scaled_feature_matrix_path: str,
+    ) -> None:
+        """Updates chunk metadata fields related to scaling.
+
+        Args:
+            db: The firestore database client to use to make the update.
+            study_area_name: The study area to update.
+            chunk_name: Name of chunk to look up chunk metadata.
+            scaled_feature_matrix_path: New GCS path pointing to scaled feature matrix.
+        """
+        cls.get_ref(db, study_area_name, chunk_name).update(
+            {"needs_scaling": False, "feature_matrix_path": scaled_feature_matrix_path},
         )
 
 

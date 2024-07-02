@@ -124,6 +124,56 @@ def test_study_area_update_chunk_info_no_need():
     mock_db.transaction().update.assert_not_called()
 
 
+def test_study_area_chunk_get_if_exists():
+    mock_db = mock.MagicMock()
+    chunk_doc_mock = mock_db.collection().document().collection().document().get()
+    chunk_doc_mock.exists = True
+    chunk_doc_mock.to_dict.return_value = {
+        "id_": "chunk_1",
+        "raw_path": "a/b",
+        "needs_scaling": True,
+    }
+
+    chunk = metastore.StudyAreaChunk.get_if_exists(mock_db, "TestStudyArea", "chunk_1")
+    assert chunk == metastore.StudyAreaChunk(
+        id_="chunk_1",
+        raw_path="a/b",
+        feature_matrix_path=None,
+        needs_scaling=True,
+    )
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("study_areas"),
+            mock.call.collection().document("TestStudyArea"),
+            mock.call.collection().document().collection("chunks"),
+            mock.call.collection().document().collection().document("chunk_1"),
+            mock.call.collection().document().collection().document().get(),
+        ]
+    )
+
+
+def test_study_area_chunk_update_scaling_done():
+    mock_db = mock.MagicMock()
+    metastore.StudyAreaChunk.update_scaling_done(
+        mock_db, "TestStudyArea", "chunk_1", "c/d"
+    )
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("study_areas"),
+            mock.call.collection().document("TestStudyArea"),
+            mock.call.collection().document().collection("chunks"),
+            mock.call.collection().document().collection().document("chunk_1"),
+            mock.call.collection()
+            .document()
+            .collection()
+            .document()
+            .update(
+                {"needs_scaling": False, "feature_matrix_path": "c/d"},
+            ),
+        ]
+    )
+
+
 def test_flood_scenario_config_set():
     mock_db = mock.MagicMock()
     metastore.FloodScenarioConfig(
