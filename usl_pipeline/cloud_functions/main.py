@@ -40,6 +40,9 @@ _MAX_RETRY_SECONDS = 60 * 60
 # The vector is long enough to express rainfall every five minutes for up to three days.
 _RAINFALL_VECTOR_LENGTH = (60 // 5) * 24 * 3
 
+# Storage bucket file name extension that should trigger feature matrix rescaling.
+_FEATURE_SCALING_TRIGGER_SUFFIX = ".scale_trigger"
+
 
 @dataclasses.dataclass(slots=True)
 class FeatureMetadata:
@@ -924,56 +927,62 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
         db, study_area_name, chunk_name
     )
     if chunk_metadata is None:
-        logging.info(f"Chunk metadata was not found for {study_area_name}/{chunk_name}")
+        logging.info(
+            f"Chunk metadata is not registered for {study_area_name}/{chunk_name}"
+        )
         return
 
     if not chunk_metadata.needs_scaling:
         logging.info(f"Chunk {study_area_name}/{chunk_name} doesn't need scaling")
         return
-
     study_area = metastore.StudyArea.get(db, study_area_name)
-    if study_area.chunk_x_count is None or study_area.chunk_y_count is None:
+
+    if blob_path.endswith(".npy"):
+        if study_area.chunk_x_count is None or study_area.chunk_y_count is None:
+            raise ValueError(
+                f"[Feature Rescaler] Study area {study_area_name} has no chunk counts"
+                + " in metadata"
+            )
+
+        feature_blobs = list(
+            feature_bucket.list_blobs(prefix=f"{study_area_name}/chunk_")
+        )
+
+        chunk_count = study_area.chunk_x_count * study_area.chunk_y_count
+        if chunk_count != len(feature_blobs):
+            raise ValueError(
+                f"[Feature Rescaler] Study area {study_area_name} has chunk counts"
+                + f" in metadata ({chunk_count}) different from number of stored"
+                + f" feature chunks ({len(feature_blobs)})"
+            )
+
+        # We're at the final step when all unscaled feature matrices are ready
+        for feature_blob in feature_blobs:
+            _, blob_chunk_name = _parse_chunk_path(feature_blob.name)
+            trigger_blob = feature_bucket.blob(
+                f"{study_area_name}/{blob_chunk_name}{_FEATURE_SCALING_TRIGGER_SUFFIX}"
+            )
+            trigger_blob.upload_from_string(data="")  # Empty file content
+    elif blob_path.endswith(_FEATURE_SCALING_TRIGGER_SUFFIX):
         logging.info(
-            f"[Feature Rescaler] Study area {study_area_name} has no chunk counts in "
-            + "metadata"
+            "[Feature Rescaler] Rescaling feature matrix %s/%s.npy",
+            study_area_name,
+            chunk_name,
         )
-        return
-
-    feature_blobs = list(feature_bucket.list_blobs(prefix=f"{study_area_name}/chunk_"))
-
-    chunk_count = study_area.chunk_x_count * study_area.chunk_y_count
-    if chunk_count != len(feature_blobs):
-        logging.info(
-            f"[Feature Rescaler] Study area {study_area_name} has chunk counts"
-            + f" in metadata ({chunk_count}) different from number of stored feature"
-            + f" chunks ({len(feature_blobs)})"
-        )
-        return
-
-    # We're at the final step when all unscaled feature matrices are ready
-    for feature_blob in feature_blobs:
-        logging.info(f"[Feature Rescaler] Rescaling feature matrix {feature_blob.name}")
-        _, blob_chunk_name = _parse_chunk_path(feature_blob.name)
-        output_blob = feature_bucket.blob(
-            f"{study_area_name}/scaled_{blob_chunk_name}.npy"
-        )
+        feature_blob = feature_bucket.blob(f"{study_area_name}/{chunk_name}.npy")
+        output_blob = feature_bucket.blob(f"{study_area_name}/scaled_{chunk_name}.npy")
         with feature_blob.open("rb") as in_fd, output_blob.open("wb") as out_fd:
             feature_raster_transformers.rescale_feature_blob(in_fd, study_area, out_fd)
-
-    logging.info("[Feature Rescaler] Updating feature matrix path in chunk metadata...")
-    for feature_blob in feature_blobs:
-        _, blob_chunk_name = _parse_chunk_path(feature_blob.name)
         scaled_feature_matrix_path = (
-            f"gs://{feature_bucket.name}/{study_area_name}/scaled_{blob_chunk_name}.npy"
+            f"gs://{feature_bucket.name}/{study_area_name}/scaled_{chunk_name}.npy"
         )
         metastore.StudyAreaSpatialChunk.update_scaling_done(
-            db, study_area_name, blob_chunk_name, scaled_feature_matrix_path
+            db, study_area_name, chunk_name, scaled_feature_matrix_path
         )
-
-    # Once all chunks are processed we can delete unscaled ones
-    logging.info("[Feature Rescaler] Deleting unscaled feature matrix files...")
-    for feature_blob in feature_blobs:
+        # Deleting unscaled matrix
         feature_blob.delete()
+        # Deleting trigger file
+        feature_bucket.blob(blob_path).delete()
 
 
 @functions_framework.cloud_event

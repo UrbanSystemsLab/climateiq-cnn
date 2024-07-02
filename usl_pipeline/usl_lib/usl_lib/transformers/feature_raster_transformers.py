@@ -144,29 +144,23 @@ def rescale_feature_blob(
             that are used for scaling.
         feature_matrix_output_fd: Output stream to write scaled results to.
     """
-    unscaled_feature_matrix = numpy.load(feature_matrix_input_fd)
-    scaled_feature_matrix = rescale_feature_matrix(
-        unscaled_feature_matrix, study_area_metadata
-    )
-    numpy.save(feature_matrix_output_fd, scaled_feature_matrix)
+    feature_matrix = numpy.load(feature_matrix_input_fd)
+    rescale_feature_matrix(feature_matrix, study_area_metadata)
+    numpy.save(feature_matrix_output_fd, feature_matrix)
 
 
 def rescale_feature_matrix(
     feature_matrix: npt.NDArray,
     study_area_metadata: metastore.StudyArea,
-) -> npt.NDArray:
+) -> None:
     """Performs scaling of elevation data in the 0-th layer of feature matrix.
 
-    Note: This logic updates feature_matrix values in place so please don't rely on
-    the assumption that input matrix won't change.
+    Note: This logic updates feature_matrix values in place.
 
     Args:
         feature_matrix: Feature matrix to perform scaling for.
         study_area_metadata: Study Area metadata containing min/max elevation values
             that are used for scaling.
-
-    Returns:
-        Scaled feature matrix.
     """
     elevation_min = study_area_metadata.elevation_min
     elevation_max = study_area_metadata.elevation_max
@@ -179,4 +173,3 @@ def rescale_feature_matrix(
         elevation_data[presence_mask == 1] - elevation_min
     ) / (elevation_max - elevation_min)
     elevation_data[presence_mask != 1] = -1
-    return feature_matrix

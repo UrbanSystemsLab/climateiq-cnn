@@ -220,7 +220,7 @@ def test_rescale_feature_matrix():
         ],
         dtype=numpy.float32,
     )
-    scaled_matrix = feature_raster_transformers.rescale_feature_matrix(
+    feature_raster_transformers.rescale_feature_matrix(
         feature_matrix,
         metastore.StudyArea(
             name="1",
@@ -234,7 +234,7 @@ def test_rescale_feature_matrix():
         ),
     )
     testing.assert_array_equal(
-        scaled_matrix,
+        feature_matrix,
         numpy.array(
             [
                 [
