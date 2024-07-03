@@ -129,7 +129,6 @@ def test_study_area_chunk_get_if_exists():
     chunk_doc_mock = mock_db.collection().document().collection().document().get()
     chunk_doc_mock.exists = True
     chunk_doc_mock.to_dict.return_value = {
-        "id_": "chunk_1",
         "raw_path": "a/b",
         "needs_scaling": True,
     }

@@ -244,7 +244,7 @@ class StudyAreaChunk:
           None otherwise.
         """
         ref = cls.get_ref(db, study_area_name, chunk_name).get()
-        return None if not ref.exists else cls(**ref.to_dict())
+        return None if not ref.exists else cls(id_=chunk_name, **ref.to_dict())
 
     @classmethod
     def update_scaling_done(
