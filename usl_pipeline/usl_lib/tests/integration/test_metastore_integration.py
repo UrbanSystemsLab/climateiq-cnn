@@ -146,6 +146,7 @@ def test_simulation_get_set_label_chunks(firestore_db):
         gcs_uri="gs://sim-chunks/study-area/config/name.txt/0_0.npy",
         x_index=0,
         y_index=0,
+        in_validation_set=True,
     )
     chunk_1.set(firestore_db, "study-area", "config/name.txt")
 
@@ -153,6 +154,7 @@ def test_simulation_get_set_label_chunks(firestore_db):
         gcs_uri="gs://sim-chunks/study-area/config/name.txt/0_1.npy",
         x_index=1,
         y_index=0,
+        in_validation_set=False,
     )
     chunk_2.set(firestore_db, "study-area", "config/name.txt")
 
