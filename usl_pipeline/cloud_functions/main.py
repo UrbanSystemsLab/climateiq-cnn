@@ -950,9 +950,9 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
                 + " in metadata"
             )
 
-        feature_blobs = list(
-            feature_bucket.list_blobs(prefix=f"{study_area_name}/chunk_")
-        )
+        prefix_blobs = feature_bucket.list_blobs(prefix=f"{study_area_name}/chunk_")
+        # Let's exclude any files that don't have ".npy" file extension
+        feature_blobs = [blob for blob in prefix_blobs if blob.name.endswith(".npy")]
 
         chunk_count = study_area.chunk_x_count * study_area.chunk_y_count
         if chunk_count != len(feature_blobs):
@@ -965,8 +965,14 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
                 chunk_count,
                 len(feature_blobs),
             )
+            return
 
         # We're at the final step when all unscaled feature matrices are ready
+        logging.info(
+            "[Feature Rescaler] Study area %s has all the unscaled feature matrices"
+            + "stored, count matches to what's registered in metadata (%s)",
+            chunk_count,
+        )
         for feature_blob in feature_blobs:
             _, blob_chunk_name = _parse_chunk_path(feature_blob.name)
             trigger_blob = feature_bucket.blob(
