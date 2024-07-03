@@ -1425,7 +1425,14 @@ def test_rescale_feature_matrices_trigger_files_generated(mock_firestore_client)
     input1_mock_blob.name = "TestArea/chunk_0_0.npy"
     input2_mock_blob = mock.MagicMock(spec=storage.Blob)
     input2_mock_blob.name = "TestArea/chunk_0_1.npy"
-    feature_bucket.list_blobs.return_value = [input1_mock_blob, input2_mock_blob]
+    input3_mock_blob = mock.MagicMock(spec=storage.Blob)
+    # This is an old file that everyone forgot to delete some time ago:
+    input3_mock_blob.name = "TestArea/chunk_0_1.scale_trigger"
+    feature_bucket.list_blobs.return_value = [
+        input1_mock_blob,
+        input2_mock_blob,
+        input3_mock_blob,
+    ]
 
     main._start_feature_rescaling_if_ready(feature_bucket, "TestArea/chunk_0_0.npy")
 
