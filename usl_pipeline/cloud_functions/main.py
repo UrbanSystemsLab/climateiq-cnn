@@ -6,6 +6,7 @@ import pathlib
 import logging
 import re
 import tarfile
+import time
 from typing import BinaryIO, Callable, IO, Optional, TextIO, Tuple
 
 from google.api_core import exceptions
@@ -316,20 +317,35 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 
 
 def _build_feature_matrix(
-    bucket_name: str, chunk_name: str, output_bucket: str
+    bucket_name: str, chunk_path: str, output_bucket: str
 ) -> None:
     """Builds a feature matrix when a set of geo files is uploaded."""
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
-    chunk_blob = bucket.blob(chunk_name)
+    chunk_blob = bucket.blob(chunk_path)
 
-    feature_file_name = pathlib.PurePosixPath(chunk_name).with_suffix(".npy")
+    feature_file_name = pathlib.PurePosixPath(chunk_path).with_suffix(".npy")
     feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
 
     # TODO: Refactor to better handle both tar'ed + un-tarred chunks
     with chunk_blob.open("rb") as chunk:
         # Flood (CityCat)
-        if chunk_name.endswith(".tar"):
+        if chunk_path.endswith(".tar"):
+            study_area_name, chunk_name = _parse_chunk_path(chunk_path)
+            chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
+                firestore.Client(), study_area_name, chunk_name
+            )
+            if chunk_metadata is not None:
+                logging.info(
+                    "Flood feature matrix for chunk %s was already generated",
+                    chunk_path,
+                )
+                return
+
+            start_time = time.time()
+            logging.info(
+                "Start generating flood feature matrix for chunk %s", chunk_path
+            )
             feature_matrix, metadata = _build_flood_feature_matrix_from_archive(chunk)
 
             if feature_matrix is None:
@@ -339,15 +355,20 @@ def _build_feature_matrix(
             # feature matrix file that will trigger rescaling post-processing.
             _update_study_area_metastore_entry(chunk_blob, metadata)
             _write_as_npy(feature_blob, feature_matrix)
+            logging.info(
+                "Flood feature matrix file was generated for chunk %s in %s seconds",
+                chunk_path,
+                time.time() - start_time,
+            )
             _write_flood_chunk_metastore_entry(chunk_blob)
 
         # Heat (WRF) - treat one WPS outout file as one chunk
-        elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_name):
+        elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_path):
             feature_matrix, metadata = _build_wps_feature_matrix(chunk)
             _write_as_npy(feature_blob, feature_matrix)
             _write_wps_chunk_metastore_entry(chunk_blob, feature_blob, metadata)
         else:
-            raise ValueError(f"Unexpected file {chunk_name}")
+            raise ValueError(f"Unexpected file {chunk_path}")
 
 
 @functions_framework.cloud_event
@@ -971,6 +992,7 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
         logging.info(
             "[Feature Rescaler] Study area %s has all the unscaled feature matrices"
             + "stored, count matches to what's registered in metadata (%s)",
+            study_area_name,
             chunk_count,
         )
         for feature_blob in feature_blobs:
