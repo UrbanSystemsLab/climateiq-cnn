@@ -687,6 +687,10 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
         )
     )
 
+    mock_firestore_client().collection("study_areas").document(
+        "study_area"
+    ).get().exists = True
+
     main.write_study_area_metadata(
         functions_framework.CloudEvent(
             {"source": "test", "type": "event"},
@@ -711,6 +715,10 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
     mock_firestore_client.assert_has_calls(
         [
             mock.call(),
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("study_area"),
+            mock.call().collection().document().get(),
+            mock.call().collection().document().delete(),
             mock.call().collection("study_areas"),
             mock.call().collection().document("study_area"),
             mock.call()

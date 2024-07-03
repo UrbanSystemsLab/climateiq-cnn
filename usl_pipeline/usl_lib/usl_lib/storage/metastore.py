@@ -155,6 +155,18 @@ class StudyArea:
             },
         )
 
+    @staticmethod
+    def delete_if_exists(db: firestore.Client, study_area_name: str) -> None:
+        """Deletes a given study area document if it exists.
+
+        Args:
+          db: The firestore database client to use.
+          study_area_name: The study area to delete.
+        """
+        ref = db.collection(STUDY_AREAS).document(study_area_name)
+        if ref.get().exists:
+            ref.delete()
+
     def _as_dict(self) -> dict:
         as_dict = {}
         for field in self.__dataclass_fields__:
