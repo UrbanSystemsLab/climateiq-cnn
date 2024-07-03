@@ -78,7 +78,8 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
     ]
     mock_storage_client.reset_mock()
 
-    mock_firestore_client().collection().document().get().to_dict.return_value = {
+    mock_db = mock_firestore_client()
+    mock_db.collection().document().get().to_dict.return_value = {
         "col_count": 10,
         "row_count": 20,
         "x_ll_corner": 0.0,
@@ -87,7 +88,9 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
     }
 
     # Simulate empty elevation min & max on the study area.
-    mock_firestore_client().collection().document().get().get.side_effect = KeyError
+    mock_db.collection().document().get().get.side_effect = KeyError
+
+    mock_db.collection().document().collection().document().get().exists = False
 
     main.build_feature_matrix(
         functions_framework.CloudEvent(
@@ -161,11 +164,11 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
         ]
     )
     # Ensure we set the elevation min & max
-    mock_firestore_client().transaction().update.assert_called_once_with(
-        mock_firestore_client().collection().document(),
+    mock_db.transaction().update.assert_called_once_with(
+        mock_db.collection().document(),
         {"elevation_min": 2, "elevation_max": 6},
     )
-    mock_firestore_client().collection().document().update.assert_called_once_with(
+    mock_db.collection().document().update.assert_called_once_with(
         {"chunk_size": 2, "chunk_x_count": 5, "chunk_y_count": 10}
     ),
 
