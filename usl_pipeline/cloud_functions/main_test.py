@@ -1415,7 +1415,6 @@ def test_rescale_feature_matrices_trigger_files_generated(mock_firestore_client)
     chunk_ref = mock_db.collection().document().collection().document().get()
     chunk_ref.exists = True
     chunk_ref.to_dict.return_value = {
-        "id_": "chunk_id",
         "raw_path": "a/b",
         "needs_scaling": True,
     }
@@ -1460,7 +1459,6 @@ def test_rescale_feature_matrices_trigger_file_processed(mock_firestore_client):
     chunk_ref = mock_db.collection().document().collection().document().get()
     chunk_ref.exists = True
     chunk_ref.to_dict.return_value = {
-        "id_": "chunk_id",
         "raw_path": "a/b",
         "needs_scaling": True,
     }
