@@ -1,4 +1,5 @@
 import sys, os
+import json
 
 # Get the directory of the current script
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +63,7 @@ def verify_labels_shape(flood_model_data_list):
 
 
 def simple_training(
+    sim_names,
     model_dir="gs://usl_models_bucket/flood_model",
     batch_size=1,
     lstm_units=128,
@@ -86,108 +88,84 @@ def simple_training(
     model = FloodModel(model_params)
     # model = model.compile(tf.keras.optimizers.Adam(learning_rate=learning_rate))
 
-    sim_names = ["Manhattan-config_v1%2FRainfall_Data_2.txt"]
+    #sim_names = ["Manhattan-config_v1%2FRainfall_Data_2.txt", "Manhattan-config_v1%2FRainfall_Data_3.txt", "Manhattan-config_v1%2FRainfall_Data_4.txt"]
 
     generator = IncrementalTrainDataGenerator(
-        batch_size=batch_size,
+        batch_size=1,
     )
 
-    # # download npy label chunks locally
-    # generator.download_numpy_files(sim_names, "label")
+    dataset_function, storm_durations = generator.get_datasets_from_tensors(sim_names)
 
-    # # download npy feature chunks locally
-    # generator.download_numpy_files(sim_names, "feature")
+    #inspect_interleaved_dataset(interleaved_dataset, datasets, storm_durations, num_elements=3)
 
-    # # download npy temporal chunks locally
-    # generator.download_numpy_files(sim_names, "temporal")
-
-    # compare feature and label chunks
-
-    # def set_shapes(features, labels):
-    #     features["geospatial"].set_shape([None, 1000, 1000, 8])
-    #     features["temporal"].set_shape([None, 864, constants.M_RAINFALL])
-    #     features["spatiotemporal"].set_shape([None, 19, 1000, 1000, 1])
-    #     labels.set_shape([None, 19, 1000, 1000])
-    #     return features, labels
-
-    for sim_name in sim_names:
-        dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
-        print("BEFORE BATCH: Dataset element spec:", dataset.element_spec)
-
-        dataset = dataset.batch(batch_size)
-
-        print("AFTER BATCH: Dataset element spec:", dataset.element_spec)
-        print(type(dataset))
-        print(storm_duration)
-        # Alternatively, use the `element_spec` to understand the structure
-    
     print("Dataset generation completed, will hand over to model training..")
     print("\n")
     print("#######  Training model ##########")
-    model_history = model.train(dataset, storm_duration)
+    model_history = model.train(dataset_function, storm_durations)
+    #check_training_datasets_for_sims(dataset_function, storm_durations)
     print("Training complete")
     return model_history
 
 
-def full_training(
-    sim_names, generator,
-    model_dir="gs://usl_models_bucket/flood_model",
-    batch_size=1,
-    lstm_units=128,
-    lstm_kernel_size=3,
-    lstm_dropout=0.2,
-    lstm_recurrent_dropout=0.2,
-    epochs=1,
-):
-    model_params = FloodModelParams(
-        batch_size=batch_size,
-        lstm_units=lstm_units,
-        lstm_kernel_size=lstm_kernel_size,
-        lstm_dropout=lstm_dropout,
-        lstm_recurrent_dropout=lstm_recurrent_dropout,
-        epochs=epochs,
-    )
-    model_history = []
+# def full_training(
+#     sim_names, generator,
+#     model_dir="gs://usl_models_bucket/flood_model",
+#     batch_size=1,
+#     lstm_units=128,
+#     lstm_kernel_size=3,
+#     lstm_dropout=0.2,
+#     lstm_recurrent_dropout=0.2,
+#     epochs=1,
+# ):
+#     model_params = FloodModelParams(
+#         batch_size=batch_size,
+#         lstm_units=lstm_units,
+#         lstm_kernel_size=lstm_kernel_size,
+#         lstm_dropout=lstm_dropout,
+#         lstm_recurrent_dropout=lstm_recurrent_dropout,
+#         epochs=epochs,
+#     )
+#     model_history = []
 
-    model = FloodModel(model_params)
+#     model = FloodModel(model_params)
 
-    sim_names_len = len(sim_names)
-    print(f"Number of simulations: {sim_names_len}")
+#     sim_names_len = len(sim_names)
+#     print(f"Number of simulations: {sim_names_len}")
 
-    def data_generator():
-        for sim_name in sim_names:
-            dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
-            for features, labels in dataset:
-                yield (features, labels), storm_duration
+#     def data_generator():
+#         for sim_name in sim_names:
+#             dataset, storm_duration = generator.get_dataset_from_tensors(sim_name)
+#             for features, labels in dataset:
+#                 yield (features, labels), storm_duration
 
-    # Create a tf.data.Dataset from the generator
-    full_dataset = tf.data.Dataset.from_generator(
-        data_generator,
-        output_signature=(
-            (
-                {
-                    'geospatial': tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
-                    'temporal': tf.TensorSpec(shape=(864, constants.M_RAINFALL), dtype=tf.float32),
-                    'spatiotemporal': tf.TensorSpec(shape=(1000, 1000, 1), dtype=tf.float32)
-                },
-                tf.TensorSpec(shape=(None, 1000, 1000), dtype=tf.float32)
-            ),
-            tf.TensorSpec(shape=(), dtype=tf.int32)  # for storm_duration
-        )
-    )
+#     # Create a tf.data.Dataset from the generator
+#     full_dataset = tf.data.Dataset.from_generator(
+#         data_generator,
+#         output_signature=(
+#             (
+#                 {
+#                     'geospatial': tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
+#                     'temporal': tf.TensorSpec(shape=(864, constants.M_RAINFALL), dtype=tf.float32),
+#                     'spatiotemporal': tf.TensorSpec(shape=(1000, 1000, 1), dtype=tf.float32)
+#                 },
+#                 tf.TensorSpec(shape=(None, 1000, 1000), dtype=tf.float32)
+#             ),
+#             tf.TensorSpec(shape=(), dtype=tf.int32)  # for storm_duration
+#         )
+#     )
 
-    # Apply batching, shuffling, and prefetching
-    full_dataset = full_dataset.batch(batch_size)
-    full_dataset = full_dataset.shuffle(buffer_size=1000)
-    full_dataset = full_dataset.prefetch(tf.data.AUTOTUNE)
+#     # Apply batching, shuffling, and prefetching
+#     full_dataset = full_dataset.batch(batch_size)
+#     full_dataset = full_dataset.shuffle(buffer_size=1000)
+#     full_dataset = full_dataset.prefetch(tf.data.AUTOTUNE)
 
-    print("Dataset preparation completed, starting model training...")
+#     print("Dataset preparation completed, starting model training...")
 
-    print("#######  Training the model ##########")
-    model_history = model.train(full_dataset)
-    print("Training complete")
+#     print("#######  Training the model ##########")
+#     model_history = model.train(full_dataset)
+#     print("Training complete")
     
-    return model_history
+#     return model_history
 
 
 def check_generator_tensor_shape(generator):
@@ -339,40 +317,83 @@ def set_tf_gpu():
             print(e)  # Handle potent
 
 
-def download_sims_locally(class_label, generator, sim_names):
-    print("**** Length of sim_names: ", len(sim_names))
-    print("Checking if feature and label chunks are equal")
-    # compare feature and label chunks
-    for sim_name in sim_names:
-        print(f"Comparing feature and label chunks for {sim_name}")
-        label_compare = class_label.compare_study_area_sim_chunks(sim_name)
-        if label_compare:
-            print("Feature and label chunks are equal for", sim_name)
-            print("")
-        else:
-            print("Feature and label chunks are not equal")
-            sim_names.remove(sim_name)
+# def download_sims_locally(class_label, generator, sim_names):
+#     print("**** Length of sim_names: ", len(sim_names))
+#     print("Checking if feature and label chunks are equal")
+#     # compare feature and label chunks
+#     for sim_name in sim_names:
+#         print(f"Comparing feature and label chunks for {sim_name}")
+#         label_compare = class_label.compare_study_area_sim_chunks(sim_name)
+#         if label_compare:
+#             print("Feature and label chunks are equal for", sim_name)
+#             print("")
+#         else:
+#             print("Feature and label chunks are not equal")
+#             sim_names.remove(sim_name)
 
-    print("**** Length of *valid* sim_names: ", len(sim_names))
-    print("Printing valid sims in metastore")
-    for sim_name in sim_names:
-        print(f"Index: {sim_names.index(sim_name)} , Sim name: {sim_name}")
-        print("")
+#     print("**** Length of *valid* sim_names: ", len(sim_names))
+#     print("Printing valid sims in metastore")
+#     for sim_name in sim_names:
+#         print(f"Index: {sim_names.index(sim_name)} , Sim name: {sim_name}")
+#         print("")
 
-    # download npy temporal chunks locally
-    print("Downloading numpy temporal chunks locally")
-    generator.download_numpy_files(sim_names, "temporal")
-    print("Temporals downloaded successfully")
+#     # download npy temporal chunks locally
+#     print("Downloading numpy temporal chunks locally")
+#     generator.download_numpy_files(sim_names, "temporal")
+#     print("Temporals downloaded successfully")
 
-    # download npy label chunks locally
-    print("Downloading numpy label chunks locally")
-    generator.download_numpy_files(sim_names, "label")
-    print("Labels downloaded successfully")
+#     # download npy label chunks locally
+#     print("Downloading numpy label chunks locally")
+#     generator.download_numpy_files(sim_names, "label")
+#     print("Labels downloaded successfully")
 
-    # download npy feature chunks locally
-    print("Downloading numpy feature chunks locally")
-    generator.download_numpy_files(sim_names, "feature")
-    print("Features downloaded successfully")
+#     # download npy feature chunks locally
+#     print("Downloading numpy feature chunks locally")
+#     generator.download_numpy_files(sim_names, "feature")
+#     print("Features downloaded successfully")
+
+
+def print_combined_history(combined_history):
+    print("\nTraining History:")
+    for metric in combined_history.history:
+        values = combined_history.history[metric]
+        avg_value = sum(values) / len(values)
+        min_value = min(values)
+        max_value = max(values)
+        print(f"{metric.capitalize()}:")
+        print(f"  Average: {avg_value:.4f}")
+        print(f"  Minimum: {min_value:.4f}")
+        print(f"  Maximum: {max_value:.4f}")
+        print(f"  Final: {values[-1]:.4f}")
+        print(f"  Total Steps: {len(values)}")
+        print()
+
+def check_training_datasets_for_sims(dataset_functions, storm_durations):
+    """Dummy function to check if training the model using the list of dataset-creation functions."""
+    model_histories = []
+    sim_names = list(storm_durations.keys())
+    num_sims = len(sim_names)
+    print("Number of simulations:", num_sims)
+    print("Starting training...")
+
+    for sim_index in range(num_sims):
+        sim_name = sim_names[sim_index]
+        storm_duration = storm_durations[sim_name]
+        print(f"Training on simulation: {sim_name}, Storm Duration: {storm_duration}")
+
+        # Get the generator for the current simulation dataset
+        current_dataset_generator = dataset_functions(sim_name, storm_duration)
+
+        for single_sim_chunk, storm_duration in current_dataset_generator:
+            for features, labels in single_sim_chunk:
+                print("-" * 50)
+                print("Feature and Label tensors will go here.")
+                print(f"geospatial: {features['geospatial'].shape}")
+                print(f"temporal: {features['temporal'].shape}")
+                print(f"spatiotemporal: {features['spatiotemporal'].shape}")
+                print(f"labels: {labels.shape}")
+                print("-" * 50)
+                print("")
 
 
 def main():
@@ -387,20 +408,12 @@ def main():
 
     # check_generator_tensor_shape(generator)
 
-    # test_temporal_tensor(generator)
+    #test_temporal_tensor(generator)
 
-    # test_feature_label_tensors(generator)
+    #test_feature_label_tensors(generator)
 
     # check_tensorflow_dataset(generator)
 
-    # # Use this function with your generator and sim_name
-    # max_batch = investigate_dataset(generator, sim_name)
-    # print(f"**** Recommended batch size for {sim_name} is {max_batch}")
-
-    # model_histories = simple_training()
-
-    # for history in model_histories:
-    #     print(history)
 
     class_label = GenerateFeatureLabelChunks()
 
@@ -409,22 +422,22 @@ def main():
         "Manhattan-config_v1%2FRainfall_Data_2.txt",
         "Manhattan-config_v1%2FRainfall_Data_3.txt",
         "Manhattan-config_v1%2FRainfall_Data_4.txt",
-        "Manhattan-config_v1%2FRainfall_Data_5.txt",
-        "Manhattan-config_v1%2FRainfall_Data_7.txt",
-        "Manhattan-config_v1%2FRainfall_Data_8.txt",
-        "Manhattan-config_v1%2FRainfall_Data_13.txt",
-        "Manhattan-config_v1%2FRainfall_Data_14.txt",
-        "Manhattan-config_v1%2FRainfall_Data_15.txt",
-        "Manhattan-config_v1%2FRainfall_Data_17.txt",
-        "Manhattan-config_v1%2FRainfall_Data_22.txt",
-        "Manhattan-config_v1%2FRainfall_Data_24.txt"    
+        # "Manhattan-config_v1%2FRainfall_Data_5.txt",
+        # "Manhattan-config_v1%2FRainfall_Data_7.txt",
+        # "Manhattan-config_v1%2FRainfall_Data_8.txt",
+        # "Manhattan-config_v1%2FRainfall_Data_13.txt",
+        # "Manhattan-config_v1%2FRainfall_Data_14.txt",
+        # "Manhattan-config_v1%2FRainfall_Data_15.txt",
+        # "Manhattan-config_v1%2FRainfall_Data_17.txt",
+        # "Manhattan-config_v1%2FRainfall_Data_22.txt",
+        # "Manhattan-config_v1%2FRainfall_Data_24.txt"    
     ]
-    
-    # download_sims_locally(class_label, generator, sim_names)
 
-    model_histories = full_training(sim_names, generator)
-    for history in model_histories:
-        print(history)
+    combined_history = simple_training(sim_names)
+    #simple_training()
+    print_combined_history(combined_history)
+    for history in combined_history:
+        print_combined_history(history)
 
 
 # Run the main function

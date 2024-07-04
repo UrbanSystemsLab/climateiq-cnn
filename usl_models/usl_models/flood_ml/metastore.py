@@ -54,14 +54,16 @@ class FirestoreDataHandler:
             The found document as a dictionary, or None if no document was found.
         """
         try:
-            print(f"Searching for document with ID '{document_id}' in collection '{collection_name}'")
+            if self.settings.DEBUG > 2:
+                print(f"Searching for document with ID '{document_id}' in collection '{collection_name}'")
 
             # Get the document with the given ID
             document = self.firestore_client.collection(collection_name).document(document_id).get()
 
             # If the document exists, return it as a dictionary
             if document.exists:
-                print(f"Found document: {document.to_dict()}")
+                if self.settings.DEBUG > 2:
+                    print(f"Found document: {document.to_dict()}")
                 return document.to_dict()
             else:
                 print(f"No document found with ID '{document_id}' in collection '{collection_name}'")

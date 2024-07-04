@@ -204,7 +204,7 @@ class GenerateFeatureLabelChunks:
         """
         This method fetches the rainfall configuration for each simulation.
         """
-        print("Generating rainfall data...")
+        #print("Generating rainfall data...")
         sim_name, configuration, study_area_ref = (
             self._get_study_area_config_from_sim_name(sim_name)
         )

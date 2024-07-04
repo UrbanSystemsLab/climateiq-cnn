@@ -2,6 +2,7 @@
 
 import dataclasses
 from typing import TypeAlias
+from datetime import datetime
 
 import tensorflow as tf
 from tensorflow.keras import layers
@@ -111,67 +112,58 @@ class FloodModel:
 
         data = dataclasses.replace(data, spatiotemporal=st_input)
         return data
-
-    # def _model_fit(self, data: FloodModelData) -> tf.keras.callbacks.History:
-    #     """Fits the model on a single batch of FloodModelData.
-
-    #     Args:
-    #         data: A FloodModelData object.
-
-    #     Returns: A History object containing the training and validation loss
-    #         and metrics.
-    #     """
-    #     inputs = {
-    #         "spatiotemporal": data.spatiotemporal,
-    #         "geospatial": data.geospatial,
-    #         "temporal": data.temporal,
-    #     }
-    #     self._model.set_n_predictions(data.storm_duration)
-    #     history = self._model.fit(
-    #         inputs,
-    #         data.labels,
-    #         batch_size=self._model_params.batch_size,
-    #         epochs=self._model_params.epochs,
-    #         #validation_split=0.2,
-    #     )
-    #     return history
+    
 
     def _model_fit(self, features, labels, storm_duration):
-        # convert storm_duration to int
         storm_duration = int(storm_duration)
-
+        print("Setting n_predictions to storm_duration:", storm_duration)
         self._model.set_n_predictions(storm_duration)
+        # Create a TensorBoard callback
+        logs = "logs/" + datetime.now().strftime("%Y%m%d-%H%M%S")
 
-        # Fit the model for this batch
+        tboard_callback = tf.keras.callbacks.TensorBoard(log_dir = logs,
+                                                        histogram_freq = 1,
+                                                        profile_batch = '1,1')
+        # Fit the model for this sample
         history = self._model.fit(
-            features,
-            labels,
-            epochs=self._model_params.epochs,
+            features, labels, callbacks=[tboard_callback]
         )
         
         return history
-
-    def _combine_histories(self, history_list):
-        combined_history = {}
-        for history in history_list:
-            for key, value in history.history.items():
-                if key not in combined_history:
-                    combined_history[key] = []
-                combined_history[key].extend(value)
-        return combined_history
-
-    def train(self, dataset: tf.data.Dataset):
-        model_history = []
-        for (features, labels), storm_duration in dataset:
-            history = self._model_fit(
-                features, labels, storm_duration=storm_duration
-            )
-            model_history.append(history)
+    
+    def train(self, dataset_functions, storm_durations):
+        """Trains the model using the list of dataset-creation functions."""
+        model_histories = []
+        sim_names = list(storm_durations.keys())
+        num_sims = len(sim_names)
+        print("Number of simulations:", num_sims)
+        print("Starting training...")
+        print("Model Summary:")
+        print(self._model.summary())
         
-        # Combine all histories after processing all batches
-        combined_history = self._combine_histories(model_history)
-        return combined_history
 
+        for sim_index in range(num_sims):
+            sim_name = sim_names[sim_index]
+            storm_duration = storm_durations[sim_name]
+            print(f"Training on simulation: {sim_name}, Storm Duration: {storm_duration}")
+
+            # Get the generator for the current simulation dataset
+            current_dataset_generator = dataset_functions(sim_name, storm_duration)
+
+            for single_sim_chunk, storm_duration in current_dataset_generator:
+                for features, labels in single_sim_chunk:
+                    history = self._model_fit(features, labels, storm_duration)
+                    model_histories.append(history)
+        
+
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        model_filename = f"flood_model_{timestamp}.keras"
+        self._model.save(model_filename)
+        print(f"Model saved to {model_filename}")
+
+        return model_histories
+
+ 
     # def train(
     #     self,
     #     data: list[FloodModelData],

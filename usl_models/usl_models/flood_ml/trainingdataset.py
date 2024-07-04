@@ -3,6 +3,10 @@ import glob
 from concurrent.futures import ThreadPoolExecutor
 import functools
 import re
+import requests
+from io import BytesIO
+import random
+
 
 import numpy as np
 import tensorflow as tf
@@ -13,6 +17,7 @@ from usl_models.flood_ml.settings import Settings
 from usl_models.flood_ml.featurelabelchunks import GenerateFeatureLabelChunks
 from usl_models.flood_ml import constants
 
+from tqdm import tqdm
 """
     This class is used to generate the training data for the flood model.
     Input:
@@ -21,19 +26,7 @@ from usl_models.flood_ml import constants
     Output:
         A generator that yields a batch of data.
 
-    Note:
-    This class uses Tensorflow TFRecords and TFExamples.
-    TFRecords store data in a binary format and are optimized for reading and processinglarge datasets,
-    making training fast. TFExamples are protocol buffers to store the data.
-
-    tf.train.Feature object, which represents a single feature in the TFRecord example.
-    The bytes_list is used to store the serialized NumPy array
-
-    TFRecords are ideal for distributed training scenarios where we need to split data across
-    multiple machines.
-
 """
-
 
 class IncrementalTrainDataGenerator:
     def __init__(
@@ -46,19 +39,12 @@ class IncrementalTrainDataGenerator:
         featurelabelchunksgenerator: GenerateFeatureLabelChunks = None,
     ):
         print("Initializing IncrementalTrainDataGenerator...")
-        self.current_index = 0  # Add an instance variable to track the current index
-        self.common_indices = []
-        self.feature_dict = {}
-        self.label_dict = {}
-        # Load settings
+     
         self.settings = settings or Settings()
 
         self.firestore_client = firestore_client or firestore.Client()
         self.storage_client = storage_client or storage.Client()
-        # self.firestore_collection = self.config.get("firestore_collection")
-        # self.batch_size = batch_size
-        self._chunks_iterator = None
-        # self.rainfall_duration = None
+       
 
         # instantiate metastore class
         self.metastore = metastore or FirestoreDataHandler(
@@ -71,111 +57,10 @@ class IncrementalTrainDataGenerator:
         )
 
         # print(f"Firestore Collection: {self.firestore_collection}")
-        print(f"Local Numpy Directory: {self.settings.LOCAL_NUMPY_DIR}")
-        if self.settings.LOCAL_NUMPY_DIR is None:
-            # set a default local directory
-            self.settings.LOCAL_NUMPY_DIR = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "numpy_data"
-            )
-            print("Local Numpy Directory is not set, will create the directory.")
-            os.makedirs(self.settings.LOCAL_NUMPY_DIR, exist_ok=True)
-
-    def download_numpy_files_in_dir(self, gcs_urls, dir_name, max_workers=25):
-        """
-        Download all numpy files from a directory in GCS to local storage.
-        """
-        if dir_name is None:
-            print("GCS directory name is empty, returning...")
-            return
-
-        if os.path.exists(dir_name):
-            npy_files = glob.glob(os.path.join(dir_name, "*.npy"))
-            if npy_files:
-                print(
-                    f"Directory '{dir_name}' already contains .npy files, skipping download."
-                )
-                return
-        else:
-            os.makedirs(dir_name)
-            print(f"Directory '{dir_name}' did not exist and was created.")
-
-        print(f"Downloading numpy files from GCS directory to: {dir_name}")
-
-        if len(gcs_urls) > 1:
-            max_workers = min(self.settings.MAX_WORKERS, len(gcs_urls))
-        else:
-            max_workers = 1
-
-        def _download_file(gcs_url, local_dir):
-            def download_single_file(single_gcs_url):
-                try:
-                    print(f"Downloading file from GCS URL: {single_gcs_url}")
-                    bucket_name, blob_name = single_gcs_url.replace("gs://", "").split(
-                        "/", 1
-                    )
-                    bucket = self.storage_client.bucket(bucket_name)
-                    blob = bucket.blob(blob_name)
-                    local_path = os.path.join(local_dir, os.path.basename(blob_name))
-                    blob.download_to_filename(local_path)
-                    # print(f"Downloaded {single_gcs_url} to {local_path}")
-                except Exception as e:
-                    print(f"Error downloading file {single_gcs_url}: {e}")
-
-            if gcs_url is None:
-                return
-
-            if isinstance(gcs_url, str):
-                download_single_file(gcs_url)
-            elif isinstance(gcs_url, list):
-                for url in gcs_url:
-                    download_single_file(url)
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(_download_file, gcs_url, dir_name)
-                for gcs_url in gcs_urls
-            ]
-
-            for future in futures:
-                try:
-                    future.result()  # Wait for all futures to complete
-                except Exception as e:
-                    print(f"Error downloading chunk numpy files: {e}")
-        print("Finished downloading numpy files.")
-
-    def download_numpy_files(self, sim_names, chunktype):
-        """
-        Download numpy files for the given sim_names.
-        """
-        for sim_name in sim_names:
-            print(f"Downloading numpy files for sim: {sim_name}")
-
-            # Get GCS URLs for npy chunks
-            feature_chunks, sim_dict = (
-                self.featurelabelchunksgenerator.get_feature_chunks(sim_name)
-            )
-            label_chunks, sim_dict = self.featurelabelchunksgenerator.get_label_chunks(
-                sim_name
-            )
-            temporal_chunks = self.featurelabelchunksgenerator.get_temporal_chunks(
-                sim_name
-            )
-
-            if chunktype == "feature":
-                dir_name = sim_name + "_feature"
-                for sim_name in sim_names:
-                    self.download_numpy_files_in_dir(feature_chunks, dir_name)
-            if chunktype == "label":
-                dir_name = sim_name + "_label"
-                for sim_name in sim_names:
-                    self.download_numpy_files_in_dir(label_chunks, dir_name)
-            if chunktype == "temporal":
-                dir_name = sim_name + "_temporal"
-                for sim_name in sim_names:
-                    self.download_numpy_files_in_dir(temporal_chunks, dir_name)
-
+        # print(f"Local Numpy Directory: {self.settings.LOCAL_NUMPY_DIR}")
+    
     def _generate_rainfall_duration(self, sim_name):
-        print("Get rainfall duration...")
+        # print("Get rainfall duration...")
         rainfall_duration, rainfaill_dict = (
             self.featurelabelchunksgenerator.get_rainfall_config(sim_name)
         )
@@ -186,37 +71,40 @@ class IncrementalTrainDataGenerator:
 
     def _generate_temporal_tensors(self, sim_name):
         """
-        Create temporal tensors from the temporal chunks.
+        Create temporal tensors from the temporal chunks using GCS URLs.
         """
         print("Generating temporal tensors...")
         # Get GCS URLs for npy chunks
-        temporal_chunks, sim_dict = (
-            self.featurelabelchunksgenerator.get_temporal_chunks(sim_name)
-        )
-
-        if temporal_chunks:
-            if self.settings.DEBUG == 2:
-                print(f"GCS URLs for sim {sim_name}: {temporal_chunks}")
-
-        temporal_dir = sim_name + "_temporal"
-
-        if os.path.exists(temporal_dir):
-            print(f"Loading temporal tensors from {temporal_dir}...")
-            for file_name in os.listdir(temporal_dir):
-                if file_name.endswith(".npy"):
-                    file_path = os.path.join(temporal_dir, file_name)
-                    temporal_npy = np.load(file_path)
-                    temporal_npy_tiled = np.tile(temporal_npy, (6, 1)).T
-                    temporal_tensor = tf.convert_to_tensor(
-                        temporal_npy_tiled,
-                        dtype=tf.float32,
-                    )
-                    # Yield the same tensor infinitely
-                    while True:
-                        yield temporal_tensor
-        else:
+        temporal_chunks, sim_dict = self.featurelabelchunksgenerator.get_temporal_chunks(sim_name)
+        
+        if not temporal_chunks:
             print(f"No temporal chunks found for sim {sim_name}.")
             return None
+
+        if self.settings.DEBUG == 2:
+            print(f"GCS URLs for sim {sim_name}: {temporal_chunks}")
+
+        for temporal_url in temporal_chunks:
+            print(f"Loading temporal tensor from {temporal_url}...")
+            
+            # Download data from GCS URL using Google Cloud Storage API
+            bucket_name, blob_name = temporal_url.replace("gs://", "").split("/", 1)
+            bucket = self.storage_client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            temporal_data = blob.download_as_string()
+
+            # Load the numpy array from the downloaded content
+            temporal_npy = np.load(BytesIO(temporal_data))
+            temporal_npy_tiled = np.tile(temporal_npy, (6, 1)).T
+            temporal_tensor = tf.convert_to_tensor(
+                temporal_npy_tiled,
+                dtype=tf.float32,
+            )
+            print("Temporal tensor shape: ", temporal_tensor.shape)
+            # Yield the same tensor infinitely
+            while True:
+                yield temporal_tensor
+
 
     def rainfall_duration_generator(self, sim_name):
         print(f"Generating rainfall duration for sim_name: {sim_name}")
@@ -224,6 +112,7 @@ class IncrementalTrainDataGenerator:
 
     # create a dummy *generator* for Spatiotemporal tensors
     def _generate_spatiotemporal_tensor(self, input_shape):
+        print("Spatiotemporal tensor shape: ", input_shape)
         while True:
             yield tf.zeros((input_shape))
 
@@ -233,23 +122,9 @@ class IncrementalTrainDataGenerator:
             return match.group(1)
         return None
 
-    def _list_numpy_files_sorted(self, directory_path):
-        """Lists NumPy files in a directory, sorted alphabetically."""
-
-        # List all files in the directory
-        all_files = os.listdir(directory_path)
-
-        # Filter for files with the '.npy' extension (NumPy's default format)
-        numpy_files = [f for f in all_files if f.endswith(".npy")]
-
-        # Sort the NumPy files alphabetically
-        numpy_files.sort()
-
-        return numpy_files
-
     def _generate_feature_label_tensors(self, sim_name):
         """
-        Create feature and label tensors from the feature and label chunks.
+        Create feature and label tensors from the feature and label chunks using GCS URLs.
         """
         print("Generating feature and label tensors...")
 
@@ -261,141 +136,193 @@ class IncrementalTrainDataGenerator:
             "The output label tensor will initially be of shape: ",
             [1000, 1000, rainfall_duration],
         )
-        if not self.common_indices:
-            feature_chunks, _ = self.featurelabelchunksgenerator.get_feature_chunks(
-                sim_name
-            )
-            label_chunks, _ = self.featurelabelchunksgenerator.get_label_chunks(
-                sim_name
-            )
 
-            if not feature_chunks or not label_chunks:
-                print(f"No chunks found for sim {sim_name}.")
-                return None
+        feature_chunks, _ = self.featurelabelchunksgenerator.get_feature_chunks(sim_name)
+        label_chunks, _ = self.featurelabelchunksgenerator.get_label_chunks(sim_name)
 
-            # Define directories containing label and feature chunks
-            feature_dir = sim_name + "_feature"
-            label_dir = sim_name + "_label"
+        if not feature_chunks or not label_chunks:
+            print(f"No chunks found for sim {sim_name}.")
+            return None
 
-            # Create a sorted list of feature and label chunks from the contents of these directories on the file system
-            feature_chunks = self._list_numpy_files_sorted(feature_dir)
-            label_chunks = self._list_numpy_files_sorted(label_dir)
+        # Create dictionaries to map indices to GCS URLs (local variables)
+        feature_dict = {self._extract_index(url): url for url in feature_chunks}
+        label_dict = {self._extract_index(url): url for url in label_chunks}
 
-            # Create dictionaries to map indices to file paths
-            self.feature_dict = {self._extract_index(f): f for f in feature_chunks}
-            self.label_dict = {self._extract_index(f): f for f in label_chunks}
-
-            # Ensure both dictionaries have the same keys (i.e., they are matched)
-            self.common_indices = sorted(
-                set(self.feature_dict.keys()).intersection(set(self.label_dict.keys()))
-            )
-            print("Length of common indices:", len(self.common_indices))
-
-            if len(self.common_indices) != len(feature_chunks) or len(
-                self.common_indices
-            ) != len(label_chunks):
-                raise ValueError(
-                    "Number of matching feature chunks and label chunks do not match."
-                )
-
-            # Generate feature and label tensors in matched pairs
-            for _ in range(len(self.common_indices)):
-                # Get current index
-                if self.current_index >= len(self.common_indices):
-                    self.current_index = (
-                        0  # Reset index if it exceeds the number of available pairs
-                    )
-
-                index = self.common_indices[self.current_index]
-                self.current_index += 1
-
-                print(
-                    f"\n Using index: {index} (current_index: {self.current_index - 1})"
-                )  # Print the current index being used
-                feature_dir = sim_name + "_feature"
-                label_dir = sim_name + "_label"
-
-                feature_path = os.path.join(feature_dir, self.feature_dict[index])
-                label_path = os.path.join(label_dir, self.label_dict[index])
-
-                print(f"\n Feature file: {self.feature_dict[index]}")
-                print(f"Label file: {self.label_dict[index]}")
-
-                # Load and yield feature and label tensors in matched pairs
-                feature_tensor = tf.convert_to_tensor(
-                    np.load(feature_path),
-                    dtype=tf.float32,
-                )
-                label_tensor = tf.convert_to_tensor(
-                    np.load(label_path), dtype=tf.float32
-                )
-                reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
-
-                yield feature_tensor, reshaped_label_tensor
-
-    def get_dataset_from_tensors(self, sim_name):
-        """
-        Get the dataset for training.
-        """
-        # Get the next batch of feature tensors
-        print("Generating training data for sim_name: ", sim_name)
-
-        storm_duration = self.rainfall_duration_generator(sim_name)
-        print(f"Storm duration: {storm_duration}")
-
-        # Define output signature for features and labels
-        output_signature = (
-            {
-                "geospatial": tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
-                "temporal": tf.TensorSpec(
-                    shape=(864, constants.M_RAINFALL), dtype=tf.float32
-                ),
-                "spatiotemporal": tf.TensorSpec(
-                    shape=(1000, 1000, 1), dtype=tf.float32
-                ),
-            },
-            tf.TensorSpec(shape=(storm_duration, 1000, 1000), dtype=tf.float32),
+        # Ensure both dictionaries have the same keys (i.e., they are matched)
+        common_indices = sorted(
+            set(feature_dict.keys()).intersection(set(label_dict.keys()))
         )
+        print("Length of common indices:", len(common_indices))
 
-        def combined_generator(sim_name):  # Pass 'sim_name' as an argument
-            feature_label_generator = self._generate_feature_label_tensors(sim_name)
-            temporal_tensor_generator = self._generate_temporal_tensors(sim_name)
+        # Shuffle the common indices
+        random.shuffle(common_indices)  # Shuffle directly within the function
 
-            spatiotemporal_tensor_generator = self._generate_spatiotemporal_tensor(
-                [1000, 1000, 1]
+        if len(common_indices) != len(feature_chunks) or len(common_indices) != len(label_chunks):
+            raise ValueError(
+                "Number of matching feature chunks and label chunks do not match."
             )
-            print("Starting combined generator")
-            count = 0
-            print(f"Storm duration: {storm_duration}")
 
-            # Combine the generators into a single generator
-            for (geo, labels), temp, spatemp in zip(
-                feature_label_generator,
-                temporal_tensor_generator,
-                spatiotemporal_tensor_generator,
-            ):
-                yield (
-                    {
-                        "geospatial": geo,
-                        "temporal": temp,
-                        "spatiotemporal": spatemp,
-                    },
-                    labels,
-                )
-                count += 1
-            print(f"Combined generator finished after {count} elements")
+        # Generate feature and label tensors in matched pairs
+        for index in common_indices:  # Iterate over local common_indices
+            feature_url = feature_dict[index]  # Use local dictionaries
+            label_url = label_dict[index]
 
-        # Create the dataset
-        dataset = tf.data.Dataset.from_generator(
-            functools.partial(
-                combined_generator, sim_name
-            ),  # Pass 'sim_name' to 'combined_generator'
-            output_signature=output_signature,
-        )
-        # dataset = dataset.batch(batch_size)
-        print("Ended creating dataset, returning..")
-        # Return the batched dataset and storm duration
-        return dataset, storm_duration
+            print(f"Feature file: {feature_url}")
+            print(f"Label file: {label_url}")
+           
+             # Download data from GCS URLs using Google Cloud Storage API
+            bucket_name, blob_name = feature_url.replace("gs://", "").split("/", 1)
+            bucket = self.storage_client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            feature_data = blob.download_as_string()
+
+            bucket_name, blob_name = label_url.replace("gs://", "").split("/", 1)
+            bucket = self.storage_client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            label_data = blob.download_as_string()
+
+            # Load and yield feature and label tensors in matched pairs
+            feature_tensor = tf.convert_to_tensor(
+                np.load(BytesIO(feature_data)),
+                dtype=tf.float32,
+            )
+            label_tensor = tf.convert_to_tensor(
+                np.load(BytesIO(label_data)),
+                dtype=tf.float32
+            )
+            
+            reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
+            label_tensor = tf.ensure_shape(reshaped_label_tensor, (rainfall_duration, 1000, 1000))
+
+            print("Finished creating feature and label tensors...")
+            print(f"Feature tensor shape: {feature_tensor.shape}")
+            print(f"Label tensor shape: {reshaped_label_tensor.shape}")
+            print("\n")
+
+            yield feature_tensor, reshaped_label_tensor
+
+
+    def combined_generator(self, sim_name):  
+        feature_label_generator = self._generate_feature_label_tensors(sim_name)
+        temporal_tensor_generator = self._generate_temporal_tensors(sim_name)
+        spatiotemporal_tensor_generator = self._generate_spatiotemporal_tensor([1000, 1000, 1])
+
+        # Combine the generators into a single generator
+        for (geo, labels), temp, spatemp in zip(
+            feature_label_generator,
+            temporal_tensor_generator,
+            spatiotemporal_tensor_generator
+        ):
+            yield {
+                "geospatial": geo,
+                "temporal": temp,
+                "spatiotemporal": spatemp,    
+            } , labels
+
+    def get_datasets_from_tensors(self, sim_names, show_progress=True, limit=1):
+        """
+        Get a generator that yields smaller chunks of datasets for each simulation for training. 
+        The examples are generated from multiple simulations.
+        """
+        storm_durations = {}  # Create an empty dictionary to store storm durations
+        for sim_name in sim_names:
+            storm_duration = self.rainfall_duration_generator(sim_name)
+            storm_durations[sim_name] = storm_duration  # Store the storm duration in the dictionary
+
+        def dataset_generator(sim_name, storm_duration):
+            print("Dataset generator: generating training data for sim_name: ", sim_name, "Storm Duration: ", storm_duration)
+
+            # Define output signature for features and labels
+            output_signature = (
+                {
+                    "geospatial": tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
+                    "temporal": tf.TensorSpec(
+                        shape=(864, constants.M_RAINFALL), dtype=tf.float32
+                    ),
+                    "spatiotemporal": tf.TensorSpec(
+                        shape=(1000, 1000, 1), dtype=tf.float32
+                    ),
+                },
+                tf.TensorSpec(shape=(storm_duration, 1000, 1000), dtype=tf.float32),
+            )
+
+            # Create the dataset for this simulation
+            full_dataset = tf.data.Dataset.from_generator(
+                lambda: self.combined_generator(sim_name),
+                output_signature=output_signature
+            )
+
+            # Set the chunk size for the dataset, and batch the dataset
+            chunk_size = 1 
+            full_dataset = full_dataset.batch(chunk_size)
+
+            yield full_dataset, storm_duration
+
+        return dataset_generator, storm_durations
+
+    # def get_dataset_from_tensors(self, sim_name):
+    #     """
+    #     Get the dataset for training.
+    #     """
+    #     # Get the next batch of feature tensors
+    #     print("Generating training data for sim_name: ", sim_name)
+
+    #     storm_duration = self.rainfall_duration_generator(sim_name)
+    #     print(f"Storm duration: {storm_duration}")
+
+    #     # Define output signature for features and labels
+    #     output_signature = (
+    #         {
+    #             "geospatial": tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
+    #             "temporal": tf.TensorSpec(
+    #                 shape=(864, constants.M_RAINFALL), dtype=tf.float32
+    #             ),
+    #             "spatiotemporal": tf.TensorSpec(
+    #                 shape=(1000, 1000, 1), dtype=tf.float32
+    #             ),
+    #         },
+    #         tf.TensorSpec(shape=(storm_duration, 1000, 1000), dtype=tf.float32),
+    #     )
+
+    #     def combined_generator(sim_name):  # Pass 'sim_name' as an argument
+    #         feature_label_generator = self._generate_feature_label_tensors(sim_name)
+    #         temporal_tensor_generator = self._generate_temporal_tensors(sim_name)
+
+    #         spatiotemporal_tensor_generator = self._generate_spatiotemporal_tensor(
+    #             [1000, 1000, 1]
+    #         )
+    #         print("Starting combined generator")
+    #         count = 0
+    #         print(f"Storm duration: {storm_duration}")
+
+    #         # Combine the generators into a single generator
+    #         for (geo, labels), temp, spatemp in zip(
+    #             feature_label_generator,
+    #             temporal_tensor_generator,
+    #             spatiotemporal_tensor_generator,
+    #         ):
+    #             yield (
+    #                 {
+    #                     "geospatial": geo,
+    #                     "temporal": temp,
+    #                     "spatiotemporal": spatemp,
+    #                 },
+    #                 labels,
+    #             )
+    #             count += 1
+    #         print(f"Combined generator finished after {count} elements")
+
+    #     # Create the dataset
+    #     dataset = tf.data.Dataset.from_generator(
+    #         functools.partial(
+    #             combined_generator, sim_name
+    #         ),  # Pass 'sim_name' to 'combined_generator'
+    #         output_signature=output_signature,
+    #     )
+    #     # dataset = dataset.batch(batch_size)
+    #     print("Ended creating dataset, returning..")
+    #     # Return the batched dataset and storm duration
+    #     return dataset, storm_duration
 
     # def get_next_batch(self, sim_names, batch_size) -> List[FloodModelData]:
     #     """
@@ -650,3 +577,112 @@ class IncrementalTrainDataGenerator:
     #             yield reshaped_label_tensor  # Yield only the reshaped label tensor
     #     else:
     #         print(f"No label chunks found for sim {sim_name}.")
+
+
+#  def download_numpy_files_in_dir(self, gcs_urls, dir_name, max_workers=25):
+#         """
+#         Download all numpy files from a directory in GCS to local storage.
+#         """
+#         if dir_name is None:
+#             print("GCS directory name is empty, returning...")
+#             return
+
+#         if os.path.exists(dir_name):
+#             npy_files = glob.glob(os.path.join(dir_name, "*.npy"))
+#             if npy_files:
+#                 print(
+#                     f"Directory '{dir_name}' already contains .npy files, skipping download."
+#                 )
+#                 return
+#         else:
+#             os.makedirs(dir_name)
+#             print(f"Directory '{dir_name}' did not exist and was created.")
+
+#         print(f"Downloading numpy files from GCS directory to: {dir_name}")
+
+#         if len(gcs_urls) > 1:
+#             max_workers = min(self.settings.MAX_WORKERS, len(gcs_urls))
+#         else:
+#             max_workers = 1
+
+#         def _download_file(gcs_url, local_dir):
+#             def download_single_file(single_gcs_url):
+#                 try:
+#                     print(f"Downloading file from GCS URL: {single_gcs_url}")
+#                     bucket_name, blob_name = single_gcs_url.replace("gs://", "").split(
+#                         "/", 1
+#                     )
+#                     bucket = self.storage_client.bucket(bucket_name)
+#                     blob = bucket.blob(blob_name)
+#                     local_path = os.path.join(local_dir, os.path.basename(blob_name))
+#                     blob.download_to_filename(local_path)
+#                     # print(f"Downloaded {single_gcs_url} to {local_path}")
+#                 except Exception as e:
+#                     print(f"Error downloading file {single_gcs_url}: {e}")
+
+#             if gcs_url is None:
+#                 return
+
+#             if isinstance(gcs_url, str):
+#                 download_single_file(gcs_url)
+#             elif isinstance(gcs_url, list):
+#                 for url in gcs_url:
+#                     download_single_file(url)
+
+#         with ThreadPoolExecutor(max_workers=max_workers) as executor:
+#             futures = [
+#                 executor.submit(_download_file, gcs_url, dir_name)
+#                 for gcs_url in gcs_urls
+#             ]
+
+#             for future in futures:
+#                 try:
+#                     future.result()  # Wait for all futures to complete
+#                 except Exception as e:
+#                     print(f"Error downloading chunk numpy files: {e}")
+#         print("Finished downloading numpy files.")
+
+#     def download_numpy_files(self, sim_names, chunktype):
+#         """
+#         Download numpy files for the given sim_names.
+#         """
+#         for sim_name in sim_names:
+#             print(f"Downloading numpy files for sim: {sim_name}")
+
+#             # Get GCS URLs for npy chunks
+#             feature_chunks, sim_dict = (
+#                 self.featurelabelchunksgenerator.get_feature_chunks(sim_name)
+#             )
+#             label_chunks, sim_dict = self.featurelabelchunksgenerator.get_label_chunks(
+#                 sim_name
+#             )
+#             temporal_chunks = self.featurelabelchunksgenerator.get_temporal_chunks(
+#                 sim_name
+#             )
+
+#             if chunktype == "feature":
+#                 dir_name = sim_name + "_feature"
+#                 for sim_name in sim_names:
+#                     self.download_numpy_files_in_dir(feature_chunks, dir_name)
+#             if chunktype == "label":
+#                 dir_name = sim_name + "_label"
+#                 for sim_name in sim_names:
+#                     self.download_numpy_files_in_dir(label_chunks, dir_name)
+#             if chunktype == "temporal":
+#                 dir_name = sim_name + "_temporal"
+#                 for sim_name in sim_names:
+#                     self.download_numpy_files_in_dir(temporal_chunks, dir_name)
+
+#   def _list_numpy_files_sorted(self, directory_path):
+#         """Lists NumPy files in a directory, sorted alphabetically."""
+
+#         # List all files in the directory
+#         all_files = os.listdir(directory_path)
+
+#         # Filter for files with the '.npy' extension (NumPy's default format)
+#         numpy_files = [f for f in all_files if f.endswith(".npy")]
+
+#         # Sort the NumPy files alphabetically
+#         numpy_files.sort()
+
+#         return numpy_files
