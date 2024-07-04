@@ -1028,10 +1028,18 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
         metastore.StudyAreaSpatialChunk.update_scaling_done(
             db, study_area_name, chunk_name, scaled_feature_matrix_path
         )
-        # Deleting unscaled matrix
-        feature_blob.delete()
-        # Deleting trigger file
-        feature_bucket.blob(blob_path).delete()
+
+        # Deleting unscaled matrix, skip Not Found errors for idempotency.
+        try:
+            feature_blob.delete()
+        except exceptions.NotFound:
+            pass
+
+        # Deleting trigger file, skip Not Found errors for idempotency.
+        try:
+            feature_bucket.blob(blob_path).delete()
+        except exceptions.NotFound:
+            pass
 
 
 @functions_framework.cloud_event
