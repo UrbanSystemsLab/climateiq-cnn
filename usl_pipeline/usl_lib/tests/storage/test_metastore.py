@@ -245,6 +245,30 @@ def test_simulation_label_chunk_is_in_validation_set_produce_right_split() -> No
     assert sum(chunks_in_validation_set) == 2
 
 
+def test_simulation_label_chunk_is_in_validation_set_is_deterministic() -> None:
+    """Ensure is_in_validation_set produces deterministic outputs."""
+    study_area = metastore.StudyArea(
+        name="name",
+        col_count=2,
+        row_count=5,
+        x_ll_corner=1.0,
+        y_ll_corner=2.0,
+        cell_size=3.0,
+        crs="over there",
+        chunk_size=1,
+        chunk_x_count=2,
+        chunk_y_count=5,
+    )
+
+    # Call the function with the same inputs several times.
+    results = [
+        metastore.SimulationLabelChunk.is_in_validation_set(study_area, "config", 0, 0)
+        for _ in range(10)
+    ]
+    # Ensure they're all the same.
+    assert all(res == results[0] for res in results)
+
+
 def test_simulation_label_chunk_is_in_validation_produces_different_splits() -> None:
     """Ensure is_in_validation_set produces distinct splits for distinct simulations."""
     study_area = metastore.StudyArea(
