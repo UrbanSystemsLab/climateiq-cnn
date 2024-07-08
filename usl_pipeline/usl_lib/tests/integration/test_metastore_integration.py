@@ -271,19 +271,17 @@ def test_delete_all_study_area_chunks(firestore_db):
 
     for i in range(20):
         assert (
-            metastore.StudyAreaSpatialChunk.get_if_exists(
+            metastore.StudyAreaChunk.get_if_exists(
                 firestore_db, "study_area_name", f"chunk_{i}"
             )
             is not None
         )
 
-    metastore.StudyAreaChunk.delete_all_for_study_area(
-        firestore_db, study_area.name, page_size=10
-    )
+    metastore.StudyArea.delete_all_chunks(firestore_db, study_area.name, page_size=10)
 
     for i in range(20):
         assert (
-            metastore.StudyAreaSpatialChunk.get_if_exists(
+            metastore.StudyAreaChunk.get_if_exists(
                 firestore_db, "study_area_name", f"chunk_{i}"
             )
             is None

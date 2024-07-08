@@ -124,6 +124,30 @@ def test_study_area_update_chunk_info_no_need():
     mock_db.transaction().update.assert_not_called()
 
 
+def test_study_area_delete_all_chunks():
+    mock_db = mock.MagicMock()
+    mock_doc_ref = mock.MagicMock()
+    mock_db.collection().document().collection().list_documents.return_value = [
+        mock_doc_ref,
+        mock_doc_ref,
+        mock_doc_ref,
+    ]
+
+    metastore.StudyArea.delete_all_chunks(mock_db, "TestStudyArea")
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("study_areas"),
+            mock.call.collection().document("TestStudyArea"),
+            mock.call.collection().document().collection("chunks"),
+            mock.call.collection()
+            .document()
+            .collection()
+            .list_documents(page_size=None),
+        ]
+    )
+    assert mock_doc_ref.delete.call_count == 3
+
+
 def test_study_area_chunk_get_if_exists():
     mock_db = mock.MagicMock()
     chunk_doc_mock = mock_db.collection().document().collection().document().get()
@@ -171,30 +195,6 @@ def test_study_area_chunk_update_scaling_done():
             ),
         ]
     )
-
-
-def test_study_area_chunk_delete_all_for_study_area():
-    mock_db = mock.MagicMock()
-    mock_doc_ref = mock.MagicMock()
-    mock_db.collection().document().collection().list_documents.return_value = [
-        mock_doc_ref,
-        mock_doc_ref,
-        mock_doc_ref,
-    ]
-
-    metastore.StudyAreaChunk.delete_all_for_study_area(mock_db, "TestStudyArea")
-    mock_db.assert_has_calls(
-        [
-            mock.call.collection("study_areas"),
-            mock.call.collection().document("TestStudyArea"),
-            mock.call.collection().document().collection("chunks"),
-            mock.call.collection()
-            .document()
-            .collection()
-            .list_documents(page_size=None),
-        ]
-    )
-    assert mock_doc_ref.delete.call_count == 3
 
 
 def test_flood_scenario_config_set():
