@@ -266,20 +266,18 @@ class StudyAreaChunk:
             {"needs_scaling": False, "feature_matrix_path": scaled_feature_matrix_path},
         )
 
-    @classmethod
+    @staticmethod
     def delete_all_for_study_area(
-        cls,
         db: firestore.Client,
         study_area_name: str,
-        page_size: int = 100,
+        page_size: Optional[int] = None,
     ) -> None:
         """Deletes all the chunks from chunk sub-collection for a given study area.
 
         Args:
             db: The firestore database client to use.
             study_area_name: The study area to delete.
-            page_size: Optional number of documents in the processing page (default is
-                100).
+            page_size: Optional number of documents in the processing page.
         """
         docs = (
             db.collection(STUDY_AREAS)

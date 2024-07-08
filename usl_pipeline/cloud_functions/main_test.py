@@ -723,7 +723,7 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
             .collection()
             .document()
             .collection()
-            .list_documents(page_size=100),
+            .list_documents(page_size=None),
             mock.call().collection("study_areas"),
             mock.call().collection().document("study_area"),
             mock.call()

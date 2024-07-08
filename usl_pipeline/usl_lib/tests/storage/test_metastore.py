@@ -191,7 +191,7 @@ def test_study_area_chunk_delete_all_for_study_area():
             mock.call.collection()
             .document()
             .collection()
-            .list_documents(page_size=100),
+            .list_documents(page_size=None),
         ]
     )
     assert mock_doc_ref.delete.call_count == 3
