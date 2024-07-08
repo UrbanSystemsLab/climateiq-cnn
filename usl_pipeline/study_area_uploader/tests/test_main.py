@@ -1,8 +1,19 @@
-def test_import():
-    """Ensure the packages are importable."""
-    # TODO: replace this with real tests as we build out script functionality.
-    from study_area_uploader import main
-    import usl_lib
+from unittest import mock
 
-    del main
-    del usl_lib
+from study_area_uploader import main
+
+
+@mock.patch.object(main, "study_area_chunkers")
+@mock.patch.object(main, "study_area_transformers")
+@mock.patch.object(main, "parse_args")
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+def test_happy_path(
+    mock_storage_client,
+    mock_firestore_client,
+    mock_parse_args_func,
+    mock_transformers,
+    mock_chunkers,
+):
+    """Ensure study area files are uploaded, metadata is stored and chunks are made."""
+    main.main()

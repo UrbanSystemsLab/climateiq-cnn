@@ -76,6 +76,11 @@ def main() -> None:
             else:
                 break
 
+        chunk_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_CHUNKS_BUCKET)
+        delete_storage_files_with_prefix(chunk_bucket, f"{args.name}/")
+        delete_storage_files_with_prefix(
+            storage_client.bucket(cloud_storage.FEATURE_CHUNKS_BUCKET), f"{args.name}/"
+        )
         logging.info(
             "Storage bucket for study area chunks: %s",
             cloud_storage.STUDY_AREA_CHUNKS_BUCKET,
@@ -84,10 +89,20 @@ def main() -> None:
             args.name,
             prepared_inputs,
             work_dir,
-            storage_client.bucket(cloud_storage.STUDY_AREA_CHUNKS_BUCKET),
+            chunk_bucket,
             args.chunk_length,
             input_elevation_band=args.elevation_geotiff_band,
         )
+
+
+def delete_storage_files_with_prefix(bucket: storage.Bucket, prefix: str) -> None:
+    logging.info("Deleting all files in gs://%s/%s*...")
+    blobs = bucket.list_blobs(prefix=f"{prefix}")
+    deleted_count = 0
+    for blob in blobs:
+        # blob.delete()
+        deleted_count = deleted_count + 1
+    logging.info(" - %s files were deleted", deleted_count)
 
 
 def parse_args() -> argparse.Namespace:
