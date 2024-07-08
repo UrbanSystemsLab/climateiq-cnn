@@ -687,9 +687,10 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
         )
     )
 
-    mock_firestore_client().collection("study_areas").document(
-        "study_area"
-    ).get().exists = True
+    old_chunk_ref_mock = mock.MagicMock()
+    (
+        mock_firestore_client().collection().document().collection().list_documents
+    ).return_value = [old_chunk_ref_mock]
 
     main.write_study_area_metadata(
         functions_framework.CloudEvent(
@@ -717,8 +718,12 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
             mock.call(),
             mock.call().collection("study_areas"),
             mock.call().collection().document("study_area"),
-            mock.call().collection().document().get(),
-            mock.call().collection().document().delete(),
+            mock.call().collection().document().collection("chunks"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .list_documents(page_size=100),
             mock.call().collection("study_areas"),
             mock.call().collection().document("study_area"),
             mock.call()
@@ -736,6 +741,7 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
             ),
         ]
     )
+    old_chunk_ref_mock.delete.assert_called_once()
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)

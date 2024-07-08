@@ -155,18 +155,6 @@ class StudyArea:
             },
         )
 
-    @staticmethod
-    def delete_if_exists(db: firestore.Client, study_area_name: str) -> None:
-        """Deletes a given study area document if it exists.
-
-        Args:
-          db: The firestore database client to use.
-          study_area_name: The study area to delete.
-        """
-        ref = db.collection(STUDY_AREAS).document(study_area_name)
-        if ref.get().exists:
-            ref.delete()
-
     def _as_dict(self) -> dict:
         as_dict = {}
         for field in self.__dataclass_fields__:
@@ -277,6 +265,31 @@ class StudyAreaChunk:
         cls.get_ref(db, study_area_name, chunk_name).update(
             {"needs_scaling": False, "feature_matrix_path": scaled_feature_matrix_path},
         )
+
+    @classmethod
+    def delete_all_for_study_area(
+        cls,
+        db: firestore.Client,
+        study_area_name: str,
+        page_size: int = 100,
+    ) -> None:
+        """Deletes all the chunks from chunk sub-collection for a given study area.
+
+        Args:
+            db: The firestore database client to use.
+            study_area_name: The study area to delete.
+            page_size: Optional number of documents in the processing page (default is
+                100).
+        """
+        docs = (
+            db.collection(STUDY_AREAS)
+            .document(study_area_name)
+            .collection(STUDY_AREA_CHUNKS)
+            .list_documents(page_size=page_size)
+        )
+        for doc in docs:
+            print(f"Deleting chunk {doc.get().to_dict()}")
+            doc.delete()
 
 
 @dataclasses.dataclass(slots=True)

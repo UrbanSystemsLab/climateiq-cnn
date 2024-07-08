@@ -199,7 +199,7 @@ def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> No
         # File names should be in the form <study_area_name>/<file_name>
         study_area_name = file_name.parent.name
 
-        metastore.StudyArea.delete_if_exists(db, study_area_name)
+        metastore.StudyAreaChunk.delete_all_for_study_area(db, study_area_name)
         study_area = metastore.StudyArea(
             name=study_area_name,
             col_count=header.col_count,

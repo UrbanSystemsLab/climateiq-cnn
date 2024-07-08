@@ -91,38 +91,6 @@ def test_study_area_as_header():
     )
 
 
-def test_study_area_delete_if_exists_skipped():
-    mock_db = mock.MagicMock()
-    doc_mock = mock_db.collection().document().get()
-    doc_mock.exists = False
-
-    metastore.StudyArea.delete_if_exists(mock_db, "TestStudyArea")
-    mock_db.assert_has_calls(
-        [
-            mock.call.collection("study_areas"),
-            mock.call.collection().document("TestStudyArea"),
-            mock.call.collection().document().get(),
-        ]
-    )
-    mock_db.collection().document().delete.assert_not_called(),
-
-
-def test_study_area_delete_if_exists_performed():
-    mock_db = mock.MagicMock()
-    doc_mock = mock_db.collection().document().get()
-    doc_mock.exists = True
-
-    metastore.StudyArea.delete_if_exists(mock_db, "TestStudyArea")
-    mock_db.assert_has_calls(
-        [
-            mock.call.collection("study_areas"),
-            mock.call.collection().document("TestStudyArea"),
-            mock.call.collection().document().get(),
-            mock.call.collection().document().delete(),
-        ]
-    )
-
-
 def test_study_area_update_chunk_info():
     mock_db = mock.MagicMock()
     mock_db.collection().document().get().to_dict.return_value = {
@@ -203,6 +171,30 @@ def test_study_area_chunk_update_scaling_done():
             ),
         ]
     )
+
+
+def test_study_area_chunk_delete_all_for_study_area():
+    mock_db = mock.MagicMock()
+    mock_doc_ref = mock.MagicMock()
+    mock_db.collection().document().collection().list_documents.return_value = [
+        mock_doc_ref,
+        mock_doc_ref,
+        mock_doc_ref,
+    ]
+
+    metastore.StudyAreaChunk.delete_all_for_study_area(mock_db, "TestStudyArea")
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("study_areas"),
+            mock.call.collection().document("TestStudyArea"),
+            mock.call.collection().document().collection("chunks"),
+            mock.call.collection()
+            .document()
+            .collection()
+            .list_documents(page_size=100),
+        ]
+    )
+    assert mock_doc_ref.delete.call_count == 3
 
 
 def test_flood_scenario_config_set():
