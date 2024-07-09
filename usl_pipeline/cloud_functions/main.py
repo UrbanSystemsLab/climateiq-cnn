@@ -497,7 +497,7 @@ def _collapse_city_cat_output_chunks(
     study_area_name = blob_path.parts[1]
     # Note that the config name be multiple 'folders' e.g. config_name/rainfall_4.txt
     config_path = str(pathlib.PurePosixPath(*blob_path.parts[2:-2]))
-    x_index, y_index = blob_path.parts[-2].split("_")
+    x_index, y_index = map(int, blob_path.parts[-2].split("_"))
     logging.info("Processing chunk %s for config %s", blob, config_path)
 
     # Retrieve the number of timesteps configured for this result file's simulation.
@@ -547,10 +547,14 @@ def _collapse_city_cat_output_chunks(
             # invocation was running.
             continue
 
+    study_area = metastore.StudyArea.get(db, study_area_name)
     metastore.SimulationLabelChunk(
         gcs_uri=f"gs://{labels_bucket.name}/{label_path}",
-        x_index=int(x_index),
-        y_index=int(y_index),
+        x_index=x_index,
+        y_index=y_index,
+        in_test_set=metastore.SimulationLabelChunk.is_in_test_set(
+            study_area, config_path, x_index, y_index
+        ),
     ).set(db, study_area_name, config_path)
 
     logging.info(

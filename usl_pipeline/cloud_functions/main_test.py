@@ -1149,12 +1149,25 @@ def test_write_city_cat_output_chunks(mock_firestore_client):
 def test_collapse_city_cat_output_chunks(mock_firestore_client):
     """Ensures we write the correct chunks to GCS."""
     # Have firestore return a three-timestep configuration.
-    mock_firestore_client().collection().document().get().to_dict.return_value = {
-        "gcs_uri": "gs://config-bucket/config/file.txt",
-        "as_vector_gcs_uri": "gs://label-bucket/config/file.npy",
-        "parent_config_name": "config",
-        "rainfall_duration": 3,
-    }
+    mock_firestore_client().collection().document().get().to_dict.side_effect = [
+        # The first call to get is for a FloodScenarioConfig.
+        {
+            "gcs_uri": "gs://config-bucket/config/file.txt",
+            "as_vector_gcs_uri": "gs://label-bucket/config/file.npy",
+            "parent_config_name": "config",
+            "rainfall_duration": 3,
+        },
+        # The second call is for a StudyArea.
+        {
+            "col_count": 2,
+            "row_count": 5,
+            "x_ll_corner": 0.0,
+            "y_ll_corner": 0.0,
+            "cell_size": 1.0,
+            "chunk_x_count": 2,
+            "chunk_y_count": 5,
+        },
+    ]
 
     # Create a blob for the file triggering the cloud function run.
     blob_path = pathlib.PurePosixPath(
@@ -1245,6 +1258,7 @@ def test_collapse_city_cat_output_chunks(mock_firestore_client):
                     ),
                     "x_index": 0,
                     "y_index": 1,
+                    "in_test_set": False,
                 }
             ),
         ]
