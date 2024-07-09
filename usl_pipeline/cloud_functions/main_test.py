@@ -1213,7 +1213,7 @@ def test_build_wrf_label_matrix(
     mock_firestore_client.assert_has_calls(
         [
             mock.call().collection("simulations"),
-            mock.call().collection().document("study_area-None"),
+            mock.call().collection().document("study_area"),
             mock.call().collection().document().collection("label_chunks"),
             mock.call()
             .collection()
@@ -1238,7 +1238,6 @@ def test_build_wrf_label_matrix(
     )
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_client, _):

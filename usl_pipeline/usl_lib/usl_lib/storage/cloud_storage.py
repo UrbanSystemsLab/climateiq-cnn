@@ -4,6 +4,9 @@ STUDY_AREA_BUCKET = os.environ.get("BUCKET_PREFIX", "") + "climateiq-study-areas
 STUDY_AREA_CHUNKS_BUCKET = (
     os.environ.get("BUCKET_PREFIX", "") + "climateiq-study-area-chunks"
 )
+SIMULATION_CHUNKS_BUCKET = (
+    os.environ.get("BUCKET_PREFIX", "") + "climateiq-simulation-chunks"
+)
 FEATURE_CHUNKS_BUCKET = (
     os.environ.get("BUCKET_PREFIX", "") + "climateiq-study-area-feature-chunks"
 )

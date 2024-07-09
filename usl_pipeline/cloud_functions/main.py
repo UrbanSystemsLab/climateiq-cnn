@@ -381,6 +381,50 @@ def delete_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) 
 
 @functions_framework.cloud_event
 @_retry_and_report_errors()
+def build_and_upload_simulation_chunk(
+    cloud_event: functions_framework.CloudEvent,
+) -> None:
+    """Creates a simulation chunk and uploads it to GCS.
+
+    This function is triggered when files containing raw output data for a simulation
+    is uploaded to GCS. It will load the file into simluation chunks bucket and
+    write a new simluation entry to metastore.
+    """
+    file_name = pathlib.PurePosixPath(cloud_event.data["name"])
+    bucket_name = cloud_event.data["bucket"]
+
+    # For AtmoML, only 3rd domain (500m) output files will be used
+    if re.search(file_names.WRF_DOMAIN3_NC_REGEX, file_name.name):
+        storage_client = storage.Client()
+        db = firestore.Client()
+
+        bucket = storage_client.bucket(bucket_name)
+        file_blob = bucket.blob(str(file_name))
+        blob_path = pathlib.PurePosixPath(cloud_event.data["name"])
+
+        # For WRF, we can treat each snapshot output file as its own chunk. If
+        # multiple snapshots must be processed together, we can choose to group
+        # the files together in a TAR before uploading.
+        with file_blob.open("rb") as fd:
+            simulation_chunk_bucket = storage_client.bucket(
+                cloud_storage.SIMULATION_CHUNKS_BUCKET
+            )
+            simulation_chunk_bucket.blob(str(file_name)).upload_from_file(fd)
+
+            # File names should be in the form <study_area_name>/<file_name>
+            study_area_name = file_name.parent.name
+
+            # Enter the simulation in our metastore.
+            metastore.Simulation(
+                gcs_prefix_uri=f"gs://{file_blob.bucket.name}/{blob_path.parent}",
+                simulation_type=metastore.SimulationType.WRF,
+                study_area=metastore.StudyArea.get_ref(db, study_area_name),
+                configuration=None,
+            ).set(db)
+
+
+@functions_framework.cloud_event
+@_retry_and_report_errors()
 def build_wrf_label_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     """Builds a label matrix when a set of simulation output files is uploaded.
 
@@ -466,8 +510,7 @@ def _write_wrf_label_chunk_metastore_entry(
     metastore.SimulationLabelTemporalChunk(
         gcs_uri=f"gs://{label_blob.bucket.name}/{label_blob.name}",
         time=metadata.time,
-        # TODO: Figure out how to differentiate each wrf label chunk (config_path)
-    ).set(db, study_area_name, config_path="None")
+    ).set(db, study_area_name)
 
 
 @functions_framework.cloud_event
