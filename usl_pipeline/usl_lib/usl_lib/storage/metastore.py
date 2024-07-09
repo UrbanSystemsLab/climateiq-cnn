@@ -155,6 +155,28 @@ class StudyArea:
             },
         )
 
+    @staticmethod
+    def delete_all_chunks(
+        db: firestore.Client,
+        study_area_name: str,
+        page_size: Optional[int] = None,
+    ) -> None:
+        """Deletes all the chunks from chunk sub-collection for a given study area.
+
+        Args:
+            db: The firestore database client to use.
+            study_area_name: The study area to delete.
+            page_size: Optional number of documents in the processing page.
+        """
+        docs = (
+            db.collection(STUDY_AREAS)
+            .document(study_area_name)
+            .collection(STUDY_AREA_CHUNKS)
+            .list_documents(page_size=page_size)
+        )
+        for doc in docs:
+            doc.delete()
+
     def _as_dict(self) -> dict:
         as_dict = {}
         for field in self.__dataclass_fields__:

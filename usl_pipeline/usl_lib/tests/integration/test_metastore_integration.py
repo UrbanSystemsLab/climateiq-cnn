@@ -251,6 +251,43 @@ def test_create_get_study_area_spatial_chunk(firestore_db):
     )
 
 
+def test_delete_all_study_area_chunks(firestore_db):
+    """Ensures all study area chunks can be deleted for a given study area."""
+    study_area = metastore.StudyArea(
+        name="study_area_name",
+        col_count=1,
+        row_count=2,
+        x_ll_corner=3,
+        y_ll_corner=4,
+        cell_size=5,
+        crs="crs",
+    )
+    study_area.create(firestore_db)
+
+    for i in range(20):
+        metastore.StudyAreaChunk(id_=f"chunk_{i}", raw_path="tar!").merge(
+            firestore_db, "study_area_name"
+        )
+
+    for i in range(20):
+        assert (
+            metastore.StudyAreaChunk.get_if_exists(
+                firestore_db, "study_area_name", f"chunk_{i}"
+            )
+            is not None
+        )
+
+    metastore.StudyArea.delete_all_chunks(firestore_db, study_area.name, page_size=10)
+
+    for i in range(20):
+        assert (
+            metastore.StudyAreaChunk.get_if_exists(
+                firestore_db, "study_area_name", f"chunk_{i}"
+            )
+            is None
+        )
+
+
 def test_create_get_study_area_temporal_chunk(firestore_db):
     """Ensures a study area spatial chunk can be created and retrieved."""
     study_area = metastore.StudyArea(
