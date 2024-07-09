@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import tensorflow as tf
 
 from usl_models.flood_ml import constants
+from typing import Any
 
 
 @dataclass(kw_only=True, slots=True)
@@ -23,7 +24,7 @@ class FloodModelParams:
     # Keras parameters.
     # Keras models support both Optimizer objects and (valid) string names.
     # It is the user's responsibility to pass in a valid optimizer value.
-    optimizer: tf.keras.Optimizer | str = "adam"
+    optimizer: Any = tf.keras.optimizers.Adam(learning_rate=1e-3)
     epochs: int = 10
 
 

@@ -4,8 +4,9 @@ import dataclasses
 import logging
 from typing import Optional, TypeAlias
 
+import datetime
 import tensorflow as tf
-from tensorflow.keras import layers
+from keras import layers
 
 from usl_models.flood_ml import constants
 from usl_models.flood_ml import data_utils
@@ -103,80 +104,55 @@ class FloodModel:
         data = dataclasses.replace(data, spatiotemporal=st_input)
         return data
 
-    def _model_fit(
-        self, data: FloodModelData, early_stopping: Optional[int]
-    ) -> tf.keras.callbacks.History:
-        """Fits the model on a single batch of FloodModelData.
+    def _model_fit(self, features, labels, storm_duration: int, early_stopping: int | None = None):
+        storm_duration = int(storm_duration)
+        print("Setting n_predictions to storm_duration:", storm_duration)
+        self._model.set_n_predictions(storm_duration)
+        # Create a TensorBoard callback
+        logs = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-        Args:
-            data: A FloodModelData object.
-            early_stopping: Optional integer representing the number of epochs to assign
-                as the patience when enabling early stopping. See the train method for
-                more details.
-
-        Returns: A History object containing the training and validation loss
-            and metrics.
-        """
-        inputs = {
-            "spatiotemporal": data.spatiotemporal,
-            "geospatial": data.geospatial,
-            "temporal": data.temporal,
-        }
-        self._model.set_n_predictions(data.storm_duration)
-
-        callbacks = None
-        if early_stopping:
-            es_callback = tf.keras.callbacks.EarlyStopping(
-                monitor="val_loss", mode="min", patience=early_stopping
-            )
-            callbacks = [es_callback]
-
-        history = self._model.fit(
-            inputs,
-            data.labels,
-            batch_size=self._model_params.batch_size,
-            epochs=self._model_params.epochs,
-            validation_split=0.2,
-            callbacks=callbacks,
+        tb_callback = tf.keras.callbacks.TensorBoard(log_dir=logs,
+                                                     histogram_freq=1,
+                                                     profile_batch='1,1')
+        es_callback = tf.keras.callbacks.EarlyStopping(
+            monitor="val_loss", mode="min", patience=early_stopping
         )
+        # Fit the model for this sample
+        history = self._model.fit(
+            features, labels, callbacks=[tb_callback] +
+            [es_callback] if early_stopping else []
+        )
+
         return history
 
-    def train(
-        self,
-        data: list[FloodModelData],
-        early_stopping: Optional[int] = None,
-    ) -> list[tf.keras.callbacks.History]:
-        """Trains the model.
+    def train(self, dataset_functions, storm_durations):
+        """Trains the model using the list of dataset-creation functions."""
+        model_histories = []
+        sim_names = list(storm_durations.keys())
+        num_sims = len(sim_names)
+        print("Number of simulations:", num_sims)
+        print("Starting training...")
 
-        The internal flood model architecture is restricted to a single storm
-        duration for each training run. In order to train on varying storm durations,
-        the model must be trained incrementally via several `fit` calls.
-        This function provides a wrapper around the incremental training logic,
-        allowing the user to pass in data for multiple storm durations at once
-        via a list of FloodModelData objects.
+        for sim_index in range(num_sims):
+            sim_name = sim_names[sim_index]
+            storm_duration = storm_durations[sim_name]
+            print(
+                f"Training on simulation: {sim_name}, Storm Duration: {storm_duration}")
 
-        Each FloodModelData instance is associated with a single storm duration.
-        In other words, data for different storm durations must be passed in as
-        separate FloodModelData objects.
+            # Get the generator for the current simulation dataset
+            current_dataset_generator = dataset_functions(sim_name, storm_duration)
 
-        Args:
-            data: A list of FloodModelData objects. Labels are required for training.
-            early_stopping: Optional integer representing the number of epochs to assign
-                as the patience when enabling early stopping. The model will stop
-                training if the validation loss doesn't improve after that many
-                epochs, up until the total number of epochs set for training.
+            for single_sim_chunk, storm_duration in current_dataset_generator:
+                for features, labels in single_sim_chunk:
+                    history = self._model_fit(features, labels, storm_duration)
+                    model_histories.append(history)
 
-        Returns: A list of History objects containing the record of training and,
-            if applicable, validation loss and metrics.
-        """
-        model_history = []
-        processed = [self._validate_and_preprocess_data(x, training=True) for x in data]
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        model_filename = f"flood_model_{timestamp}.keras"
+        self._model.save(model_filename)
+        print(f"Model saved to {model_filename}")
 
-        for x in processed:
-            history = self._model_fit(x, early_stopping=early_stopping)
-            model_history.append(history)
-
-        return model_history
+        return model_histories
 
     def load_model(self, filepath: str) -> None:
         """Loads weights from an existing file.
