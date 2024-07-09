@@ -2,34 +2,11 @@
 
 ## Model memory experiments
 
-Placeholder for model memory notes.
+Training the ConvLSTM is expensive in VRAM on GPU. We trained the model using an A100 with 40GB of RAM and were only able to get a batch size of 4.
 
-Tensor shapes:
+Some strategies to reduce memory requirement:
 
-```
-st_input (None, 1, 1000, 1000, 1)
-temp_input (None, 1, 6)
-st_input (None, 2, 1000, 1000, 1)
-temp_input (None, 2, 6)
-st_input (None, 3, 1000, 1000, 1)
-temp_input (None, 3, 6)
-st_input (None, 4, 1000, 1000, 1)
-temp_input (None, 4, 6)
-st_input (None, 5, 1000, 1000, 1)
-temp_input (None, 5, 6)
-st_input (None, 5, 1000, 1000, 1)
-temp_input (None, 5, 6)
-st_input (None, 5, 1000, 1000, 1)
-temp_input (None, 5, 6)
-st_input (None, 5, 1000, 1000, 1)
-temp_input (None, 5, 6)
-st_input (None, 5, 1000, 1000, 1)
-temp_input (None, 5, 6)
-st_input (None, 5, 1000, 1000, 1)
-temp_input (None, 5, 6)
-st_input (None, 5, 1000, 1000, 1)
-temp_input (None, 5, 6)
-st_input (None, 5, 1000, 1000, 1)
-temp_input (None, 5, 6)
-st_input (None, 5, 1000, 1000, 1)
-```
+1) Smaller context window (`constants.N_FLOOD_MAPS`)
+2) Smaller spatial chunks (currently using 1000 X 1000)
+3) Migrating to JAX instead of TF
+4) Using half-precision floats (`dtype=tf.float16`)
