@@ -15,7 +15,7 @@ class FirestoreDataHandler:
         firestore_client: firestore.Client = None,
         settings: Settings = None,
     ):
-        print("Initializing FirestoreDataHandler...")
+        # print("Initializing FirestoreDataHandler...")
         self.firestore_client = firestore_client or firestore.Client()
 
         # Load settings
@@ -55,10 +55,12 @@ class FirestoreDataHandler:
         """
         try:
             if self.settings.DEBUG > 2:
-                print(f"Searching for document with ID '{document_id}' in collection '{collection_name}'")
+                print(
+                    f"Searching for document with ID '{document_id}' in collection '{collection_name}'")
 
             # Get the document with the given ID
-            document = self.firestore_client.collection(collection_name).document(document_id).get()
+            document = self.firestore_client.collection(
+                collection_name).document(document_id).get()
 
             # If the document exists, return it as a dictionary
             if document.exists:
@@ -66,7 +68,8 @@ class FirestoreDataHandler:
                     print(f"Found document: {document.to_dict()}")
                 return document.to_dict()
             else:
-                print(f"No document found with ID '{document_id}' in collection '{collection_name}'")
+                print(
+                    f"No document found with ID '{document_id}' in collection '{collection_name}'")
                 return None
 
         except Exception as e:
@@ -101,7 +104,7 @@ class FirestoreDataHandler:
 
     def _find_simulation_documents(self, simulation_collection_name):
         """Finds all documents under a given simulation collection."""
-        print(f"Finding documents under collection: {simulation_collection_name}")
+        # print(f"Finding documents under collection: {simulation_collection_name}")
         simulation_documents = []
 
         # Get the collection
@@ -113,9 +116,9 @@ class FirestoreDataHandler:
         if not docs:
             print(f"No documents found under collection: {simulation_collection_name}")
             return simulation_documents
-        else :
-            print(f"Found documents under collection: {simulation_collection_name}")
-    
+        else:
+            # print(f"Found documents under collection: {simulation_collection_name}")
+
             for doc in docs:
                 document_data = doc.to_dict()
                 document_id = doc.id

@@ -2,7 +2,7 @@
 
 import dataclasses
 import logging
-from typing import TypeAlias, TypedDict
+from typing import TypeAlias, TypedDict, List
 
 import datetime
 import tensorflow as tf
@@ -18,6 +18,7 @@ geo_tensor: TypeAlias = tf.Tensor
 temp_tensor: TypeAlias = tf.Tensor
 FloodModelData: TypeAlias = data_utils.FloodModelData
 FloodModelParams: TypeAlias = model_params.FloodModelParams
+
 
 class Input(TypedDict):
     geospatial: tf.Tensor
@@ -109,27 +110,27 @@ class FloodModel:
 
         data = dataclasses.replace(data, spatiotemporal=st_input)
         return data
-    
+
     def call(self, input: Input) -> tf.Tensor:
         return self._model.call(input)
 
-    def call_n(self, input: Input) -> tf.Tensor:
-        return self._model.call_n(input)
+    def call_n(self, input: Input, n: int = 1) -> tf.Tensor:
+        return self._model.call_n(input, n=n)
 
-    def fit(self, dataset: tf.data.Dataset, early_stopping: int | None = None):
+    def fit(self, dataset: tf.data.Dataset, epochs: int = 1, early_stopping: int | None = None):
         """Fit the model to the given dataset."""
         # Create a TensorBoard callback
-        logs = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        tb_callback = tf.keras.callbacks.TensorBoard(log_dir=logs,
+        logs = "./logs" #  + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        tb_callback = keras.callbacks.TensorBoard(log_dir=logs,
                                                      histogram_freq=1,
-                                                     profile_batch='1,1')
-        es_callback = tf.keras.callbacks.EarlyStopping(
+                                                     profile_batch='1,100')
+        es_callback = keras.callbacks.EarlyStopping(
             monitor="val_loss", mode="min", patience=early_stopping
         )
         # Fit the model for this sample
         return self._model.fit(
-            dataset, callbacks=[tb_callback] +
-            [es_callback] if early_stopping else []
+            dataset, epochs=epochs, callbacks=[tb_callback] 
+            # + [es_callback] if early_stopping else []
         )
 
     def load_model(self, filepath: str) -> None:
@@ -331,7 +332,7 @@ class FloodConvLSTM(tf.keras.Model):
 
         return output
 
-    def call_n(self, full_input: Input) -> tf.Tensor:
+    def call_n(self, full_input: Input, n: int = 1) -> tf.Tensor:
         """Runs the entire autoregressive model.
 
         Args:
@@ -345,38 +346,29 @@ class FloodConvLSTM(tf.keras.Model):
         # The initial flood map is added to align indexing between flood maps
         # and rainfall, i.e., the current flooding conditions and rainfall at
         # time t are stored at index t along the temporal axis.
-        flood_maps = tf.TensorArray(
-            tf.float32, size=self._n_predictions + 1, clear_after_read=False
-        )
-        flood_maps = flood_maps.write(0, full_input["spatiotemporal"])
+
+        spatiotemporal = full_input["spatiotemporal"]
+        geospatial = full_input["geospatial"]
+        temporal = full_input["temporal"]
 
         # We use 1-indexing for simplicity. Time step t represents the t-th flood
         # prediction.
-        for t in range(1, self._n_predictions + 1):
-
-            spatiotemporal, temporal = self._update_temporal_inputs(
-                flood_maps, full_input["temporal"], t
-            )
-            input = Input(geospatial=full_input["geospatial"],
-                          temporal=temporal, spatiotemporal=spatiotemporal)
+        for t in range(1, n + 1):
+            temporal = self._get_temporal_window(temporal, t, constants.N_FLOOD_MAPS)
+            input = Input(geospatial=geospatial,
+                          temporal=temporal,
+                          spatiotemporal=spatiotemporal)
             prediction = self.call(input)
-            flood_maps = flood_maps.write(t, prediction)
+            prediction = tf.expand_dims(prediction, axis=1)
 
-        # Concatenate the predictions.
-        # This gathers the predictions along axis 0, so we need to permute the
-        # time (0) and batch (1) axes.
-        predictions = flood_maps.gather(tf.range(1, self._n_predictions + 1))
-        predictions = tf.transpose(predictions, perm=[1, 0, 2, 3, 4])
-        predictions = tf.squeeze(predictions, axis=-1)
+            # Append the prediction to spatiotemporal, then remove the earliest timestep.
+            spatiotemporal = tf.concat([spatiotemporal, prediction], axis=1)
+            spatiotemporal = spatiotemporal[:, 1:]
 
-        # Close the TensorArray and clean up the cached geo_cnn_output.
-        flood_maps.close()
-        self.geo_cnn_output = None
+        return spatiotemporal
 
-        return predictions
-
-    def _update_temporal_inputs(
-        self, flood_maps: tf.TensorArray, full_temp_input: tf.Tensor, t: int
+    def _get_temporal_window(
+        self, full_temporal: tf.Tensor, t: int, n: int
     ) -> tuple[tf.Tensor, tf.Tensor]:
         """Updates temporal inputs for a new time step (prediction).
 
@@ -394,12 +386,7 @@ class FloodConvLSTM(tf.keras.Model):
             A tuple of tensors for the flood maps and rainfall, having shapes
             [n, H, W, 1] and [n, m], respectively.
         """
-        n = min(self._params.n_flood_maps, t)
         step_range = tf.range(t - n, t)
-        # Gather the relevant flood maps. This will stack them along axis 0, so
-        # we need to permute the time (0) and batch (1) axes.
-        st_input = flood_maps.gather(step_range)
-        st_input = tf.transpose(st_input, perm=[1, 0, 2, 3, 4])
         # Gather the relevant rainfall windows.
-        temp_input = tf.gather(full_temp_input, step_range, axis=1)
-        return (st_input, temp_input)
+        temp_input = tf.gather(full_temporal, step_range, axis=1)
+        return (temp_input)
