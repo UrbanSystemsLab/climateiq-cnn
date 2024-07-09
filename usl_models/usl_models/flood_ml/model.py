@@ -2,10 +2,11 @@
 
 import dataclasses
 import logging
-from typing import Optional, TypeAlias
+from typing import TypeAlias, TypedDict
 
 import datetime
 import tensorflow as tf
+import keras
 from keras import layers
 
 from usl_models.flood_ml import constants
@@ -17,6 +18,11 @@ geo_tensor: TypeAlias = tf.Tensor
 temp_tensor: TypeAlias = tf.Tensor
 FloodModelData: TypeAlias = data_utils.FloodModelData
 FloodModelParams: TypeAlias = model_params.FloodModelParams
+
+class Input(TypedDict):
+    geospatial: tf.Tensor
+    temporal: tf.Tensor
+    spatiotemporal: tf.Tensor
 
 
 class FloodModel:
@@ -39,7 +45,7 @@ class FloodModel:
         self._spatial_dims = spatial_dims
         self._model = self._build_model()
 
-    def _build_model(self) -> tf.keras.Model:
+    def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
         model = FloodConvLSTM(self._model_params, spatial_dims=self._spatial_dims)
         model.compile(
@@ -103,14 +109,17 @@ class FloodModel:
 
         data = dataclasses.replace(data, spatiotemporal=st_input)
         return data
+    
+    def call(self, input: Input) -> tf.Tensor:
+        return self._model.call(input)
 
-    def _model_fit(self, features, labels, storm_duration: int, early_stopping: int | None = None):
-        storm_duration = int(storm_duration)
-        print("Setting n_predictions to storm_duration:", storm_duration)
-        self._model.set_n_predictions(storm_duration)
+    def call_n(self, input: Input) -> tf.Tensor:
+        return self._model.call_n(input)
+
+    def fit(self, dataset: tf.data.Dataset, early_stopping: int | None = None):
+        """Fit the model to the given dataset."""
         # Create a TensorBoard callback
         logs = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-
         tb_callback = tf.keras.callbacks.TensorBoard(log_dir=logs,
                                                      histogram_freq=1,
                                                      profile_batch='1,1')
@@ -118,41 +127,10 @@ class FloodModel:
             monitor="val_loss", mode="min", patience=early_stopping
         )
         # Fit the model for this sample
-        history = self._model.fit(
-            features, labels, callbacks=[tb_callback] +
+        return self._model.fit(
+            dataset, callbacks=[tb_callback] +
             [es_callback] if early_stopping else []
         )
-
-        return history
-
-    def train(self, dataset_functions, storm_durations):
-        """Trains the model using the list of dataset-creation functions."""
-        model_histories = []
-        sim_names = list(storm_durations.keys())
-        num_sims = len(sim_names)
-        print("Number of simulations:", num_sims)
-        print("Starting training...")
-
-        for sim_index in range(num_sims):
-            sim_name = sim_names[sim_index]
-            storm_duration = storm_durations[sim_name]
-            print(
-                f"Training on simulation: {sim_name}, Storm Duration: {storm_duration}")
-
-            # Get the generator for the current simulation dataset
-            current_dataset_generator = dataset_functions(sim_name, storm_duration)
-
-            for single_sim_chunk, storm_duration in current_dataset_generator:
-                for features, labels in single_sim_chunk:
-                    history = self._model_fit(features, labels, storm_duration)
-                    model_histories.append(history)
-
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        model_filename = f"flood_model_{timestamp}.keras"
-        self._model.save(model_filename)
-        print(f"Model saved to {model_filename}")
-
-        return model_histories
 
     def load_model(self, filepath: str) -> None:
         """Loads weights from an existing file.
@@ -305,12 +283,7 @@ class FloodConvLSTM(tf.keras.Model):
         """Updates n_predictions."""
         self._n_predictions = n_predictions
 
-    def forward(
-        self,
-        st_input: st_tensor,
-        geo_input: geo_tensor,
-        temp_input: temp_tensor,
-    ) -> tf.Tensor:
+    def call(self, input: Input) -> tf.Tensor:
         """Makes a single forward pass on a batch of data.
 
         The forward pass represents a single prediction on an input batch
@@ -325,23 +298,29 @@ class FloodConvLSTM(tf.keras.Model):
         Returns:
             The flood map prediction. A tensor of shape [B, H, W, 1].
         """
+        spatiotemporal: tf.Tensor = input["spatiotemporal"]
+        geospatial: tf.Tensor = input["geospatial"]
+        temporal: tf.Tensor = input["temporal"]
+        # print("spatiotemporal", spatiotemporal.shape)
+        # print("temporal", temporal.shape)
+
         # Spatiotemporal CNN
         # [B, n, H, W, 1] -> [B, n, H', W', k1]
-        st_cnn_output = self.st_cnn(st_input)
+        st_cnn_output = self.st_cnn(spatiotemporal)
 
         # Geospatial CNN
         # [B, H, W, f ]-> [B, H', W', k2]
         # Add a new time axis and repeat n times -> [B, n, H', W', k2].
-        geo_cnn_output = self.geo_cnn(geo_input)
+        geo_cnn_output = self.geo_cnn(geospatial)
         geo_cnn_output = geo_cnn_output[:, tf.newaxis, :, :, :]
-        n = st_input.shape[1]
+        n = spatiotemporal.shape[1]
         geo_cnn_output = tf.repeat(geo_cnn_output, [n], axis=1)
 
         # Expand temporal inputs into maps
         # [B, n, m] -> [B, n, H', W', m]
         H_out = st_cnn_output.shape[2]
         W_out = st_cnn_output.shape[3]
-        temp_input = temp_input[:, :, tf.newaxis, tf.newaxis, :]
+        temp_input = temporal[:, :, tf.newaxis, tf.newaxis, :]
         temp_input = tf.tile(temp_input, [1, 1, H_out, W_out, 1])
 
         # Concatenate and feed into remaining ConvLSTM and TransposeConv layers
@@ -352,7 +331,7 @@ class FloodConvLSTM(tf.keras.Model):
 
         return output
 
-    def call(self, inputs: dict[str, tf.Tensor]) -> tf.Tensor:
+    def call_n(self, full_input: Input) -> tf.Tensor:
         """Runs the entire autoregressive model.
 
         Args:
@@ -361,9 +340,6 @@ class FloodConvLSTM(tf.keras.Model):
         Returns:
             A tensor of all the flood predictions: [B, T, H, W].
         """
-        st_input = inputs["spatiotemporal"]
-        geo_input = inputs["geospatial"]
-        full_temp_input = inputs["temporal"]
 
         # This array stores the initial flood map and the n_predictions.
         # The initial flood map is added to align indexing between flood maps
@@ -372,15 +348,18 @@ class FloodConvLSTM(tf.keras.Model):
         flood_maps = tf.TensorArray(
             tf.float32, size=self._n_predictions + 1, clear_after_read=False
         )
-        flood_maps = flood_maps.write(0, st_input)
+        flood_maps = flood_maps.write(0, full_input["spatiotemporal"])
 
         # We use 1-indexing for simplicity. Time step t represents the t-th flood
         # prediction.
         for t in range(1, self._n_predictions + 1):
-            st_input, temp_input = self._update_temporal_inputs(
-                flood_maps, full_temp_input, t
+
+            spatiotemporal, temporal = self._update_temporal_inputs(
+                flood_maps, full_input["temporal"], t
             )
-            prediction = self.forward(st_input, geo_input, temp_input)
+            input = Input(geospatial=full_input["geospatial"],
+                          temporal=temporal, spatiotemporal=spatiotemporal)
+            prediction = self.call(input)
             flood_maps = flood_maps.write(t, prediction)
 
         # Concatenate the predictions.

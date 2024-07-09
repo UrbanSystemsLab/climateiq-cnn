@@ -1,12 +1,8 @@
-import os
-import glob
-from concurrent.futures import ThreadPoolExecutor
-import functools
 import re
-import requests
+from typing import Tuple
 from io import BytesIO
-import random
 
+from typing import Iterator
 
 import numpy as np
 import tensorflow as tf
@@ -16,8 +12,8 @@ from usl_models.flood_ml.metastore import FirestoreDataHandler
 from usl_models.flood_ml.settings import Settings
 from usl_models.flood_ml.featurelabelchunks import GenerateFeatureLabelChunks
 from usl_models.flood_ml import constants
+from usl_models.flood_ml.model import Input
 
-from tqdm import tqdm
 """
     This class is used to generate the training data for the flood model.
     Input:
@@ -28,10 +24,10 @@ from tqdm import tqdm
 
 """
 
+
 class IncrementalTrainDataGenerator:
     def __init__(
         self,
-        batch_size: int,
         settings: Settings = None,
         firestore_client: firestore.Client = None,
         storage_client: storage.Client = None,
@@ -39,12 +35,11 @@ class IncrementalTrainDataGenerator:
         featurelabelchunksgenerator: GenerateFeatureLabelChunks = None,
     ):
         print("Initializing IncrementalTrainDataGenerator...")
-     
+
         self.settings = settings or Settings()
 
         self.firestore_client = firestore_client or firestore.Client()
         self.storage_client = storage_client or storage.Client()
-       
 
         # instantiate metastore class
         self.metastore = metastore or FirestoreDataHandler(
@@ -58,7 +53,7 @@ class IncrementalTrainDataGenerator:
 
         # print(f"Firestore Collection: {self.firestore_collection}")
         # print(f"Local Numpy Directory: {self.settings.LOCAL_NUMPY_DIR}")
-    
+
     def _generate_rainfall_duration(self, sim_name):
         # print("Get rainfall duration...")
         rainfall_duration, rainfaill_dict = (
@@ -75,8 +70,9 @@ class IncrementalTrainDataGenerator:
         """
         print("Generating temporal tensors...")
         # Get GCS URLs for npy chunks
-        temporal_chunks, sim_dict = self.featurelabelchunksgenerator.get_temporal_chunks(sim_name)
-        
+        temporal_chunks, sim_dict = self.featurelabelchunksgenerator.get_temporal_chunks(
+            sim_name)
+
         if not temporal_chunks:
             print(f"No temporal chunks found for sim {sim_name}.")
             return None
@@ -86,7 +82,7 @@ class IncrementalTrainDataGenerator:
 
         for temporal_url in temporal_chunks:
             print(f"Loading temporal tensor from {temporal_url}...")
-            
+
             # Download data from GCS URL using Google Cloud Storage API
             bucket_name, blob_name = temporal_url.replace("gs://", "").split("/", 1)
             bucket = self.storage_client.bucket(bucket_name)
@@ -104,7 +100,6 @@ class IncrementalTrainDataGenerator:
             # Yield the same tensor infinitely
             while True:
                 yield temporal_tensor
-
 
     def rainfall_duration_generator(self, sim_name):
         print(f"Generating rainfall duration for sim_name: {sim_name}")
@@ -137,7 +132,8 @@ class IncrementalTrainDataGenerator:
             [1000, 1000, rainfall_duration],
         )
 
-        feature_chunks, _ = self.featurelabelchunksgenerator.get_feature_chunks(sim_name)
+        feature_chunks, _ = self.featurelabelchunksgenerator.get_feature_chunks(
+            sim_name)
         label_chunks, _ = self.featurelabelchunksgenerator.get_label_chunks(sim_name)
 
         if not feature_chunks or not label_chunks:
@@ -169,8 +165,8 @@ class IncrementalTrainDataGenerator:
 
             print(f"Feature file: {feature_url}")
             print(f"Label file: {label_url}")
-           
-             # Download data from GCS URLs using Google Cloud Storage API
+
+            # Download data from GCS URLs using Google Cloud Storage API
             bucket_name, blob_name = feature_url.replace("gs://", "").split("/", 1)
             bucket = self.storage_client.bucket(bucket_name)
             blob = bucket.blob(blob_name)
@@ -190,9 +186,10 @@ class IncrementalTrainDataGenerator:
                 np.load(BytesIO(label_data)),
                 dtype=tf.float32
             )
-            
+
             reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
-            label_tensor = tf.ensure_shape(reshaped_label_tensor, (rainfall_duration, 1000, 1000))
+            label_tensor = tf.ensure_shape(
+                reshaped_label_tensor, (rainfall_duration, 1000, 1000))
 
             print("Finished creating feature and label tensors...")
             print(f"Feature tensor shape: {feature_tensor.shape}")
@@ -201,61 +198,86 @@ class IncrementalTrainDataGenerator:
 
             yield feature_tensor, reshaped_label_tensor
 
+    @staticmethod
+    def extract_spatiotemporal(t: int, n: int, labels: tf.Tensor) -> tf.Tensor:
+        """Extracts spatiotemporal tensor from labeled data.
 
-    def combined_generator(self, sim_name):  
-        feature_label_generator = self._generate_feature_label_tensors(sim_name)
-        temporal_tensor_generator = self._generate_temporal_tensors(sim_name)
-        spatiotemporal_tensor_generator = self._generate_spatiotemporal_tensor([1000, 1000, 1])
+        t is the current timestep.
+        n is the window size.
+        The result is the slice labels[t-n:t] with zero padding so the
+        output tensor is always of shape (n, H, W, 1).
+        """
+        (_, H, W, *_) = labels.shape
+        zeros = tf.zeros(shape=(max(n - t, 0), H, W), dtype=tf.float32)
+        # print("labels:", labels.shape)
+        data = labels[max(t - n, 0):t]
+        # print(f"labels[max(t - n, 0):{t}]:", data.shape)
+        return tf.concat([zeros, data], axis=0)
 
-        # Combine the generators into a single generator
-        for (geo, labels), temp, spatemp in zip(
-            feature_label_generator,
-            temporal_tensor_generator,
-            spatiotemporal_tensor_generator
-        ):
-            yield {
-                "geospatial": geo,
-                "temporal": temp,
-                "spatiotemporal": spatemp,    
-            } , labels
+    @staticmethod
+    def extract_temporal(t: int, n: int, temporal: tf.Tensor) -> tf.Tensor:
+        (_, D) = temporal.shape
+        zeros = tf.zeros(shape=(max(n - t, 0), D))
+        data = temporal[max(t - n, 0):t]
+        return tf.concat([zeros, data], axis=0)
 
-    def get_datasets_from_tensors(self, sim_names, show_progress=True, limit=1):
+    def generate_windows(self,
+                         temporal: tf.Tensor,
+                         geospatial: tf.Tensor,
+                         labels: tf.Tensor,
+                         n: int = constants.N_FLOOD_MAPS) -> Iterator[Tuple[Input, tf.Tensor]]:
+        """Generate inputs for a sliding time window of length n timesteps."""
+        (T_max, H, W, *_) = labels.shape
+        for t in range(T_max):
+            input = Input(
+                geospatial=geospatial,
+                temporal=self.extract_temporal(t, n, temporal),
+                spatiotemporal=self.extract_spatiotemporal(t, n, labels),
+            )
+            # print("input.geospatial:", input["geospatial"].shape)
+            # print("input.temporal:", input["temporal"].shape)
+            # print("input.spatiotemporal:", input["spatiotemporal"].shape)
+            yield input, labels[t]
+
+    def load_simulations(self, sim_names: list[str], max_chunks: int = 0) -> Iterator[tuple[Input, tf.Tensor]]:
+        # For each simulation
+        for sim_name in sim_names:
+            feature_label_gen = self._generate_feature_label_tensors(sim_name)
+            temporal_gen = self._generate_temporal_tensors(sim_name)
+
+            chunks = 0
+            # For each spatial chunk in the simulation
+            for (geospatial, labels), temporal in zip(feature_label_gen, temporal_gen):
+                chunks += 1
+                if max_chunks > 0 and chunks > max_chunks:
+                    break
+
+                # For each time window
+                for (input, label) in self.generate_windows(temporal, geospatial, labels):
+                    yield (input, label)
+
+    def load_datasets(self, sim_names: list[str], batch_size: int = 1, max_chunks: int = 0) -> tf.data.Dataset:
         """
         Get a generator that yields smaller chunks of datasets for each simulation for training. 
         The examples are generated from multiple simulations.
         """
-        storm_durations = {}  # Create an empty dictionary to store storm durations
-        for sim_name in sim_names:
-            storm_duration = self.rainfall_duration_generator(sim_name)
-            storm_durations[sim_name] = storm_duration  # Store the storm duration in the dictionary
-
-        def dataset_generator(sim_name, storm_duration):
-            print("Dataset generator: generating training data for sim_name: ", sim_name, "Storm Duration: ", storm_duration)
-
-            # Define output signature for features and labels
-            output_signature = (
-                {
-                    "geospatial": tf.TensorSpec(shape=(1000, 1000, 8), dtype=tf.float32),
-                    "temporal": tf.TensorSpec(
-                        shape=(864, constants.M_RAINFALL), dtype=tf.float32
+        # Create the dataset for this simulation
+        dataset = tf.data.Dataset.from_generator(
+            lambda: self.load_simulations(sim_names, max_chunks=max_chunks),
+            output_signature=(
+                dict(
+                    geospatial=tf.TensorSpec(shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH, constants.GEO_FEATURES), dtype=tf.float32),
+                    temporal=tf.TensorSpec(
+                        shape=(constants.N_FLOOD_MAPS,
+                               constants.M_RAINFALL), dtype=tf.float32
                     ),
-                    "spatiotemporal": tf.TensorSpec(
-                        shape=(1000, 1000, 1), dtype=tf.float32
+                    spatiotemporal=tf.TensorSpec(
+                        shape=(constants.N_FLOOD_MAPS, constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
                     ),
-                },
-                tf.TensorSpec(shape=(storm_duration, 1000, 1000), dtype=tf.float32),
+                ),
+                tf.TensorSpec(shape=(constants.MAP_HEIGHT,
+                              constants.MAP_WIDTH), dtype=tf.float32),
             )
-
-            # Create the dataset for this simulation
-            full_dataset = tf.data.Dataset.from_generator(
-                lambda: self.combined_generator(sim_name),
-                output_signature=output_signature
-            )
-
-            # Set the chunk size for the dataset, and batch the dataset
-            chunk_size = 1 
-            full_dataset = full_dataset.batch(chunk_size)
-
-            yield full_dataset, storm_duration
-
-        return dataset_generator, storm_durations
+        )
+        dataset = dataset.batch(batch_size)
+        return dataset
