@@ -530,7 +530,7 @@ def _collapse_city_cat_output_chunks(
         gcs_uri=f"gs://{labels_bucket.name}/{label_path}",
         x_index=x_index,
         y_index=y_index,
-        in_validation_set=metastore.SimulationLabelChunk.is_in_validation_set(
+        in_test_set=metastore.SimulationLabelChunk.is_in_test_set(
             study_area, config_path, x_index, y_index
         ),
     ).set(db, study_area_name, config_path)
