@@ -675,8 +675,15 @@ def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
     Returns:
       A new xarray dataset with newly derived variables.
     """
-    # Derive wind components: WSPD10 (wind speed), WDIR10 (wind direction)
-    if all(var in dataset.keys() for var in ["UU", "VV"]):
+    # Derive wind components from UU & VV + Solar time components from XLAT_M & XLONG_M
+   
+    # WSPD (wind speed) at FNL level 0 (~10m)
+    # WDIR_SIN (wind direction_sine component) at FNL level 0 (~10m)
+    # WDIR_COS (wind direction_cosine component) at FNL level 0 (~10m)
+    if all(var in dataset.keys() for var in ["UU", "VV", "XLAT_M", "XLONG_M"]):
+        
+        ######## Compute WIND ##########
+
         uu = dataset.data_vars["UU"]
         vv = dataset.data_vars["VV"]
 
@@ -684,15 +691,120 @@ def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
         uu_centered = (uu[:, :, :, :-1] + uu[:, :, :, 1:]) / 2
         vv_centered = (vv[:, :, :-1, :] + vv[:, :, 1:, :]) / 2
 
+        # Compute wind speed
         wind_speed = numpy.sqrt(uu_centered.values**2 + vv_centered.values**2)
+        
+        # compute wind direction 0 deg is x-axis
+        # 270 is subtracted to align direction to true North
         wind_direction = (
             270 - numpy.degrees(numpy.arctan2(vv_centered.values, uu_centered.values))
         ) % 360
+                
+        # Define functions to compute sine and cosine components of wind direction
+        def direction_to_sine(degrees):
+            radians = (degrees / 360.0) * 2 * numpy.pi
+            return numpy.sin(radians)
+
+        def direction_to_cosine(degrees):
+            radians = (degrees / 360.0) * 2 * numpy.pi
+            return numpy.cos(radians)
+
+        # Compute sine and cosine components of wind direction
+        wind_direction_sin = direction_to_sine(wind_direction)
+        wind_direction_cos = direction_to_cosine(wind_direction)
+
+        # Convert sine and cosine components back to xarray DataArray, retaining original coordinates and dimensions
+        wind_direction_sin = xarray.DataArray(
+            wind_direction_sin,
+            coords=vv_centered.coords,
+            dims=vv_centered.dims
+        )
+
+        wind_direction_cos = xarray.DataArray(
+            wind_direction_cos,
+            coords=vv_centered.coords,
+            dims=vv_centered.dims
+        )
 
         new_dims = ["Time", "num_metgrid_levels", "south_north", "west_east"]
-        dataset = dataset.assign(WSPD10=(new_dims, wind_speed))
-        dataset = dataset.assign(WDIR10=(new_dims, wind_direction))
+        dataset = dataset.assign(WSPD=(new_dims, wind_speed))
+        dataset = dataset.assign(WDIR_SIN=(new_dims, wind_direction_sin))
+        dataset = dataset.assign(WDIR_COS=(new_dims, wind_direction_cos))
+        
+        ####### Compute Solar Time ##########
 
+        # Extract longitude and time data
+        longitude = dataset.data_vars['XLONG_M']
+        times = dataset.data_vars['Times']
+
+        # Convert time variable to datetime objects
+        times = numpy.array([numpy.datetime64(''.join(t.astype(str)).replace('_', 'T')) for t in times.values])
+        # Extract hours and minutes from the datetime objects
+        utc_hours_minutes = numpy.array([t.astype('datetime64[h]').astype(int) % 24 + t.astype('datetime64[m]').astype(int) % 60 / 60 for t in times])
+
+        # Define the function to calculate solar time
+        def calculate_solar_time(utc_time, longitude):
+            return (utc_time + longitude / 15) % 24
+
+        # Use the correct variable names for latitude and longitude coordinates
+        latitude_coord = 'XLAT_M'
+        longitude_coord = 'XLONG_M'
+
+        # Extract latitude and longitude coordinates
+        latitudes = dataset[latitude_coord][0, :, :]
+        longitudes = dataset[longitude_coord][0, :, :]
+
+        # Create an empty DataArray to store solar times
+        solar_times = xarray.DataArray(
+            numpy.zeros((len(utc_hours_minutes),) + longitude.shape[1:]),
+            # Shape should match (utc_time, south_north, west_east)
+            coords={
+                'utc_time': utc_hours_minutes,
+                'south_north': latitudes.coords['south_north'],
+                'west_east': longitudes.coords['west_east']
+            },
+            dims=['utc_time', 'south_north', 'west_east']
+        )
+
+        # Calculate solar time for each extracted UTC time
+        for i, utc_time in enumerate(utc_hours_minutes):
+            solar_times.loc[utc_time, :, :] = calculate_solar_time(utc_time, longitudes)
+
+        # Define the function to convert time in hours to sine value
+        def time_to_sine(hours):
+            # Map the hours (in 24-hour format) to radians [0, 2π]
+            radians = (hours / 24.0) * 2 * numpy.pi
+            return numpy.sin(radians)
+
+        # Define the function to convert time in hours to cosine value
+        def time_to_cosine(hours):
+            # Map the hours (in 24-hour format) to radians [0, 2π]
+            radians = (hours / 24.0) * 2 * numpy.pi
+            return numpy.cos(radians)
+
+        # Create empty DataArrays to store sine and cosine values of solar times
+        sin_solar_time = xarray.DataArray(
+            numpy.zeros_like(solar_times),
+            coords=solar_times.coords,
+            dims=solar_times.dims
+        )
+
+        cos_solar_time = xarray.DataArray(
+            numpy.zeros_like(solar_times),
+            coords=solar_times.coords,
+            dims=solar_times.dims
+        )
+
+        # Convert solar times to sine and cosine values
+        for utc_time in utc_hours_minutes:
+            sin_solar_time.loc[utc_time, :, :] = time_to_sine(solar_times.sel(utc_time=utc_time))
+            cos_solar_time.loc[utc_time, :, :] = time_to_cosine(solar_times.sel(utc_time=utc_time))
+            
+        new_dims = ["Time", "south_north", "west_east"]
+        dataset = dataset.assign(SOLAR_TIME_SIN=(new_dims, sin_solar_time))
+        dataset = dataset.assign(SOLAR_TIME_COS=(new_dims, cos_solar_time))
+
+        
     return dataset
 
 
