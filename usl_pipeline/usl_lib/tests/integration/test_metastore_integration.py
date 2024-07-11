@@ -253,6 +253,47 @@ def test_create_get_study_area_spatial_chunk(firestore_db):
     )
 
 
+def test_spacial_chunk_update(firestore_db):
+    """Ensures a study area spatial chunk can be updated."""
+    study_area = metastore.StudyArea(
+        name="study_area_name",
+        col_count=1,
+        row_count=2,
+        x_ll_corner=3,
+        y_ll_corner=4,
+        cell_size=5,
+        crs="crs",
+    )
+    study_area.create(firestore_db)
+
+    chunk = metastore.StudyAreaSpatialChunk(
+        id_="chunk_name",
+        state=metastore.StudyAreaChunkState.FEATURE_MATRIX_PROCESSING,
+        raw_path="gcs://raw_file.tar",
+        needs_scaling=True,
+        x_index=1,
+        y_index=2,
+        error="Old error",
+    )
+    chunk.merge(firestore_db, "study_area_name")
+
+    metastore.StudyAreaSpatialChunk.update_scaling_done(
+        firestore_db, "study_area_name", "chunk_name", "gcs://feature_file.npy"
+    )
+
+    assert metastore.StudyAreaSpatialChunk.get(
+        firestore_db, "study_area_name", "chunk_name"
+    ) == metastore.StudyAreaSpatialChunk(
+        id_="chunk_name",
+        state=metastore.StudyAreaChunkState.FEATURE_MATRIX_READY,
+        raw_path="gcs://raw_file.tar",
+        feature_matrix_path="gcs://feature_file.npy",
+        needs_scaling=False,
+        x_index=1,
+        y_index=2,
+    )
+
+
 def test_delete_all_study_area_chunks(firestore_db):
     """Ensures all study area chunks can be deleted for a given study area."""
     study_area = metastore.StudyArea(

@@ -336,7 +336,7 @@ def _build_feature_matrix(
             chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
                 firestore.Client(), study_area_name, chunk_name
             )
-            if chunk_metadata is not None:
+            if chunk_metadata is not None and chunk_metadata.state is not None:
                 logging.info(
                     "Flood feature matrix for chunk %s was already generated",
                     chunk_path,
@@ -347,6 +347,10 @@ def _build_feature_matrix(
             logging.info(
                 "Start generating flood feature matrix for chunk %s", chunk_path
             )
+            metastore.StudyAreaSpatialChunk(
+                id_=chunk_name,
+                error=firestore.DELETE_FIELD,
+            ).merge(firestore.Client(), study_area_name)
             feature_matrix, metadata = _build_flood_feature_matrix_from_archive(chunk)
 
             if feature_matrix is None:
@@ -844,6 +848,7 @@ def _write_flood_chunk_metastore_entry(chunk_blob: storage.Blob) -> None:
 
     metastore.StudyAreaSpatialChunk(
         id_=chunk_name,
+        state=metastore.StudyAreaChunkState.FEATURE_MATRIX_PROCESSING,
         raw_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
         needs_scaling=True,
         x_index=x_index,
