@@ -832,13 +832,13 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 @mock.patch.object(main.wrf, "getvar", autospec=True)
-def test_build_label_matrix_wrf(
+def test_build_wrf_label_matrix(
     mock_wrf_getvar, mock_storage_client, mock_firestore_client, _
 ):
     # Create an in-memory mock netcdf file and grab its bytes
     ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
     ncfile.createDimension("Time", None)
-     # Create new dim to represent length of datetime str
+    # Create new dim to represent length of datetime str
     ncfile.createDimension("DateStrLen", 19)
     time = ncfile.createVariable("Times", "S1", ("Time", "DateStrLen"))
     time[0] = netCDF4.stringtochar(numpy.array(["2010-02-02_18:00:00"], dtype="S19"))
@@ -880,7 +880,7 @@ def test_build_label_matrix_wrf(
     ]
     mock_wrf_getvar.reset_mock()
 
-    main.build_label_matrix(
+    main.build_wrf_label_matrix(
         functions_framework.CloudEvent(
             {"source": "test", "type": "event"},
             data={

@@ -259,16 +259,36 @@ def test_simulation_label_chunk_is_in_test_set_produce_right_split() -> None:
 
     # Calculate whether all chunks are in the test set.
     chunks_in_test_set = [
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 0, 0),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 0, 1),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 0, 2),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 0, 3),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 0, 4),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 1, 0),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 1, 1),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 1, 2),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 1, 3),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 1, 4),
+        metastore.SimulationLabelSpatialChunk.is_in_test_set(
+            study_area, "config", 0, 0
+        ),
+        metastore.SimulationLabelSpatialChunk.is_in_test_set(
+            study_area, "config", 0, 1
+        ),
+        metastore.SimulationLabelSpatialChunk.is_in_test_set(
+            study_area, "config", 0, 2
+        ),
+        metastore.SimulationLabelSpatialChunk.is_in_test_set(
+            study_area, "config", 0, 3
+        ),
+        metastore.SimulationLabelSpatialChunk.is_in_test_set(
+            study_area, "config", 0, 4
+        ),
+        metastore.SimulationLabelSpatialChunk.is_in_test_set(
+            study_area, "config", 1, 0
+        ),
+        metastore.SimulationLabelSpatialChunk.is_in_test_set(
+            study_area, "config", 1, 1
+        ),
+        metastore.SimulationLabelSpatialChunk.is_in_test_set(
+            study_area, "config", 1, 2
+        ),
+        metastore.SimulationLabelSpatialChunk.is_in_test_set(
+            study_area, "config", 1, 3
+        ),
+        metastore.SimulationLabelSpatialChunk.is_in_test_set(
+            study_area, "config", 1, 4
+        ),
     ]
     # 2 / 10 of the chunks should be in the test set.
     assert sum(chunks_in_test_set) == 2

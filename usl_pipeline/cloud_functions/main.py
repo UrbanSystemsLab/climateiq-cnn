@@ -17,8 +17,6 @@ import functions_framework
 import netCDF4
 import numpy
 from numpy.typing import NDArray
-import netCDF4
-import wrf
 import xarray
 import rasterio
 from shapely import geometry
@@ -333,21 +331,23 @@ def delete_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) 
 
 @functions_framework.cloud_event
 @_retry_and_report_errors()
-def build_label_matrix(cloud_event: functions_framework.CloudEvent) -> None:
+def build_wrf_label_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     """Builds a label matrix when a set of simulation output files is uploaded.
 
     This function is triggered when files containing simulation data are uploaded to
     GCS. It produces a label matrix for the sim data and writes that label matrix to
     another GCS bucket for eventual use in model training and prediction.
     """
-    _build_label_matrix(
+    _build_wrf_label_matrix(
         cloud_event.data["bucket"],
         cloud_event.data["name"],
         cloud_storage.LABEL_CHUNKS_BUCKET,
     )
 
 
-def _build_label_matrix(bucket_name: str, chunk_name: str, output_bucket: str) -> None:
+def _build_wrf_label_matrix(
+    bucket_name: str, chunk_name: str, output_bucket: str
+) -> None:
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     chunk_blob = bucket.blob(chunk_name)
@@ -355,7 +355,7 @@ def _build_label_matrix(bucket_name: str, chunk_name: str, output_bucket: str) -
     with chunk_blob.open("rb") as chunk:
         # Heat (WRF) - treat one WRF output file as one chunk
         if re.search(file_names.WRF_DOMAIN3_NC_REGEX, chunk_name):
-            label_matrix, metadata = _build_wrf_label_matrix(chunk)
+            label_matrix, metadata = _process_wrf_label_and_metadata(chunk)
 
             label_file_name = chunk_name + ".npy"
             label_blob = storage_client.bucket(output_bucket).blob(str(label_file_name))
@@ -366,7 +366,7 @@ def _build_label_matrix(bucket_name: str, chunk_name: str, output_bucket: str) -
             raise ValueError(f"Unexpected file {chunk_name}")
 
 
-def _build_wrf_label_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+def _process_wrf_label_and_metadata(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     nc_bytes = fd.read()
     label_components = []
     with netCDF4.Dataset("in_memory.nc", memory=nc_bytes) as nc:
@@ -410,7 +410,8 @@ def _write_wrf_label_chunk_metastore_entry(
     metastore.SimulationLabelTemporalChunk(
         gcs_uri=f"gs://{label_blob.bucket.name}/{label_blob.name}",
         time=metadata.time,
-    ).set(db, study_area_name, config_path=None)
+    # TODO: Figure out how to differentiate each wrf label chunk (config_path)
+    ).set(db, study_area_name, config_path="None")
 
 
 @functions_framework.cloud_event
@@ -673,11 +674,12 @@ def _collapse_city_cat_output_chunks(
             # invocation was running.
             continue
 
+    study_area = metastore.StudyArea.get(db, study_area_name)
     metastore.SimulationLabelSpatialChunk(
         gcs_uri=f"gs://{labels_bucket.name}/{label_path}",
         x_index=x_index,
         y_index=y_index,
-        in_test_set=metastore.SimulationLabelChunk.is_in_test_set(
+        in_test_set=metastore.SimulationLabelSpatialChunk.is_in_test_set(
             study_area, config_path, x_index, y_index
         ),
     ).set(db, study_area_name, config_path)
