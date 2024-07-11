@@ -328,11 +328,10 @@ def _build_feature_matrix(
     feature_file_name = pathlib.PurePosixPath(chunk_path).with_suffix(".npy")
     feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
 
-    # TODO: Refactor to better handle both tar'ed + un-tarred chunks
     with chunk_blob.open("rb") as chunk:
+        study_area_name, chunk_name = _parse_chunk_path(chunk_path)
         # Flood (CityCat)
         if chunk_path.endswith(".tar"):
-            study_area_name, chunk_name = _parse_chunk_path(chunk_path)
             chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
                 firestore.Client(), study_area_name, chunk_name
             )
@@ -664,9 +663,10 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
             features_components.append(feature)
 
         features_matrix = numpy.dstack(features_components)
+        snapshot_time = ds.Times.values[0].decode("utf-8")
 
     return features_matrix, FeatureMetadata(
-        time=datetime.datetime.fromisoformat(str(ds.Times.values[0]))
+        time=datetime.datetime.fromisoformat(snapshot_time)
     )
 
 
