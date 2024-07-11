@@ -594,3 +594,5 @@ class SimulationLabelTemporalChunk(SimulationLabelChunk):
         Simulation.get_ref(db, study_area_name, config_path).collection(
             SIMULATION_LABEL_CHUNKS
         ).document(str(self.time)).set(dataclasses.asdict(self))
+    
+    # TODO: Implement is_in_test_set() for temporal chunks
