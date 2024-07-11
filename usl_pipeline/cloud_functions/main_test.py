@@ -615,21 +615,32 @@ def test_build_feature_matrix_errors(
 
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_build_and_upload_study_area_chunk(mock_storage_client, mock_firestore_client):
+@mock.patch.object(main, "_get_crs_from_wps", autospec=True)
+def test_build_and_upload_study_area_chunk(
+    mock_get_crs_from_wps, mock_storage_client, mock_firestore_client
+):
+    # Get some random data to place in a netcdf file
+    lat_vals = [40, 45]
+    long_vals = [-79, -80]
+    cell_size = 500
+    source_crs = "EPSG:32618"
+
     # Create an in-memory netcdf file and grab its bytes
     ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
-    ncfile.createDimension("Time", 1)
-    ncfile.createVariable("time", "f8", ("Time",))
+    ncfile.setncattr("corner_lons", long_vals)
+    ncfile.setncattr("corner_lats", lat_vals)
+    ncfile.setncattr("DX", cell_size)
 
     memfile = ncfile.close()
+    ncfile_bytes = memfile.tobytes()
 
     # Create a mock blob for the input file uploaded
     mock_input_blob = mock.MagicMock()
     mock_input_blob.name = "study_area/met_em.d03_test.nc"
     mock_input_blob.bucket.name = "input-bucket"
-    mock_input_blob.open.return_value = memfile
+    mock_input_blob.open.return_value = io.BytesIO(ncfile_bytes)
 
-    # Create a mock blob for the archive we will upload.
+    # Create a mock blob for the chunk we will upload.
     mock_chunk_blob = mock.MagicMock()
     mock_chunk_blob.name = "study_area/met_em.d03_test.nc"
     mock_chunk_blob.bucket.name = "climateiq-study-area-chunks"
@@ -640,6 +651,8 @@ def test_build_and_upload_study_area_chunk(mock_storage_client, mock_firestore_c
         mock_chunk_blob,
     ]
     mock_storage_client.reset_mock()
+
+    mock_get_crs_from_wps.return_value = source_crs
 
     main.build_and_upload_study_area_chunk(
         functions_framework.CloudEvent(
@@ -662,8 +675,33 @@ def test_build_and_upload_study_area_chunk(mock_storage_client, mock_firestore_c
         ]
     )
 
+    # Ensure we opened the input file
+    mock_input_blob.open.assert_called_once_with("rb")
+
     # Ensure we attempted to upload the chunked file
     mock_chunk_blob.upload_from_file.assert_called_once_with(mock.ANY)
+
+    # Ensure we wrote the firestore entry for the study area.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("study_area"),
+            mock.call()
+            .collection()
+            .document()
+            .set(
+                {
+                    "col_count": 200,
+                    "row_count": 200,
+                    "x_ll_corner": long_vals[0],
+                    "y_ll_corner": lat_vals[0],
+                    "cell_size": cell_size,
+                    "crs": source_crs,
+                }
+            ),
+        ]
+    )
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
