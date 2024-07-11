@@ -336,6 +336,13 @@ def _build_feature_matrix(
             chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
                 firestore.Client(), study_area_name, chunk_name
             )
+            # Let's check if the chunk metadata object is present and has the state
+            # different from None (which means it's either FEATURE_MATRIX_PROCESSING
+            # meaning that unscaled feature matrix is stored and this CF succeeded, or
+            # it's FEATURE_MATRIX_READY and the downstream rescaling CF is also done).
+            # If metadata object is not present it means we're in the first execution
+            # attempt. None state means that we're in the retry and either this CF
+            # crashed during previous execution attempt or it finished with an error.
             if chunk_metadata is not None and chunk_metadata.state is not None:
                 logging.info(
                     "Flood feature matrix for chunk %s was already generated",
