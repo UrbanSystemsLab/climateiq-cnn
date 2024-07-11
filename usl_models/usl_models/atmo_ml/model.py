@@ -24,7 +24,20 @@ AtmoModelParams: TypeAlias = model_params.AtmoModelParams
 
 
 class AtmoConvLSTM(tf.keras.Model):
-    """Atmo ConvLSTM model."""
+    """Atmo ConvLSTM model.
+
+    The architecture is a multi-head ConvLSTM model.
+
+    Spatial and spatiotemporal features are passed into separate CNN blocks for
+    feature extraction before being concatenated and fed into a ConvLSTM. The
+    ConvLSTM outputs are then fed into separate TransposeConv blocks for
+    multi-prediction. There are four different output heads for 2m temperature,
+    2m relative humidity, 10m wind speed, and 10m wind direction.
+
+    Architecture diagram: https://miro.com/app/board/uXjVK3Q31rQ=/.
+    Architecture details:
+    https://www.notion.so/climate-iq/AtmoML-Architecture-Proposals-and-Design-c00d0e54265c4bb8a72ce01fd475f116.
+    """
 
     def __init__(
         self,
