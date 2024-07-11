@@ -285,11 +285,13 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     # Create an in-memory netcdf file and grab its bytes
     ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
     ncfile.createDimension("Time", 1)
+    # Create new dim to represent length of datetime str
+    ncfile.createDimension("DateStrLen", 19)
     ncfile.createDimension("west_east", 3)
     ncfile.createDimension("south_north", 3)
 
     # In WPS/WRF files, 'Times'->dimension and 'Time'->variable
-    time = ncfile.createVariable("Times", "str", ("Time",))
+    time = ncfile.createVariable("Times", "S1", ("Time", "DateStrLen"))
     lat = ncfile.createVariable("lat", "float32", ("south_north",))
     lon = ncfile.createVariable("lon", "float32", ("west_east",))
     # Create dataset entries for all variables in mock
@@ -300,7 +302,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
         "NOT_REQUIRED_VAR", "float32", ("Time", "south_north", "west_east")
     )
 
-    time[0] = "2010-02-02_18:00:00"
+    time[0] = netCDF4.stringtochar(numpy.array(["2010-02-02_18:00:00"], dtype="S19"))
     lat[:] = [200, 200, 200]
     lon[:] = [300, 300, 300]
     ncfile.variables["GHT"][:] = netcdf_array1
