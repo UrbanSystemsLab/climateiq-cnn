@@ -16,6 +16,8 @@ from google.cloud import storage
 import functions_framework
 import numpy
 from numpy.typing import NDArray
+import netCDF4
+import wrf
 import xarray
 import rasterio
 from shapely import geometry
@@ -149,30 +151,60 @@ def _retry_and_report_errors(
 def build_and_upload_study_area_chunk(
     cloud_event: functions_framework.CloudEvent,
 ) -> None:
-    """Creates a study area chunk and uploads it to GCS.
+    """Creates a study area chunk, uploads to bucket, and writes to metastore.
 
     This function is triggered when files containing raw geo data for a study area
-    are uploaded to GCS. It will group the files into TAR-files and upload it to a
-    bucket.
+    are uploaded to GCS. It will load the file into study area chunks bucket and
+    write a new study area to metastore.
     """
-    file_name = cloud_event.data["name"]
+    file_name = pathlib.PurePosixPath(cloud_event.data["name"])
     bucket_name = cloud_event.data["bucket"]
 
-    if re.search(file_names.WPS_DOMAIN3_NC_REGEX, file_name):
+    # For AtmoML, only 3rd domain (500m) output files will be used
+    if re.search(file_names.WPS_DOMAIN3_NC_REGEX, file_name.name):
         storage_client = storage.Client()
+        db = firestore.Client()
+
         bucket = storage_client.bucket(bucket_name)
-        file_blob = bucket.blob(file_name)
+        file_blob = bucket.blob(str(file_name))
 
         # For WRF, we can treat each snapshot output file as its own chunk. If
         # multiple snapshots must be processed together, we can choose to group
         # the files together in a TAR before uploading.
-        with file_blob.open("rb") as f:
+        with file_blob.open("rb") as fd:
             study_area_chunk_bucket = storage_client.bucket(
                 cloud_storage.STUDY_AREA_CHUNKS_BUCKET
             )
-            study_area_chunk_bucket.blob(file_name).upload_from_file(f)
+            study_area_chunk_bucket.blob(str(file_name)).upload_from_file(fd)
 
-        # TODO: Write to metastore - create new chunk entry
+            # File names should be in the form <study_area_name>/<file_name>
+            study_area_name = file_name.parent.name
+
+            nc_bytes = fd.read()
+            with netCDF4.Dataset("in_memory.nc", memory=nc_bytes) as ds:
+                study_area = metastore.StudyArea(
+                    name=study_area_name,
+                    # Grid dimension will always be 200x200 for all cities
+                    col_count=200,
+                    row_count=200,
+                    x_ll_corner=ds.getncattr("corner_lons")[0],
+                    y_ll_corner=ds.getncattr("corner_lats")[0],
+                    # https://www2.mmm.ucar.edu/wrf/users/namelist_best_prac_wps.html#dx_dy
+                    cell_size=int(ds.getncattr("DX")),
+                    # https://www2.mmm.ucar.edu/wrf/users/namelist_best_prac_wps.html#map_proj
+                    crs=_get_crs_from_wps(ds),
+                )
+                study_area.set(db)
+
+
+def _get_crs_from_wps(nc_dataset: netCDF4.Dataset) -> str:
+    # The var used here doesn't matter - as long as it is a var that has coordinate
+    # attributes
+    wps_var = wrf.getvar(wrfin=nc_dataset, varname="XLAT_M")
+    cart_proj = wrf.get_cartopy(wps_var)
+    source_crs = cart_proj.source_crs.to_json_dict()["conversion"]["method"]["id"]
+    crs = source_crs["authority"] + ":" + str(source_crs["code"])
+    return crs
 
 
 @functions_framework.cloud_event
@@ -199,6 +231,7 @@ def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> No
         # File names should be in the form <study_area_name>/<file_name>
         study_area_name = file_name.parent.name
 
+        metastore.StudyArea.delete_all_chunks(db, study_area_name)
         study_area = metastore.StudyArea(
             name=study_area_name,
             col_count=header.col_count,
@@ -327,15 +360,21 @@ def _build_feature_matrix(
     feature_file_name = pathlib.PurePosixPath(chunk_path).with_suffix(".npy")
     feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
 
-    # TODO: Refactor to better handle both tar'ed + un-tarred chunks
     with chunk_blob.open("rb") as chunk:
+        study_area_name, chunk_name = _parse_chunk_path(chunk_path)
         # Flood (CityCat)
         if chunk_path.endswith(".tar"):
-            study_area_name, chunk_name = _parse_chunk_path(chunk_path)
             chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
                 firestore.Client(), study_area_name, chunk_name
             )
-            if chunk_metadata is not None:
+            # Let's check if the chunk metadata object is present and has the state
+            # different from None (which means it's either FEATURE_MATRIX_PROCESSING
+            # meaning that unscaled feature matrix is stored and this CF succeeded, or
+            # it's FEATURE_MATRIX_READY and the downstream rescaling CF is also done).
+            # If metadata object is not present it means we're in the first execution
+            # attempt. None state means that we're in the retry and either this CF
+            # crashed during previous execution attempt or it finished with an error.
+            if chunk_metadata is not None and chunk_metadata.state is not None:
                 logging.info(
                     "Flood feature matrix for chunk %s was already generated",
                     chunk_path,
@@ -346,6 +385,10 @@ def _build_feature_matrix(
             logging.info(
                 "Start generating flood feature matrix for chunk %s", chunk_path
             )
+            metastore.StudyAreaSpatialChunk(
+                id_=chunk_name,
+                error=firestore.DELETE_FIELD,
+            ).merge(firestore.Client(), study_area_name)
             feature_matrix, metadata = _build_flood_feature_matrix_from_archive(chunk)
 
             if feature_matrix is None:
@@ -496,7 +539,7 @@ def _collapse_city_cat_output_chunks(
     study_area_name = blob_path.parts[1]
     # Note that the config name be multiple 'folders' e.g. config_name/rainfall_4.txt
     config_path = str(pathlib.PurePosixPath(*blob_path.parts[2:-2]))
-    x_index, y_index = blob_path.parts[-2].split("_")
+    x_index, y_index = map(int, blob_path.parts[-2].split("_"))
     logging.info("Processing chunk %s for config %s", blob, config_path)
 
     # Retrieve the number of timesteps configured for this result file's simulation.
@@ -546,10 +589,14 @@ def _collapse_city_cat_output_chunks(
             # invocation was running.
             continue
 
+    study_area = metastore.StudyArea.get(db, study_area_name)
     metastore.SimulationLabelChunk(
         gcs_uri=f"gs://{labels_bucket.name}/{label_path}",
-        x_index=int(x_index),
-        y_index=int(y_index),
+        x_index=x_index,
+        y_index=y_index,
+        in_test_set=metastore.SimulationLabelChunk.is_in_test_set(
+            study_area, config_path, x_index, y_index
+        ),
     ).set(db, study_area_name, config_path)
 
     logging.info(
@@ -659,9 +706,10 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
             features_components.append(feature)
 
         features_matrix = numpy.dstack(features_components)
+        snapshot_time = ds.Times.values[0].decode("utf-8")
 
     return features_matrix, FeatureMetadata(
-        time=datetime.datetime.fromisoformat(str(ds.Times.values[0]))
+        time=datetime.datetime.fromisoformat(snapshot_time)
     )
 
 
@@ -839,6 +887,7 @@ def _write_flood_chunk_metastore_entry(chunk_blob: storage.Blob) -> None:
 
     metastore.StudyAreaSpatialChunk(
         id_=chunk_name,
+        state=metastore.StudyAreaChunkState.FEATURE_MATRIX_PROCESSING,
         raw_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
         needs_scaling=True,
         x_index=x_index,

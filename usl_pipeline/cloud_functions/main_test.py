@@ -17,7 +17,7 @@ import xarray
 
 import main
 from usl_lib.shared import geo_data, wps_data
-from usl_lib.storage import file_names
+from usl_lib.storage import file_names, metastore
 
 
 def _add_to_tar(tar: tarfile.TarFile, file_name: str, content_bytes: bytes):
@@ -146,13 +146,14 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
             mock.call().collection().document("study_area"),
             mock.call().collection().document().collection("chunks"),
             mock.call().collection().document().collection().document("chunk_1_2"),
-            mock.call()
-            .collection()
-            .document()
-            .collection()
-            .document()
-            .set(
+        ]
+    )
+    mock_db.collection().document().collection().document().set.assert_has_calls(
+        [
+            mock.call({"error": firestore.DELETE_FIELD}, merge=True),
+            mock.call(
                 {
+                    "state": metastore.StudyAreaChunkState.FEATURE_MATRIX_PROCESSING,
                     "raw_path": "gs://bucket/study_area/chunk_1_2.tar",
                     "needs_scaling": True,
                     "error": firestore.DELETE_FIELD,
@@ -171,6 +172,49 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
     mock_db.collection().document().update.assert_called_once_with(
         {"chunk_size": 2, "chunk_x_count": 5, "chunk_y_count": 10}
     ),
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+def test_build_feature_matrix_flood_already_done_will_be_skipped(
+    mock_storage_client, mock_firestore_client, _
+):
+    mock_feature_blob = mock.MagicMock()
+    mock_storage_client().bucket("").blob.side_effect = [
+        mock.MagicMock(),  # Input blob whose archive content is never used
+        mock_feature_blob,
+    ]
+    mock_storage_client.reset_mock()
+
+    mock_db = mock_firestore_client()
+
+    # The following statement means that the chunk was already processed before, and we
+    # don't need to process it again this time.
+    chunk_ref_mock = mock_db.collection().document().collection().document().get()
+    chunk_ref_mock.exists = True
+    chunk_ref_mock.to_dict.return_value = {
+        "state": metastore.StudyAreaChunkState.FEATURE_MATRIX_PROCESSING
+    }
+
+    main.build_feature_matrix(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "study_area/chunk_1_2.tar",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we didn't upload a serialized matrix of the tiff
+    mock_feature_blob.upload_from_file.assert_not_called()
+
+    # Ensure we didn't do firestore changes
+    mock_db.collection().document().collection().document().set.assert_not_called()
+    mock_db.transaction().update.assert_not_called()
+    mock_db.collection().document().update.assert_not_called()
 
 
 def test_build_feature_matrix_from_archive_empty_polygons():
@@ -285,11 +329,13 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     # Create an in-memory netcdf file and grab its bytes
     ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
     ncfile.createDimension("Time", 1)
+    # Create new dim to represent length of datetime str
+    ncfile.createDimension("DateStrLen", 19)
     ncfile.createDimension("west_east", 3)
     ncfile.createDimension("south_north", 3)
 
     # In WPS/WRF files, 'Times'->dimension and 'Time'->variable
-    time = ncfile.createVariable("Times", "str", ("Time",))
+    time = ncfile.createVariable("Times", "S1", ("Time", "DateStrLen"))
     lat = ncfile.createVariable("lat", "float32", ("south_north",))
     lon = ncfile.createVariable("lon", "float32", ("west_east",))
     # Create dataset entries for all variables in mock
@@ -300,7 +346,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
         "NOT_REQUIRED_VAR", "float32", ("Time", "south_north", "west_east")
     )
 
-    time[0] = "2010-02-02_18:00:00"
+    time[0] = netCDF4.stringtochar(numpy.array(["2010-02-02_18:00:00"], dtype="S19"))
     lat[:] = [200, 200, 200]
     lon[:] = [300, 300, 300]
     ncfile.variables["GHT"][:] = netcdf_array1
@@ -615,21 +661,32 @@ def test_build_feature_matrix_errors(
 
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-def test_build_and_upload_study_area_chunk(mock_storage_client, mock_firestore_client):
+@mock.patch.object(main, "_get_crs_from_wps", autospec=True)
+def test_build_and_upload_study_area_chunk(
+    mock_get_crs_from_wps, mock_storage_client, mock_firestore_client
+):
+    # Get some random data to place in a netcdf file
+    lat_vals = [40, 45]
+    long_vals = [-79, -80]
+    cell_size = 500
+    source_crs = "EPSG:32618"
+
     # Create an in-memory netcdf file and grab its bytes
     ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
-    ncfile.createDimension("Time", 1)
-    ncfile.createVariable("time", "f8", ("Time",))
+    ncfile.setncattr("corner_lons", long_vals)
+    ncfile.setncattr("corner_lats", lat_vals)
+    ncfile.setncattr("DX", cell_size)
 
     memfile = ncfile.close()
+    ncfile_bytes = memfile.tobytes()
 
     # Create a mock blob for the input file uploaded
     mock_input_blob = mock.MagicMock()
     mock_input_blob.name = "study_area/met_em.d03_test.nc"
     mock_input_blob.bucket.name = "input-bucket"
-    mock_input_blob.open.return_value = memfile
+    mock_input_blob.open.return_value = io.BytesIO(ncfile_bytes)
 
-    # Create a mock blob for the archive we will upload.
+    # Create a mock blob for the chunk we will upload.
     mock_chunk_blob = mock.MagicMock()
     mock_chunk_blob.name = "study_area/met_em.d03_test.nc"
     mock_chunk_blob.bucket.name = "climateiq-study-area-chunks"
@@ -640,6 +697,8 @@ def test_build_and_upload_study_area_chunk(mock_storage_client, mock_firestore_c
         mock_chunk_blob,
     ]
     mock_storage_client.reset_mock()
+
+    mock_get_crs_from_wps.return_value = source_crs
 
     main.build_and_upload_study_area_chunk(
         functions_framework.CloudEvent(
@@ -662,8 +721,33 @@ def test_build_and_upload_study_area_chunk(mock_storage_client, mock_firestore_c
         ]
     )
 
+    # Ensure we opened the input file
+    mock_input_blob.open.assert_called_once_with("rb")
+
     # Ensure we attempted to upload the chunked file
     mock_chunk_blob.upload_from_file.assert_called_once_with(mock.ANY)
+
+    # Ensure we wrote the firestore entry for the study area.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("study_area"),
+            mock.call()
+            .collection()
+            .document()
+            .set(
+                {
+                    "col_count": 200,
+                    "row_count": 200,
+                    "x_ll_corner": long_vals[0],
+                    "y_ll_corner": lat_vals[0],
+                    "cell_size": cell_size,
+                    "crs": source_crs,
+                }
+            ),
+        ]
+    )
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
@@ -686,6 +770,11 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
             """
         )
     )
+
+    old_chunk_ref_mock = mock.MagicMock()
+    (
+        mock_firestore_client().collection().document().collection().list_documents
+    ).return_value = [old_chunk_ref_mock]
 
     main.write_study_area_metadata(
         functions_framework.CloudEvent(
@@ -713,6 +802,14 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
             mock.call(),
             mock.call().collection("study_areas"),
             mock.call().collection().document("study_area"),
+            mock.call().collection().document().collection("chunks"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .list_documents(page_size=None),
+            mock.call().collection("study_areas"),
+            mock.call().collection().document("study_area"),
             mock.call()
             .collection()
             .document()
@@ -728,6 +825,7 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
             ),
         ]
     )
+    old_chunk_ref_mock.delete.assert_called_once()
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
@@ -1135,12 +1233,25 @@ def test_write_city_cat_output_chunks(mock_firestore_client):
 def test_collapse_city_cat_output_chunks(mock_firestore_client):
     """Ensures we write the correct chunks to GCS."""
     # Have firestore return a three-timestep configuration.
-    mock_firestore_client().collection().document().get().to_dict.return_value = {
-        "gcs_uri": "gs://config-bucket/config/file.txt",
-        "as_vector_gcs_uri": "gs://label-bucket/config/file.npy",
-        "parent_config_name": "config",
-        "rainfall_duration": 3,
-    }
+    mock_firestore_client().collection().document().get().to_dict.side_effect = [
+        # The first call to get is for a FloodScenarioConfig.
+        {
+            "gcs_uri": "gs://config-bucket/config/file.txt",
+            "as_vector_gcs_uri": "gs://label-bucket/config/file.npy",
+            "parent_config_name": "config",
+            "rainfall_duration": 3,
+        },
+        # The second call is for a StudyArea.
+        {
+            "col_count": 2,
+            "row_count": 5,
+            "x_ll_corner": 0.0,
+            "y_ll_corner": 0.0,
+            "cell_size": 1.0,
+            "chunk_x_count": 2,
+            "chunk_y_count": 5,
+        },
+    ]
 
     # Create a blob for the file triggering the cloud function run.
     blob_path = pathlib.PurePosixPath(
@@ -1231,6 +1342,7 @@ def test_collapse_city_cat_output_chunks(mock_firestore_client):
                     ),
                     "x_index": 0,
                     "y_index": 1,
+                    "in_test_set": False,
                 }
             ),
         ]
@@ -1555,9 +1667,11 @@ def test_rescale_feature_matrices_trigger_file_processed(mock_firestore_client):
             .document()
             .update(
                 {
+                    "state": metastore.StudyAreaChunkState.FEATURE_MATRIX_READY,
                     "needs_scaling": False,
                     "feature_matrix_path": "gs://features/TestArea/"
                     + "scaled_chunk_0_0.npy",
+                    "error": firestore.DELETE_FIELD,
                 },
             ),
         ]

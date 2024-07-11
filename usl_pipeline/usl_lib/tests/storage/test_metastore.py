@@ -1,5 +1,6 @@
 from unittest import mock
 
+from google.cloud import firestore
 import rasterio
 
 from usl_lib.shared import geo_data
@@ -124,6 +125,30 @@ def test_study_area_update_chunk_info_no_need():
     mock_db.transaction().update.assert_not_called()
 
 
+def test_study_area_delete_all_chunks():
+    mock_db = mock.MagicMock()
+    mock_doc_ref = mock.MagicMock()
+    mock_db.collection().document().collection().list_documents.return_value = [
+        mock_doc_ref,
+        mock_doc_ref,
+        mock_doc_ref,
+    ]
+
+    metastore.StudyArea.delete_all_chunks(mock_db, "TestStudyArea")
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("study_areas"),
+            mock.call.collection().document("TestStudyArea"),
+            mock.call.collection().document().collection("chunks"),
+            mock.call.collection()
+            .document()
+            .collection()
+            .list_documents(page_size=None),
+        ]
+    )
+    assert mock_doc_ref.delete.call_count == 3
+
+
 def test_study_area_chunk_get_if_exists():
     mock_db = mock.MagicMock()
     chunk_doc_mock = mock_db.collection().document().collection().document().get()
@@ -167,7 +192,12 @@ def test_study_area_chunk_update_scaling_done():
             .collection()
             .document()
             .update(
-                {"needs_scaling": False, "feature_matrix_path": "c/d"},
+                {
+                    "state": metastore.StudyAreaChunkState.FEATURE_MATRIX_READY,
+                    "needs_scaling": False,
+                    "feature_matrix_path": "c/d",
+                    "error": firestore.DELETE_FIELD,
+                },
             ),
         ]
     )
@@ -210,3 +240,99 @@ def test_flood_scenario_config_delete():
             mock.call.collection().document().delete(),
         ]
     )
+
+
+def test_simulation_label_chunk_is_in_test_set_produce_right_split() -> None:
+    """Ensure is_in_test_set produces a 20-80 split."""
+    study_area = metastore.StudyArea(
+        name="name",
+        col_count=2,
+        row_count=5,
+        x_ll_corner=1.0,
+        y_ll_corner=2.0,
+        cell_size=3.0,
+        crs="over there",
+        chunk_size=1,
+        chunk_x_count=2,
+        chunk_y_count=5,
+    )
+
+    # Calculate whether all chunks are in the test set.
+    chunks_in_test_set = [
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 0, 0),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 0, 1),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 0, 2),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 0, 3),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 0, 4),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 1, 0),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 1, 1),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 1, 2),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 1, 3),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 1, 4),
+    ]
+    # 2 / 10 of the chunks should be in the test set.
+    assert sum(chunks_in_test_set) == 2
+
+
+def test_simulation_label_chunk_is_in_test_set_is_deterministic() -> None:
+    """Ensure is_in_test_set produces deterministic outputs."""
+    study_area = metastore.StudyArea(
+        name="name",
+        col_count=2,
+        row_count=5,
+        x_ll_corner=1.0,
+        y_ll_corner=2.0,
+        cell_size=3.0,
+        crs="over there",
+        chunk_size=1,
+        chunk_x_count=2,
+        chunk_y_count=5,
+    )
+
+    # Call the function with the same inputs several times.
+    results = [
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "config", 0, 0)
+        for _ in range(10)
+    ]
+    # Ensure they're all the same.
+    assert all(res == results[0] for res in results)
+
+
+def test_simulation_label_chunk_is_in_test_produces_different_splits() -> None:
+    """Ensure is_in_test_set produces distinct splits for distinct simulations."""
+    study_area = metastore.StudyArea(
+        name="name",
+        col_count=2,
+        row_count=3,
+        x_ll_corner=1.0,
+        y_ll_corner=2.0,
+        cell_size=3.0,
+        crs="over there",
+        chunk_size=1,
+        chunk_x_count=2,
+        chunk_y_count=5,
+    )
+
+    chunks_in_test_set_for_config_1 = [
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c1", 0, 0),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c1", 0, 1),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c1", 0, 2),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c1", 1, 0),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c1", 1, 1),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c1", 1, 2),
+    ]
+
+    chunks_in_test_set_for_config_2 = [
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c2", 0, 0),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c2", 0, 1),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c2", 0, 2),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c2", 1, 0),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c2", 1, 1),
+        metastore.SimulationLabelChunk.is_in_test_set(study_area, "c2", 1, 2),
+    ]
+
+    # Different simulation config names could potentially result in
+    # the same set of chunks in the test set, but our use of
+    # seeds ensures we will get the same sets for the same
+    # configuration names, making this test reproducible.
+    assert chunks_in_test_set_for_config_1 != chunks_in_test_set_for_config_2
