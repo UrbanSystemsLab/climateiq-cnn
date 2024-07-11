@@ -17,7 +17,7 @@ import xarray
 
 import main
 from usl_lib.shared import geo_data, wps_data
-from usl_lib.storage import file_names
+from usl_lib.storage import file_names, metastore
 
 
 def _add_to_tar(tar: tarfile.TarFile, file_name: str, content_bytes: bytes):
@@ -146,13 +146,14 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
             mock.call().collection().document("study_area"),
             mock.call().collection().document().collection("chunks"),
             mock.call().collection().document().collection().document("chunk_1_2"),
-            mock.call()
-            .collection()
-            .document()
-            .collection()
-            .document()
-            .set(
+        ]
+    )
+    mock_db.collection().document().collection().document().set.assert_has_calls(
+        [
+            mock.call({"error": firestore.DELETE_FIELD}, merge=True),
+            mock.call(
                 {
+                    "state": metastore.StudyAreaChunkState.FEATURE_MATRIX_PROCESSING,
                     "raw_path": "gs://bucket/study_area/chunk_1_2.tar",
                     "needs_scaling": True,
                     "error": firestore.DELETE_FIELD,
@@ -171,6 +172,49 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
     mock_db.collection().document().update.assert_called_once_with(
         {"chunk_size": 2, "chunk_x_count": 5, "chunk_y_count": 10}
     ),
+
+
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+def test_build_feature_matrix_flood_already_done_will_be_skipped(
+    mock_storage_client, mock_firestore_client, _
+):
+    mock_feature_blob = mock.MagicMock()
+    mock_storage_client().bucket("").blob.side_effect = [
+        mock.MagicMock(),  # Input blob whose archive content is never used
+        mock_feature_blob,
+    ]
+    mock_storage_client.reset_mock()
+
+    mock_db = mock_firestore_client()
+
+    # The following statement means that the chunk was already processed before, and we
+    # don't need to process it again this time.
+    chunk_ref_mock = mock_db.collection().document().collection().document().get()
+    chunk_ref_mock.exists = True
+    chunk_ref_mock.to_dict.return_value = {
+        "state": metastore.StudyAreaChunkState.FEATURE_MATRIX_PROCESSING
+    }
+
+    main.build_feature_matrix(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "study_area/chunk_1_2.tar",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we didn't upload a serialized matrix of the tiff
+    mock_feature_blob.upload_from_file.assert_not_called()
+
+    # Ensure we didn't do firestore changes
+    mock_db.collection().document().collection().document().set.assert_not_called()
+    mock_db.transaction().update.assert_not_called()
+    mock_db.collection().document().update.assert_not_called()
 
 
 def test_build_feature_matrix_from_archive_empty_polygons():
@@ -1623,9 +1667,11 @@ def test_rescale_feature_matrices_trigger_file_processed(mock_firestore_client):
             .document()
             .update(
                 {
+                    "state": metastore.StudyAreaChunkState.FEATURE_MATRIX_READY,
                     "needs_scaling": False,
                     "feature_matrix_path": "gs://features/TestArea/"
                     + "scaled_chunk_0_0.npy",
+                    "error": firestore.DELETE_FIELD,
                 },
             ),
         ]

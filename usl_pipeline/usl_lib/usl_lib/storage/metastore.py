@@ -193,6 +193,11 @@ class StudyArea:
         return as_dict
 
 
+class StudyAreaChunkState(enum.StrEnum):
+    FEATURE_MATRIX_PROCESSING = "feature-matrix-processing"
+    FEATURE_MATRIX_READY = "feature-matrix-ready"
+
+
 @dataclasses.dataclass(slots=True)
 class StudyAreaChunk:
     """A chunk of a data within a larger study area.
@@ -209,6 +214,7 @@ class StudyAreaChunk:
     """
 
     id_: str
+    state: Optional[StudyAreaChunkState] = None
     raw_path: Optional[str] = None
     feature_matrix_path: Optional[str] = None
     needs_scaling: Optional[bool] = None
@@ -288,7 +294,12 @@ class StudyAreaChunk:
             scaled_feature_matrix_path: New GCS path pointing to scaled feature matrix.
         """
         cls.get_ref(db, study_area_name, chunk_name).update(
-            {"needs_scaling": False, "feature_matrix_path": scaled_feature_matrix_path},
+            {
+                "state": StudyAreaChunkState.FEATURE_MATRIX_READY,
+                "needs_scaling": False,
+                "feature_matrix_path": scaled_feature_matrix_path,
+                "error": firestore.DELETE_FIELD,
+            },
         )
 
 

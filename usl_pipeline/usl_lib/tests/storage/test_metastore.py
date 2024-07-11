@@ -1,5 +1,6 @@
 from unittest import mock
 
+from google.cloud import firestore
 import rasterio
 
 from usl_lib.shared import geo_data
@@ -191,7 +192,12 @@ def test_study_area_chunk_update_scaling_done():
             .collection()
             .document()
             .update(
-                {"needs_scaling": False, "feature_matrix_path": "c/d"},
+                {
+                    "state": metastore.StudyAreaChunkState.FEATURE_MATRIX_READY,
+                    "needs_scaling": False,
+                    "feature_matrix_path": "c/d",
+                    "error": firestore.DELETE_FIELD,
+                },
             ),
         ]
     )
