@@ -11,8 +11,8 @@ class AtmoModelParams:
     batch_size: int = 64
 
     # Layer-specific parameters.
-    lstm_units: int = 128
-    lstm_kernel_size: int = 3
+    lstm_units: int = 512
+    lstm_kernel_size: int = 5
     lstm_dropout: float = 0.2
     lstm_recurrent_dropout: float = 0.2
 
