@@ -6,10 +6,20 @@ from usl_models.atmo_ml import model as atmo_model
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import model_params
 
-_TEST_MAP_HEIGHT = 200
-_TEST_MAP_WIDTH = 200
-_TEST_SPATIAL_FEATURES = 40
+_TEST_MAP_HEIGHT = 100
+_TEST_MAP_WIDTH = 100
+_TEST_SPATIAL_FEATURES = 20
 _TEST_SPATIOTEMPORAL_FEATURES = 6
+
+
+def pytest_model_params() -> model_params.AtmoModelParams:
+    """Defines AtmoModelParams for testing."""
+    return model_params.AtmoModelParams(
+        batch_size=4,
+        lstm_units=32,
+        lstm_kernel_size=3,
+        epochs=1,
+    )
 
 
 def fake_input_batch(
@@ -50,7 +60,7 @@ def fake_input_batch(
 def test_atmo_convlstm():
     """Tests the AtmoConvLSTM model call."""
     batch_size = 4
-    params = model_params.test_model_params
+    params = pytest_model_params()
 
     fake_input = fake_input_batch(batch_size)
 
