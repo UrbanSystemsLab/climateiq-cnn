@@ -357,7 +357,13 @@ def _build_wrf_label_matrix(
         if re.search(file_names.WRF_DOMAIN3_NC_REGEX, chunk_name):
             label_matrix, metadata = _process_wrf_label_and_metadata(chunk)
 
-            label_file_name = chunk_name + ".npy"
+            # Current wrfout files don't include a .nc file extension, but handle both
+            # cases just in case
+            if chunk_name.endswith(".nc"):
+                label_file_name = chunk_name.replace(".nc", ".npy")
+            else:
+                label_file_name = chunk_name + ".npy"
+
             label_blob = storage_client.bucket(output_bucket).blob(str(label_file_name))
 
             _write_as_npy(label_blob, label_matrix)
@@ -410,7 +416,7 @@ def _write_wrf_label_chunk_metastore_entry(
     metastore.SimulationLabelTemporalChunk(
         gcs_uri=f"gs://{label_blob.bucket.name}/{label_blob.name}",
         time=metadata.time,
-    # TODO: Figure out how to differentiate each wrf label chunk (config_path)
+        # TODO: Figure out how to differentiate each wrf label chunk (config_path)
     ).set(db, study_area_name, config_path="None")
 
 
