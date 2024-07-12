@@ -213,7 +213,7 @@ class IncrementalTrainDataGenerator:
         # print("labels:", labels.shape)
         data = labels[max(t - n, 0):t]
         # print(f"labels[max(t - n, 0):{t}]:", data.shape)
-        return tf.concat([zeros, data], axis=0)
+        return tf.expand_dims(tf.concat([zeros, data], axis=0), axis=-1)
 
     @staticmethod
     def extract_temporal(t: int, n: int, temporal: tf.Tensor) -> tf.Tensor:
@@ -318,7 +318,7 @@ class IncrementalTrainDataGenerator:
                     ),
                     spatiotemporal=tf.TensorSpec(
                         shape=(constants.N_FLOOD_MAPS, constants.MAP_HEIGHT,
-                               constants.MAP_WIDTH), dtype=tf.float32
+                               constants.MAP_WIDTH, 1), dtype=tf.float32
                     ),
                 ),
                 tf.TensorSpec(shape=(constants.MAP_HEIGHT,
