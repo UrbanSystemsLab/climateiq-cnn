@@ -14,13 +14,13 @@ from google.cloud import error_reporting
 from google.cloud import firestore
 from google.cloud import storage
 import functions_framework
+import netCDF4
 import numpy
 from numpy.typing import NDArray
-import netCDF4
-import wrf
 import xarray
 import rasterio
 from shapely import geometry
+import wrf
 
 from usl_lib.chunkers import raster_chunkers
 from usl_lib.readers import simulation_readers
@@ -330,6 +330,97 @@ def delete_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) 
 
 
 @functions_framework.cloud_event
+@_retry_and_report_errors()
+def build_wrf_label_matrix(cloud_event: functions_framework.CloudEvent) -> None:
+    """Builds a label matrix when a set of simulation output files is uploaded.
+
+    This function is triggered when files containing simulation data are uploaded to
+    GCS. It produces a label matrix for the sim data and writes that label matrix to
+    another GCS bucket for eventual use in model training and prediction.
+    """
+    _build_wrf_label_matrix(
+        cloud_event.data["bucket"],
+        cloud_event.data["name"],
+        cloud_storage.LABEL_CHUNKS_BUCKET,
+    )
+
+
+def _build_wrf_label_matrix(
+    bucket_name: str, chunk_name: str, output_bucket: str
+) -> None:
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    chunk_blob = bucket.blob(chunk_name)
+
+    with chunk_blob.open("rb") as chunk:
+        # Heat (WRF) - treat one WRF output file as one chunk
+        if re.search(file_names.WRF_DOMAIN3_NC_REGEX, chunk_name):
+            label_matrix, metadata = _process_wrf_label_and_metadata(chunk)
+
+            # Current wrfout files don't include a .nc file extension, but handle both
+            # cases just in case
+            if chunk_name.endswith(".nc"):
+                label_file_name = chunk_name.replace(".nc", ".npy")
+            else:
+                label_file_name = chunk_name + ".npy"
+
+            label_blob = storage_client.bucket(output_bucket).blob(str(label_file_name))
+
+            _write_as_npy(label_blob, label_matrix)
+            _write_wrf_label_chunk_metastore_entry(chunk_blob, label_blob, metadata)
+        else:
+            raise ValueError(f"Unexpected file {chunk_name}")
+
+
+def _process_wrf_label_and_metadata(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+    nc_bytes = fd.read()
+    label_components = []
+    with netCDF4.Dataset("in_memory.nc", memory=nc_bytes) as nc:
+        # Variable names are listed here according to the formatting
+        # specified by wrf-python documentation
+        # https://wrf-python.readthedocs.io/en/latest/user_api/generated/wrf.getvar.html#wrf-getvar
+        vars_to_derive = ["rh2", "T2", "wspd_wdir10"]
+        for var in vars_to_derive:
+            if var == "wspd_wdir10":
+                # TODO: Split wind dir to sin/cos components
+                wspd10, wdir10 = wrf.getvar(nc, "wspd_wdir10")
+                label_components.append(numpy.swapaxes(wspd10, 0, 1))
+                label_components.append(numpy.swapaxes(wdir10, 0, 1))
+            else:
+                label = wrf.getvar(nc, var)
+                # Ensure order of dimension axes are: (west_east, south_north)
+                label_components.append(numpy.swapaxes(label, 0, 1))
+
+        ds = xarray.open_dataset(xarray.backends.NetCDF4DataStore(nc))
+        snapshot_time = ds.Times.values[0].decode("utf-8")
+
+    labels_matrix = numpy.dstack(label_components)
+    return labels_matrix, FeatureMetadata(
+        time=datetime.datetime.fromisoformat(snapshot_time)
+    )
+
+
+def _write_wrf_label_chunk_metastore_entry(
+    chunk_blob: storage.Blob, label_blob: storage.Blob, metadata: FeatureMetadata
+) -> None:
+    """Updates the metastore with new information for the given wrf chunks.
+
+    Args:
+      chunk_blob: The GCS blob containing the raw chunk.
+      label_blob: The GCS blob containing the label tensor for the chunk.
+      metadata: Additional metadata describing the features.
+    """
+    db = firestore.Client()
+    study_area_name = _parse_chunk_path(chunk_blob.name)[0]
+
+    metastore.SimulationLabelTemporalChunk(
+        gcs_uri=f"gs://{label_blob.bucket.name}/{label_blob.name}",
+        time=metadata.time,
+        # TODO: Figure out how to differentiate each wrf label chunk (config_path)
+    ).set(db, study_area_name, config_path="None")
+
+
+@functions_framework.cloud_event
 @_retry_and_report_errors(
     lambda cloud_event, exc: _write_chunk_metastore_error(
         cloud_event.data["name"], str(exc)
@@ -590,11 +681,11 @@ def _collapse_city_cat_output_chunks(
             continue
 
     study_area = metastore.StudyArea.get(db, study_area_name)
-    metastore.SimulationLabelChunk(
+    metastore.SimulationLabelSpatialChunk(
         gcs_uri=f"gs://{labels_bucket.name}/{label_path}",
         x_index=x_index,
         y_index=y_index,
-        in_test_set=metastore.SimulationLabelChunk.is_in_test_set(
+        in_test_set=metastore.SimulationLabelSpatialChunk.is_in_test_set(
             study_area, config_path, x_index, y_index
         ),
     ).set(db, study_area_name, config_path)

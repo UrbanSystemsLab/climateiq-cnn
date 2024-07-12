@@ -476,23 +476,9 @@ class SimulationLabelChunk:
 
     Attributes:
         gcs_uri: The full GCS uri to the location of the chunk.
-        x_index: The x index of the chunk relative to other chunks in the simulation.
-        y_index: The y index of the chunk relative to other chunks in the simulation.
-        in_test_set: Whether the label should be held out from model training as
-                     part of the test set.
     """
 
     gcs_uri: str
-    x_index: int
-    y_index: int
-    in_test_set: bool
-
-    def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
-        """Adds the label chunk to the given simulation."""
-        id_ = f"{self.x_index}_{self.y_index}"
-        Simulation.get_ref(db, study_area_name, config_path).collection(
-            SIMULATION_LABEL_CHUNKS
-        ).document(id_).set(dataclasses.asdict(self))
 
     @classmethod
     def list_chunks(
@@ -512,6 +498,29 @@ class SimulationLabelChunk:
         )
         for chunk_ref in ref.list_documents():
             yield cls(**chunk_ref.get().to_dict())
+
+
+@dataclasses.dataclass(slots=True)
+class SimulationLabelSpatialChunk(SimulationLabelChunk):
+    """A sub-area chunk of a larger study area.
+
+    Attributes:
+        x_index: The x index of the chunk relative to other chunks in the simulation.
+        y_index: The y index of the chunk relative to other chunks in the simulation.
+        in_test_set: Whether the label should be held out from model training as
+                     part of the test set.
+    """
+
+    x_index: int
+    y_index: int
+    in_test_set: bool
+
+    def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
+        """Adds the label chunk to the given simulation."""
+        id_ = f"{self.x_index}_{self.y_index}"
+        Simulation.get_ref(db, study_area_name, config_path).collection(
+            SIMULATION_LABEL_CHUNKS
+        ).document(id_).set(dataclasses.asdict(self))
 
     @staticmethod
     def is_in_test_set(
@@ -568,3 +577,22 @@ class SimulationLabelChunk:
 
         split = int(0.2 * len(chunk_indices))
         return (x_index, y_index) in set(chunk_indices[:split])
+
+
+@dataclasses.dataclass(slots=True)
+class SimulationLabelTemporalChunk(SimulationLabelChunk):
+    """A sub-area chunk of a larger study area.
+
+    Attributes:
+        time: The timestep represented by the data in this chunk.
+    """
+
+    time: Optional[datetime.datetime] = None
+
+    def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
+        """Adds the label chunk to the given simulation."""
+        Simulation.get_ref(db, study_area_name, config_path).collection(
+            SIMULATION_LABEL_CHUNKS
+        ).document(str(self.time)).set(dataclasses.asdict(self))
+
+    # TODO: Implement is_in_test_set() for temporal chunks
