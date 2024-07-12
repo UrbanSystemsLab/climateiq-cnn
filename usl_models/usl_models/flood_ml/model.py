@@ -3,6 +3,7 @@
 import dataclasses
 import logging
 from typing import TypeAlias, TypedDict
+import datetime
 
 import tensorflow as tf
 import keras
@@ -120,7 +121,7 @@ class FloodModel:
     def fit(self, dataset: tf.data.Dataset, epochs: int = 1, early_stopping: int | None = None):
         """Fit the model to the given dataset."""
         # Create a TensorBoard callback
-        logs = "./logs"  # + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        logs = "./logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         tb_callback = keras.callbacks.TensorBoard(log_dir=logs,
                                                   histogram_freq=1,
                                                   profile_batch='1,100')
