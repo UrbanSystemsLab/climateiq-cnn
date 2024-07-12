@@ -1,6 +1,6 @@
 """AtmoML model definition."""
 
-from typing import TypeAlias
+from typing import TypeAlias, TypedDict
 
 import tensorflow as tf
 from tensorflow.keras import layers
@@ -10,6 +10,13 @@ from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
 
 AtmoModelParams: TypeAlias = model_params.AtmoModelParams
+
+
+class AtmoInput(TypedDict):
+    """Input tensors dictionary for the Atmo model."""
+
+    spatial: tf.Tensor
+    spatiotemporal: tf.Tensor
 
 
 ###############################################################################
@@ -215,7 +222,7 @@ class AtmoConvLSTM(tf.keras.Model):
             name="wdir10_output_cnn",
         )
 
-    def call(self, inputs: dict[str, tf.Tensor]) -> tf.Tensor:
+    def call(self, inputs: AtmoInput) -> tf.Tensor:
         """Makes a forward pass of the model.
 
         Args:

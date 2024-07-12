@@ -16,7 +16,7 @@ def fake_input_batch(
     batch_size: int,
     height: int = _TEST_MAP_HEIGHT,
     width: int = _TEST_MAP_WIDTH,
-) -> dict[str, tf.Tensor]:
+) -> atmo_model.AtmoInput:
     """Creates a fake training batch for testing.
 
     Args:
