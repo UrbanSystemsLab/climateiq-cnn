@@ -130,7 +130,7 @@ class FloodModel:
         # Fit the model for this sample
         return self._model.fit(
             dataset, epochs=epochs, callbacks=[tb_callback]
-            # + [es_callback] if early_stopping else []
+            + [es_callback] if early_stopping else []
         )
 
     def load_model(self, filepath: str) -> None:
