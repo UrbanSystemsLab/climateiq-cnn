@@ -15,7 +15,7 @@ from usl_lib.storage import metastore
 
 def main() -> None:
     """Breaks the input files into chunks and uploads them to GCS."""
-    args = parse_args()
+    args = _parse_args()
     # Setting up logging:
     logging.getLogger("rasterio").setLevel(logging.WARNING)
     if args.verbose:
@@ -25,11 +25,35 @@ def main() -> None:
 
     db = firestore.Client()
     storage_client = storage.Client()
-    logging.info(
-        "Storage bucket for study areas: %s",
-        cloud_storage.STUDY_AREA_BUCKET,
-    )
+
+    # Let's check and cleanup old files before uploading new ones.
+    study_area_file_prefix = f"{args.name}/"
+    override = args.override
     study_area_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_BUCKET)
+    _check_and_delete_storage_files_with_prefix(
+        study_area_bucket, study_area_file_prefix, override
+    )
+
+    citycat_bucket = None
+    if args.export_to_citycat:
+        citycat_bucket = storage_client.bucket(
+            cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET
+        )
+        _check_and_delete_storage_files_with_prefix(
+            citycat_bucket, study_area_file_prefix, override
+        )
+
+    chunk_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_CHUNKS_BUCKET)
+    _check_and_delete_storage_files_with_prefix(
+        chunk_bucket, study_area_file_prefix, override
+    )
+
+    _check_and_delete_storage_files_with_prefix(
+        storage_client.bucket(cloud_storage.FEATURE_CHUNKS_BUCKET),
+        study_area_file_prefix,
+        override,
+    )
+
     with tempfile.TemporaryDirectory() as temp_dir:
         work_dir = pathlib.Path(temp_dir)
         prepared_inputs = study_area_transformers.prepare_and_upload_study_area_files(
@@ -46,15 +70,13 @@ def main() -> None:
         )
 
         if args.export_to_citycat:
-            logging.info(
-                "Storage bucket for flood simulation inputs: %s",
-                cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET,
-            )
+            if citycat_bucket is None:
+                raise ValueError("Internal error, CityCat bucket should be set earlier")
             study_area_transformers.prepare_and_upload_citycat_input_files(
                 args.name,
                 prepared_inputs,
                 work_dir,
-                storage_client.bucket(cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET),
+                citycat_bucket,
                 elevation_geotiff_band=args.elevation_geotiff_band,
             )
 
@@ -76,15 +98,6 @@ def main() -> None:
             else:
                 break
 
-        chunk_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_CHUNKS_BUCKET)
-        delete_storage_files_with_prefix(chunk_bucket, f"{args.name}/")
-        delete_storage_files_with_prefix(
-            storage_client.bucket(cloud_storage.FEATURE_CHUNKS_BUCKET), f"{args.name}/"
-        )
-        logging.info(
-            "Storage bucket for study area chunks: %s",
-            cloud_storage.STUDY_AREA_CHUNKS_BUCKET,
-        )
         study_area_chunkers.build_and_upload_chunks(
             args.name,
             prepared_inputs,
@@ -95,17 +108,28 @@ def main() -> None:
         )
 
 
-def delete_storage_files_with_prefix(bucket: storage.Bucket, prefix: str) -> None:
-    logging.info("Deleting all files in gs://%s/%s*...")
-    blobs = bucket.list_blobs(prefix=f"{prefix}")
-    deleted_count = 0
+def _check_and_delete_storage_files_with_prefix(
+    bucket: storage.Bucket, prefix: str, override: bool
+) -> None:
+    """Checks if storage bucket folder has files, deletes if allowed or stops if not."""
+    blobs = [blob for blob in bucket.list_blobs(prefix=f"{prefix}")]
+    if len(blobs) == 0:
+        # No files, nothing to check or delete
+        return
+    if not override:
+        # Deletion is not allowed, stop the execution
+        raise ValueError(
+            f"{len(blobs)} file(s) found in gs://{bucket.name}/{prefix}, "
+            + "please set --override in order to clean them up before upload"
+        )
+    logging.info("Deleting all files in gs://%s/%s*...", bucket.name, prefix)
     for blob in blobs:
-        # blob.delete()
-        deleted_count = deleted_count + 1
-    logging.info(" - %s files were deleted", deleted_count)
+        blob.delete()
+    logging.info(" - %s files were deleted", len(blobs))
 
 
-def parse_args() -> argparse.Namespace:
+def _get_args_parser() -> argparse.ArgumentParser:
+    """Prepares command-line argument parser."""
     parser = argparse.ArgumentParser(
         description=(
             "Uploads a set of files describing features of a geography into GCS. The "
@@ -175,7 +199,20 @@ def parse_args() -> argparse.Namespace:
         help="Optional list of soil classes that cannot be treated as green areas",
         nargs="*",
     )
+    parser.add_argument(
+        "--override",
+        type=bool,
+        default=False,
+        help="Indicates that old files will be cleaned up in storage buckets before"
+        + " new files can be uploaded (execution will be stopped otherwise)",
+        action=argparse.BooleanOptionalAction,
+    )
+    return parser
 
+
+def _parse_args() -> argparse.Namespace:
+    """Parses command-line arguments."""
+    parser = _get_args_parser()
     args = parser.parse_args()
 
     # Validation of CLI arguments
