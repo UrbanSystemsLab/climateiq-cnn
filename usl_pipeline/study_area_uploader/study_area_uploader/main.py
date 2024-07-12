@@ -1,6 +1,7 @@
 import argparse
 import logging
 import pathlib
+import sys
 import tempfile
 import time
 
@@ -30,29 +31,33 @@ def main() -> None:
     study_area_file_prefix = f"{args.name}/"
     override = args.override
     study_area_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_BUCKET)
-    _check_and_delete_storage_files_with_prefix(
+    if not _check_and_delete_storage_files_with_prefix(
         study_area_bucket, study_area_file_prefix, override
-    )
+    ):
+        sys.exit(1)
 
     citycat_bucket = None
     if args.export_to_citycat:
         citycat_bucket = storage_client.bucket(
             cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET
         )
-        _check_and_delete_storage_files_with_prefix(
+        if not _check_and_delete_storage_files_with_prefix(
             citycat_bucket, study_area_file_prefix, override
-        )
+        ):
+            sys.exit(1)
 
     chunk_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_CHUNKS_BUCKET)
-    _check_and_delete_storage_files_with_prefix(
+    if not _check_and_delete_storage_files_with_prefix(
         chunk_bucket, study_area_file_prefix, override
-    )
+    ):
+        sys.exit(1)
 
-    _check_and_delete_storage_files_with_prefix(
+    if not _check_and_delete_storage_files_with_prefix(
         storage_client.bucket(cloud_storage.FEATURE_CHUNKS_BUCKET),
         study_area_file_prefix,
         override,
-    )
+    ):
+        sys.exit(1)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         work_dir = pathlib.Path(temp_dir)
@@ -110,22 +115,28 @@ def main() -> None:
 
 def _check_and_delete_storage_files_with_prefix(
     bucket: storage.Bucket, prefix: str, override: bool
-) -> None:
-    """Checks if storage bucket folder has files, deletes if allowed or stops if not."""
+) -> bool:
+    """Checks if storage bucket folder has files, deletes them and returns True.
+
+    The function returns False if files are found but override is False (deletion is not
+    allowed).
+    """
     blobs = [blob for blob in bucket.list_blobs(prefix=f"{prefix}")]
     if len(blobs) == 0:
         # No files, nothing to check or delete
-        return
+        return True
     if not override:
         # Deletion is not allowed, stop the execution
-        raise ValueError(
+        logging.error(
             f"{len(blobs)} file(s) found in gs://{bucket.name}/{prefix}, "
             + "please set --override in order to clean them up before upload"
         )
+        return False
     logging.info("Deleting all files in gs://%s/%s*...", bucket.name, prefix)
     for blob in blobs:
         blob.delete()
     logging.info(" - %s files were deleted", len(blobs))
+    return True
 
 
 def _get_args_parser() -> argparse.ArgumentParser:
