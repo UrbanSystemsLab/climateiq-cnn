@@ -1,3 +1,5 @@
+"""tf.data.Datasets for training FloodML model on CityCAT data."""
+
 import logging
 import random
 from typing import Iterator, Optional, Tuple
@@ -33,7 +35,8 @@ def load_dataset_windowed(
     Args:
       sim_names: The simulation labels to use for training,
                  e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
-      batch_size: Size of batches yielded by the dataset.
+      batch_size: Size of batches yielded by the dataset. Approximate memory
+                  usage is 10GB * batch_size during training.
       n_flood_maps: The number of flood maps in each example.
       m_rainfall: The width of the temporal rainfall tensor.
       max_chunks: The maximum number of examples to yield from the dataset.
@@ -110,6 +113,7 @@ def _generate_windows(
 
 
 def _extract_temporal(t: int, n: int, temporal: tf.Tensor) -> tf.Tensor:
+    """Generate inputs for a sliding time window of length `n`."""
     (_, D) = temporal.shape
     zeros = tf.zeros(shape=(max(n - t, 0), D))
     data = temporal[max(t - n, 0) : t]
@@ -146,7 +150,7 @@ def _iter_model_inputs(
     temporal = _generate_temporal_tensor(
         firestore_client, storage_client, sim_name, m_rainfall
     )
-    feature_label_gen = _iter_feature_label_tensors(
+    feature_label_gen = _iter_geo_feature_label_tensors(
         firestore_client, storage_client, sim_name
     )
 
@@ -182,15 +186,14 @@ def _generate_temporal_tensor(
     gcs_url = temporal_metadata["as_vector_gcs_uri"]
 
     logging.info("Retrieving temporal features from %s.", gcs_url)
-    temporal_array = _download_as_array(storage_client, gcs_url)
-    temporal_tensor = tf.convert_to_tensor(
-        numpy.tile(temporal_array, (m_rainfall, 1)).T,
-        dtype=tf.float32,
+
+    temporal_vector = _download_as_tensor(storage_client, gcs_url)
+    return tf.transpose(
+        tf.tile(tf.reshape(temporal_vector, (1, len(temporal_vector))), [m_rainfall, 1])
     )
-    return temporal_tensor
 
 
-def _iter_feature_label_tensors(
+def _iter_geo_feature_label_tensors(
     firestore_client: firestore.Client, storage_client: storage.Client, sim_name: str
 ) -> Iterator[tuple[tf.Tensor, tf.Tensor]]:
     """Yields feature and label tensors from chunks stored in GCS."""
