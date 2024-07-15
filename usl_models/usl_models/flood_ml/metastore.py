@@ -1,208 +1,123 @@
-import json
+from typing import Any, Sequence, TypeVar
+import urllib.parse
+
 from google.cloud import firestore
-from usl_models.flood_ml.settings import Settings
 
 
-"""
-    This class is used to query Firestore metastore.
+def get_temporal_feature_metadata(
+    db: firestore.Client, sim_name: str
+) -> dict[str, Any]:
+    """Retrieves metadata stating the location of temporal features in GCS.
 
-"""
+    Args:
+      db: The firestore client to use when retrieving metadata.
+      sim_name: The simulation for which to retrieve metadata.
+
+    Returns:
+      A dictionary with keys 'as_vector_gcs_uri' and 'rainfall_duration' which state the
+      GCS location of the temporal feature vector and the duration of the rainfall
+      represented by the vector.
+
+    Raises:
+      ValueError: If a simulation `sim_name` can not be found.
+    """
+    sim = _get_simulation_doc(db, sim_name).get().to_dict()
+    if sim is None:
+        raise ValueError(f"No such simulation {sim_name} found.")
+
+    rainfall_config = sim["configuration"]
+    return rainfall_config.get().to_dict()
 
 
-class FirestoreDataHandler:
-    def __init__(
-        self,
-        firestore_client: firestore.Client = None,
-        settings: Settings = None,
-    ):
-        # print("Initializing FirestoreDataHandler...")
-        self.firestore_client = firestore_client or firestore.Client()
+def get_spatial_feature_chunk_metadata(
+    db: firestore.Client, sim_name: str
+) -> list[dict[str, Any]]:
+    """Retrieves metadata stating the location of spatial features in GCS.
 
-        # Load settings
-        self.settings = settings or Settings()
+    Args:
+      db: The firestore client to use when retrieving metadata.
+      sim_name: The simulation for which to retrieve metadata.
 
-    def _fetch_document(self, document_ref):
-        """
-        Fetches a document from Firestore using the provided document reference.
+    Returns:
+      A sequence of dictionaries with key 'feature_matrix_path' stating the location in
+      GCS of the feature tensor.
 
-        Args:
-            document_ref: The reference of the document to fetch.
+    Raises:
+      ValueError: If a simulation `sim_name` can not be found.
+    """
+    sim = _get_simulation_doc(db, sim_name).get().to_dict()
+    if sim is None:
+        raise ValueError(f"No such simulation {sim_name} found.")
 
-        Returns:
-            The fetched document as a dictionary.
-        """
-        try:
-            print(f"Fetching document: {document_ref.id}")
-            # Fetch the document
-            document = document_ref.get()
+    study_area_ref = sim["study_area"]
+    return [doc.to_dict() for doc in study_area_ref.collection("chunks").stream()]
 
-            # Return the document data as a dictionary
-            return document.to_dict()
-        except Exception as e:
-            print(f"An error occurred while fetching the document: {e}")
-            return None
 
-    def _find_document_by_id(self, collection_name, document_id):
-        """
-        Finds a document by ID in the specified collection.
+def get_spatial_feature_and_label_chunk_metadata(
+    db: firestore.Client, sim_name: str
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Retrieves metadata for the location of (feature, label) pairs in GCS.
 
-        Args:
-            collection_name: The name of the collection to search in.
-            document_id: The ID of the document to find.
+    Args:
+      db: The firestore client to use when retrieving metadata.
+      sim_name: The simulation for which to retrieve metadata.
 
-        Returns:
-            The found document as a dictionary, or None if no document was found.
-        """
-        try:
-            if self.settings.DEBUG > 2:
-                print(
-                    f"Searching for document with ID '{document_id}' in collection '{collection_name}'")
+    Returns:
+      A sequence of (feature, label) tuples, where `feature` is a dictionary with key
+      'feature_matrix_path' stating the location in GCS of the feature tensor and
+      `label` is a dictionary with key 'gcs_uri' stating the location in GCS of the
+      accompanying label tensor.
 
-            # Get the document with the given ID
-            document = self.firestore_client.collection(
-                collection_name).document(document_id).get()
+    Raises:
+      ValueError: If a simulation `sim_name` can not be found.
+      AssertionError: If the labels and spatial features for the simulation do not
+                      contain the same set of chunks.
+    """
+    feature_metadata = get_spatial_feature_chunk_metadata(db, sim_name)
 
-            # If the document exists, return it as a dictionary
-            if document.exists:
-                if self.settings.DEBUG > 2:
-                    print(f"Found document: {document.to_dict()}")
-                return document.to_dict()
-            else:
-                print(
-                    f"No document found with ID '{document_id}' in collection '{collection_name}'")
-                return None
+    # Retrieve all label chunks for the simulation.
+    label_chunks_collection = _get_simulation_doc(db, sim_name).collection(
+        "label_chunks"
+    )
+    label_metadata = [doc.to_dict() for doc in label_chunks_collection.stream()]
 
-        except Exception as e:
-            print(f"An error occurred while finding the document: {e}")
-            return None
+    # Map the features and labels by their chunk indices.
+    features_by_chunk_index = {
+        (feature["x_index"], feature["y_index"]): feature
+        for feature in feature_metadata
+    }
+    labels_by_chunk_index = {
+        (label["x_index"], label["y_index"]): label for label in label_metadata
+    }
 
-    def _print_document_content(self, collection_info, document_id):
-        """Prints the content of a document if it exists in the collection_info.
+    # Ensure we have the same chunk indices for features and labels.
+    missing_labels = _missing_keys(features_by_chunk_index, labels_by_chunk_index)
+    missing_features = _missing_keys(labels_by_chunk_index, features_by_chunk_index)
+    if missing_labels or missing_features:
+        raise AssertionError(
+            "Features and label chunks do not line up. "
+            f'Indices missing from labels: {", ".join(map(str, missing_labels))} '
+            f'Indices missing from features: {", ".join(map(str, missing_features))}'
+        )
 
-        Args:
-            collection_info: A dictionary representing the collection information.
-            document_id: The ID of the document to print.
-        """
-        print("Printing document content...")
-        print(f"Collection: {collection_info}")
-        print(f"Document ID: {document_id}")
+    # Return feature & matching label metadata associated with the same indices.
+    return [
+        (feature, labels_by_chunk_index[index])
+        for index, feature in features_by_chunk_index.items()
+    ]
 
-        for collection_name, collection_data in collection_info.items():
-            if document_id in collection_data:
-                print(f"Document ID: {document_id}")
-                print(json.dumps(collection_data[document_id], indent=4))
-                return
 
-        print(f"Document with ID '{document_id}' not found in the collection.")
+_T = TypeVar("_T")
 
-    def _is_document_in_collection(self, collection_info, object_name):
-        """Checks if an object is a document."""
-        for collection_name, collection_data in collection_info.items():
-            if object_name in collection_data:
-                return True
-        return False
 
-    def _find_simulation_documents(self, simulation_collection_name):
-        """Finds all documents under a given simulation collection."""
-        # print(f"Finding documents under collection: {simulation_collection_name}")
-        simulation_documents = []
+def _missing_keys(d1: dict[_T, Any], d2: dict[_T, Any]) -> Sequence[_T]:
+    """Returns dictionary keys present in d1 but not d2."""
+    return [key for key in d1.keys() if key not in d2]
 
-        # Get the collection
-        collection_ref = self.firestore_client.collection(simulation_collection_name)
 
-        # Get all documents from the collection
-        docs = collection_ref.stream()
-
-        if not docs:
-            print(f"No documents found under collection: {simulation_collection_name}")
-            return simulation_documents
-        else:
-            # print(f"Found documents under collection: {simulation_collection_name}")
-
-            for doc in docs:
-                document_data = doc.to_dict()
-                document_id = doc.id
-
-                # Get all subcollections of the document
-                subcollections = (
-                    self.firestore_client.collection(simulation_collection_name)
-                    .document(document_id)
-                    .collections()
-                )
-
-                subcollections_data = {}
-                for subcollection in subcollections:
-                    subcollection_docs = subcollection.stream()
-                    subcollections_data[subcollection.id] = [
-                        doc.to_dict() for doc in subcollection_docs
-                    ]
-
-                simulation_documents.append(
-                    {
-                        "document_id": document_id,
-                        "document_data": document_data,
-                        "subcollections": subcollections_data,
-                    }
-                )
-
-        return simulation_documents
-
-    def get_documents(self, collection_name):
-        """
-        Get all documents in a collection.
-        """
-        print(f"Getting documents in collection: {collection_name}")
-        documents = []
-
-        # Get the collection
-        collection_ref = self.firestore_client.collection(collection_name)
-
-        # Get all documents from the collection
-        docs = collection_ref.stream()
-
-        for doc in docs:
-            # Append the document data as a dictionary to the list
-            documents.append({
-                "document_id": doc.id,  # Include the document ID
-                "document_data": doc.to_dict()  # Include the document data
-            })
-
-        return documents
-
-    def _list_collections_and_print_documents(self):
-        """
-        List all collections and print the documents in each collection.
-        """
-        print("Listing collections and documents...")
-        collections_info = {}
-
-        # List all top-level collections
-        collections = self.firestore_client.collections()
-        for collection in collections:
-            collection_name = collection.id
-            collections_info[collection_name] = {}
-
-            # List all documents in the collection
-            docs = collection.stream()
-            for doc in docs:
-                doc_id = doc.id
-                collections_info[collection_name][doc_id] = []
-
-                # Print any document in the collection
-                # print(f"Collection: {collection_name}")
-                # print(f"  Document ID: {doc_id}")
-                # print(f"  Document Data: {doc.to_dict()}")
-
-                # List all subcollections for each document
-                subcollections = (
-                    self.firestore_client.collection(collection_name)
-                    .document(doc_id)
-                    .collections()
-                )
-                for subcollection in subcollections:
-                    subcollection_name = subcollection.id
-                    collections_info[collection_name][doc_id].append(subcollection_name)
-
-                break
-
-        return collections_info
+def _get_simulation_doc(
+    db: firestore.Client, sim_name: str
+) -> firestore.DocumentReference:
+    """Retrieves the firestore document for the simulation with the given name."""
+    # Escape the name to avoid characters not allowed in IDs such as slashes.
+    return db.collection("simulations").document(urllib.parse.quote(sim_name, safe=()))

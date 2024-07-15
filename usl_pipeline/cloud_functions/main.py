@@ -14,11 +14,13 @@ from google.cloud import error_reporting
 from google.cloud import firestore
 from google.cloud import storage
 import functions_framework
+import netCDF4
 import numpy
 from numpy.typing import NDArray
 import xarray
 import rasterio
 from shapely import geometry
+import wrf
 
 from usl_lib.chunkers import raster_chunkers
 from usl_lib.readers import simulation_readers
@@ -149,30 +151,60 @@ def _retry_and_report_errors(
 def build_and_upload_study_area_chunk(
     cloud_event: functions_framework.CloudEvent,
 ) -> None:
-    """Creates a study area chunk and uploads it to GCS.
+    """Creates a study area chunk, uploads to bucket, and writes to metastore.
 
     This function is triggered when files containing raw geo data for a study area
-    are uploaded to GCS. It will group the files into TAR-files and upload it to a
-    bucket.
+    are uploaded to GCS. It will load the file into study area chunks bucket and
+    write a new study area to metastore.
     """
-    file_name = cloud_event.data["name"]
+    file_name = pathlib.PurePosixPath(cloud_event.data["name"])
     bucket_name = cloud_event.data["bucket"]
 
-    if re.search(file_names.WPS_DOMAIN3_NC_REGEX, file_name):
+    # For AtmoML, only 3rd domain (500m) output files will be used
+    if re.search(file_names.WPS_DOMAIN3_NC_REGEX, file_name.name):
         storage_client = storage.Client()
+        db = firestore.Client()
+
         bucket = storage_client.bucket(bucket_name)
-        file_blob = bucket.blob(file_name)
+        file_blob = bucket.blob(str(file_name))
 
         # For WRF, we can treat each snapshot output file as its own chunk. If
         # multiple snapshots must be processed together, we can choose to group
         # the files together in a TAR before uploading.
-        with file_blob.open("rb") as f:
+        with file_blob.open("rb") as fd:
             study_area_chunk_bucket = storage_client.bucket(
                 cloud_storage.STUDY_AREA_CHUNKS_BUCKET
             )
-            study_area_chunk_bucket.blob(file_name).upload_from_file(f)
+            study_area_chunk_bucket.blob(str(file_name)).upload_from_file(fd)
 
-        # TODO: Write to metastore - create new chunk entry
+            # File names should be in the form <study_area_name>/<file_name>
+            study_area_name = file_name.parent.name
+
+            nc_bytes = fd.read()
+            with netCDF4.Dataset("in_memory.nc", memory=nc_bytes) as ds:
+                study_area = metastore.StudyArea(
+                    name=study_area_name,
+                    # Grid dimension will always be 200x200 for all cities
+                    col_count=200,
+                    row_count=200,
+                    x_ll_corner=ds.getncattr("corner_lons")[0],
+                    y_ll_corner=ds.getncattr("corner_lats")[0],
+                    # https://www2.mmm.ucar.edu/wrf/users/namelist_best_prac_wps.html#dx_dy
+                    cell_size=int(ds.getncattr("DX")),
+                    # https://www2.mmm.ucar.edu/wrf/users/namelist_best_prac_wps.html#map_proj
+                    crs=_get_crs_from_wps(ds),
+                )
+                study_area.set(db)
+
+
+def _get_crs_from_wps(nc_dataset: netCDF4.Dataset) -> str:
+    # The var used here doesn't matter - as long as it is a var that has coordinate
+    # attributes
+    wps_var = wrf.getvar(wrfin=nc_dataset, varname="XLAT_M")
+    cart_proj = wrf.get_cartopy(wps_var)
+    source_crs = cart_proj.source_crs.to_json_dict()["conversion"]["method"]["id"]
+    crs = source_crs["authority"] + ":" + str(source_crs["code"])
+    return crs
 
 
 @functions_framework.cloud_event
@@ -298,6 +330,97 @@ def delete_flood_scenario_metadata(cloud_event: functions_framework.CloudEvent) 
 
 
 @functions_framework.cloud_event
+@_retry_and_report_errors()
+def build_wrf_label_matrix(cloud_event: functions_framework.CloudEvent) -> None:
+    """Builds a label matrix when a set of simulation output files is uploaded.
+
+    This function is triggered when files containing simulation data are uploaded to
+    GCS. It produces a label matrix for the sim data and writes that label matrix to
+    another GCS bucket for eventual use in model training and prediction.
+    """
+    _build_wrf_label_matrix(
+        cloud_event.data["bucket"],
+        cloud_event.data["name"],
+        cloud_storage.LABEL_CHUNKS_BUCKET,
+    )
+
+
+def _build_wrf_label_matrix(
+    bucket_name: str, chunk_name: str, output_bucket: str
+) -> None:
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    chunk_blob = bucket.blob(chunk_name)
+
+    with chunk_blob.open("rb") as chunk:
+        # Heat (WRF) - treat one WRF output file as one chunk
+        if re.search(file_names.WRF_DOMAIN3_NC_REGEX, chunk_name):
+            label_matrix, metadata = _process_wrf_label_and_metadata(chunk)
+
+            # Current wrfout files don't include a .nc file extension, but handle both
+            # cases just in case
+            if chunk_name.endswith(".nc"):
+                label_file_name = chunk_name.replace(".nc", ".npy")
+            else:
+                label_file_name = chunk_name + ".npy"
+
+            label_blob = storage_client.bucket(output_bucket).blob(str(label_file_name))
+
+            _write_as_npy(label_blob, label_matrix)
+            _write_wrf_label_chunk_metastore_entry(chunk_blob, label_blob, metadata)
+        else:
+            raise ValueError(f"Unexpected file {chunk_name}")
+
+
+def _process_wrf_label_and_metadata(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+    nc_bytes = fd.read()
+    label_components = []
+    with netCDF4.Dataset("in_memory.nc", memory=nc_bytes) as nc:
+        # Variable names are listed here according to the formatting
+        # specified by wrf-python documentation
+        # https://wrf-python.readthedocs.io/en/latest/user_api/generated/wrf.getvar.html#wrf-getvar
+        vars_to_derive = ["rh2", "T2", "wspd_wdir10"]
+        for var in vars_to_derive:
+            if var == "wspd_wdir10":
+                # TODO: Split wind dir to sin/cos components
+                wspd10, wdir10 = wrf.getvar(nc, "wspd_wdir10")
+                label_components.append(numpy.swapaxes(wspd10, 0, 1))
+                label_components.append(numpy.swapaxes(wdir10, 0, 1))
+            else:
+                label = wrf.getvar(nc, var)
+                # Ensure order of dimension axes are: (west_east, south_north)
+                label_components.append(numpy.swapaxes(label, 0, 1))
+
+        ds = xarray.open_dataset(xarray.backends.NetCDF4DataStore(nc))
+        snapshot_time = ds.Times.values[0].decode("utf-8")
+
+    labels_matrix = numpy.dstack(label_components)
+    return labels_matrix, FeatureMetadata(
+        time=datetime.datetime.fromisoformat(snapshot_time)
+    )
+
+
+def _write_wrf_label_chunk_metastore_entry(
+    chunk_blob: storage.Blob, label_blob: storage.Blob, metadata: FeatureMetadata
+) -> None:
+    """Updates the metastore with new information for the given wrf chunks.
+
+    Args:
+      chunk_blob: The GCS blob containing the raw chunk.
+      label_blob: The GCS blob containing the label tensor for the chunk.
+      metadata: Additional metadata describing the features.
+    """
+    db = firestore.Client()
+    study_area_name = _parse_chunk_path(chunk_blob.name)[0]
+
+    metastore.SimulationLabelTemporalChunk(
+        gcs_uri=f"gs://{label_blob.bucket.name}/{label_blob.name}",
+        time=metadata.time,
+        # TODO: Figure out how to differentiate each wrf label chunk (config_path)
+    ).set(db, study_area_name, config_path="None")
+
+
+@functions_framework.cloud_event
 @_retry_and_report_errors(
     lambda cloud_event, exc: _write_chunk_metastore_error(
         cloud_event.data["name"], str(exc)
@@ -328,15 +451,21 @@ def _build_feature_matrix(
     feature_file_name = pathlib.PurePosixPath(chunk_path).with_suffix(".npy")
     feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
 
-    # TODO: Refactor to better handle both tar'ed + un-tarred chunks
     with chunk_blob.open("rb") as chunk:
+        study_area_name, chunk_name = _parse_chunk_path(chunk_path)
         # Flood (CityCat)
         if chunk_path.endswith(".tar"):
-            study_area_name, chunk_name = _parse_chunk_path(chunk_path)
             chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
                 firestore.Client(), study_area_name, chunk_name
             )
-            if chunk_metadata is not None:
+            # Let's check if the chunk metadata object is present and has the state
+            # different from None (which means it's either FEATURE_MATRIX_PROCESSING
+            # meaning that unscaled feature matrix is stored and this CF succeeded, or
+            # it's FEATURE_MATRIX_READY and the downstream rescaling CF is also done).
+            # If metadata object is not present it means we're in the first execution
+            # attempt. None state means that we're in the retry and either this CF
+            # crashed during previous execution attempt or it finished with an error.
+            if chunk_metadata is not None and chunk_metadata.state is not None:
                 logging.info(
                     "Flood feature matrix for chunk %s was already generated",
                     chunk_path,
@@ -347,6 +476,10 @@ def _build_feature_matrix(
             logging.info(
                 "Start generating flood feature matrix for chunk %s", chunk_path
             )
+            metastore.StudyAreaSpatialChunk(
+                id_=chunk_name,
+                error=firestore.DELETE_FIELD,
+            ).merge(firestore.Client(), study_area_name)
             feature_matrix, metadata = _build_flood_feature_matrix_from_archive(chunk)
 
             if feature_matrix is None:
@@ -548,11 +681,11 @@ def _collapse_city_cat_output_chunks(
             continue
 
     study_area = metastore.StudyArea.get(db, study_area_name)
-    metastore.SimulationLabelChunk(
+    metastore.SimulationLabelSpatialChunk(
         gcs_uri=f"gs://{labels_bucket.name}/{label_path}",
         x_index=x_index,
         y_index=y_index,
-        in_test_set=metastore.SimulationLabelChunk.is_in_test_set(
+        in_test_set=metastore.SimulationLabelSpatialChunk.is_in_test_set(
             study_area, config_path, x_index, y_index
         ),
     ).set(db, study_area_name, config_path)
@@ -664,9 +797,10 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
             features_components.append(feature)
 
         features_matrix = numpy.dstack(features_components)
+        snapshot_time = ds.Times.values[0].decode("utf-8")
 
     return features_matrix, FeatureMetadata(
-        time=datetime.datetime.fromisoformat(str(ds.Times.values[0]))
+        time=datetime.datetime.fromisoformat(snapshot_time)
     )
 
 
@@ -747,9 +881,9 @@ def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray
         scaling_config is not None
         and scaling_config.get("type") == wps_data.ScalingType.GLOBAL
     ):
-        min = scaling_config.get("min")
-        max = scaling_config.get("max")
-        feature_values = _apply_minmax_scaler(feature_values, min, max)
+        scaling_min = scaling_config.get("min")
+        scaling_max = scaling_config.get("max")
+        feature_values = _apply_minmax_scaler(feature_values, scaling_min, scaling_max)
 
     return feature_values
 
@@ -844,6 +978,7 @@ def _write_flood_chunk_metastore_entry(chunk_blob: storage.Blob) -> None:
 
     metastore.StudyAreaSpatialChunk(
         id_=chunk_name,
+        state=metastore.StudyAreaChunkState.FEATURE_MATRIX_PROCESSING,
         raw_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
         needs_scaling=True,
         x_index=x_index,
