@@ -47,7 +47,7 @@ def load_dataset(
     storage_client = storage_client or storage.Client()
 
     def generator():
-        """Generator for teacher-forcing training."""
+        """Generator for producing full inputs and labels."""
         for sim_name in sim_names:
             for model_input, labels in _iter_model_inputs(
                 firestore_client,
