@@ -21,6 +21,7 @@ FloodModelParams: TypeAlias = model_params.FloodModelParams
 
 class Input(TypedDict):
     """Input tensors dictionary."""
+
     geospatial: tf.Tensor
     temporal: tf.Tensor
     spatiotemporal: tf.Tensor
@@ -119,25 +120,28 @@ class FloodModel:
         """Call the model to predict the next n timesteps."""
         return self._model.call_n(input, n=n)
 
-    def fit(self,
-            dataset: tf.data.Dataset,
-            epochs: int = 1,
-            steps_per_epoch: int | None = None,
-            early_stopping: int | None = None,
-            callbacks: List[Callable] | None = None):
+    def fit(
+        self,
+        dataset: tf.data.Dataset,
+        epochs: int = 1,
+        steps_per_epoch: int | None = None,
+        early_stopping: int | None = None,
+        callbacks: List[Callable] | None = None,
+    ):
         """Fit the model to the given dataset."""
         if callbacks is None:
             callbacks = []
         if early_stopping is not None:
-            callbacks.append(keras.callbacks.EarlyStopping(
-                monitor="loss", mode="min", patience=early_stopping
-            ))
+            callbacks.append(
+                keras.callbacks.EarlyStopping(
+                    monitor="loss", mode="min", patience=early_stopping
+                )
+            )
 
         # Fit the model for this sample
         return self._model.fit(
-            dataset, epochs=epochs,
-            steps_per_epoch=steps_per_epoch,
-            callbacks=callbacks)
+            dataset, epochs=epochs, steps_per_epoch=steps_per_epoch, callbacks=callbacks
+        )
 
     def load_model(self, filepath: str) -> None:
         """Loads weights from an existing file.
@@ -373,16 +377,18 @@ class FloodConvLSTM(tf.keras.Model):
         # We use 1-indexing for simplicity. Time step t represents the t-th flood
         # prediction.
         for t in range(1, n + 1):
-            input = Input(geospatial=geospatial,
-                          temporal=self._get_temporal_window(temporal, t, N),
-                          spatiotemporal=spatiotemporal)
+            input = Input(
+                geospatial=geospatial,
+                temporal=self._get_temporal_window(temporal, t, N),
+                spatiotemporal=spatiotemporal,
+            )
             prediction = self.call(input)
             predictions = predictions.write(t - 1, prediction)
 
             # Append new predictions along time axis, drop the first.
-            spatiotemporal = tf.concat([spatiotemporal,
-                                        tf.expand_dims(prediction, axis=1)],
-                                       axis=1)[:, 1:]
+            spatiotemporal = tf.concat(
+                [spatiotemporal, tf.expand_dims(prediction, axis=1)], axis=1
+            )[:, 1:]
 
         # Gather dense tensor out of TensorArray along the time axis.
         predictions = tf.stack(tf.unstack(predictions.stack()), axis=1)
@@ -393,6 +399,7 @@ class FloodConvLSTM(tf.keras.Model):
     def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
         """Returns a zero-padded n-sized window at timestep t."""
         B, _, M = temporal.shape
-        return tf.concat([tf.zeros(shape=(B, max(n - t, 0), M)),
-                          temporal[:, max(t - n, 0):t]],
-                         axis=1)
+        return tf.concat(
+            [tf.zeros(shape=(B, max(n - t, 0), M)), temporal[:, max(t - n, 0) : t]],
+            axis=1,
+        )
