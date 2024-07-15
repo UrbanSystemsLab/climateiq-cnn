@@ -968,7 +968,11 @@ def _update_study_area_metastore_entry(
         # the chunks are present in metadata (in any state) meaning that every chunk
         # TAR-file was placed in the chunk bucket and did trigger processing event.
         study_area_metadata = metastore.StudyArea.get(db, study_area_name)
-        if study_area_metadata.state == metastore.StudyAreaState.INIT:
+        if (
+            study_area_metadata.state == metastore.StudyAreaState.INIT
+            and study_area_metadata.chunk_x_count is not None
+            and study_area_metadata.chunk_y_count is not None
+        ):
             expected_chunk_count = (
                 study_area_metadata.chunk_x_count * study_area_metadata.chunk_y_count
             )
