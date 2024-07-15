@@ -2,8 +2,7 @@
 
 import dataclasses
 import logging
-from typing import TypeAlias, TypedDict
-import datetime
+from typing import TypeAlias, TypedDict, List, Callable
 
 import tensorflow as tf
 import keras
@@ -22,6 +21,7 @@ FloodModelParams: TypeAlias = model_params.FloodModelParams
 
 class Input(TypedDict):
     """Input tensors dictionary."""
+
     geospatial: tf.Tensor
     temporal: tf.Tensor
     spatiotemporal: tf.Tensor
@@ -113,25 +113,34 @@ class FloodModel:
         return data
 
     def call(self, input: Input) -> tf.Tensor:
+        """Call the model to predict the next timestep."""
         return self._model.call(input)
 
     def call_n(self, input: Input, n: int = 1) -> tf.Tensor:
+        """Call the model to predict the next n timesteps."""
         return self._model.call_n(input, n=n)
 
-    def fit(self, dataset: tf.data.Dataset, epochs: int = 1, early_stopping: int | None = None):
+    def fit(
+        self,
+        dataset: tf.data.Dataset,
+        epochs: int = 1,
+        steps_per_epoch: int | None = None,
+        early_stopping: int | None = None,
+        callbacks: List[Callable] | None = None,
+    ):
         """Fit the model to the given dataset."""
-        # Create a TensorBoard callback
-        logs = "./logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        tb_callback = keras.callbacks.TensorBoard(log_dir=logs,
-                                                  histogram_freq=1,
-                                                  profile_batch='1,100')
-        es_callback = keras.callbacks.EarlyStopping(
-            monitor="val_loss", mode="min", patience=early_stopping
-        )
+        if callbacks is None:
+            callbacks = []
+        if early_stopping is not None:
+            callbacks.append(
+                keras.callbacks.EarlyStopping(
+                    monitor="loss", mode="min", patience=early_stopping
+                )
+            )
+
         # Fit the model for this sample
         return self._model.fit(
-            dataset, epochs=epochs, callbacks=[tb_callback]
-            + [es_callback] if early_stopping else []
+            dataset, epochs=epochs, steps_per_epoch=steps_per_epoch, callbacks=callbacks
         )
 
     def load_model(self, filepath: str) -> None:
@@ -286,7 +295,7 @@ class FloodConvLSTM(tf.keras.Model):
         internal ConvLSTM and ignores autoregressive steps.
 
         Args:
-            input: Dictionary containing: 
+            input: Dictionary containing:
               - spatiotemporal: Flood maps tensor of shape [B, n, H, W, 1].
               - geospatial: Geospatial tensor of shape [B, H, W, f].
               - temporal: Rainfall windows tensor of shape [B, n, m].
@@ -299,10 +308,10 @@ class FloodConvLSTM(tf.keras.Model):
         temporal: tf.Tensor = input["temporal"]
 
         B = spatiotemporal.shape[0]
-        C = 1
+        C = 1  # Channel dimension for spatiotemporal tensor
         F = constants.GEO_FEATURES
-        N = constants.N_FLOOD_MAPS
-        M = constants.M_RAINFALL
+        N = self._params.n_flood_maps
+        M = self._params.m_rainfall
         H, W = self._spatial_height, self._spatial_width
 
         tf.ensure_shape(spatiotemporal, (B, N, H, W, C))
@@ -352,8 +361,9 @@ class FloodConvLSTM(tf.keras.Model):
         temporal = full_input["temporal"]
 
         B = spatiotemporal.shape[0]
-        C = 1
-        F, N, M = constants.GEO_FEATURES, constants.N_FLOOD_MAPS, constants.M_RAINFALL
+        C = 1  # Channel dimension for spatiotemporal tensor
+        F = constants.GEO_FEATURES
+        N, M = self._params.n_flood_maps, self._params.m_rainfall
         T_MAX = constants.MAX_RAINFALL_DURATION
         H, W = self._spatial_height, self._spatial_width
 
@@ -367,25 +377,29 @@ class FloodConvLSTM(tf.keras.Model):
         # We use 1-indexing for simplicity. Time step t represents the t-th flood
         # prediction.
         for t in range(1, n + 1):
-            input = Input(geospatial=geospatial,
-                          temporal=self._get_temporal_window(temporal, t, N),
-                          spatiotemporal=spatiotemporal)
+            input = Input(
+                geospatial=geospatial,
+                temporal=self._get_temporal_window(temporal, t, N),
+                spatiotemporal=spatiotemporal,
+            )
             prediction = self.call(input)
             predictions = predictions.write(t - 1, prediction)
 
             # Append new predictions along time axis, drop the first.
-            spatiotemporal = tf.concat([spatiotemporal,
-                                        tf.expand_dims(prediction, axis=1)],
-                                       axis=1)[:, 1:]
+            spatiotemporal = tf.concat(
+                [spatiotemporal, tf.expand_dims(prediction, axis=1)], axis=1
+            )[:, 1:]
 
         # Gather dense tensor out of TensorArray along the time axis.
         predictions = tf.stack(tf.unstack(predictions.stack()), axis=1)
         # Drop channels dimension.
         return tf.squeeze(predictions, axis=-1)
 
-    def _get_temporal_window(self, temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
-        """Returns a zero-padded n-sized window into the temporal tensor at timestep t."""
+    @staticmethod
+    def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
+        """Returns a zero-padded n-sized window at timestep t."""
         B, _, M = temporal.shape
-        return tf.concat([tf.zeros(shape=(B, max(n - t, 0), M)),
-                          temporal[:, max(t - n, 0):t]],
-                         axis=1)
+        return tf.concat(
+            [tf.zeros(shape=(B, max(n - t, 0), M)), temporal[:, max(t - n, 0) : t]],
+            axis=1,
+        )
