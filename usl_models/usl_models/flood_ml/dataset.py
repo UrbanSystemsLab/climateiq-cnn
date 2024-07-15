@@ -16,6 +16,87 @@ from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
 
 
+def load_dataset(
+    sim_names: list[str],
+    batch_size: int = 4,
+    n_flood_maps: int = constants.N_FLOOD_MAPS,
+    m_rainfall: int = constants.M_RAINFALL,
+    max_chunks: Optional[int] = None,
+    firestore_client: Optional[firestore.Client] = None,
+    storage_client: Optional[storage.Client] = None,
+) -> tf.data.Dataset:
+    """Creates a dataset which generates chunks for flood model inference.
+
+    The examples are generated from multiple simulations.
+    The dataset iteratively yields examples read from Google Cloud Storage to avoid
+    pulling all examples into memory at once.
+
+    Args:
+      sim_names: The simulation labels to use for training,
+                 e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
+      batch_size: Size of batches yielded by the dataset. Approximate memory
+                  usage is 10GB * batch_size during training.
+      n_flood_maps: The number of flood maps in each example.
+      m_rainfall: The width of the temporal rainfall tensor.
+      max_chunks: The maximum number of examples to yield from the dataset.
+                  If `None` (default) yields all examples from the simulations.
+      firestore_client: The client to use when interacting with Firestore.
+      storage_client: The client to use when interacting with Cloud Storage.
+    """
+    firestore_client = firestore_client or firestore.Client()
+    storage_client = storage_client or storage.Client()
+
+    def generator():
+        """Generator for producing full inputs and labels."""
+        for sim_name in sim_names:
+            for model_input, labels in _iter_model_inputs(
+                firestore_client,
+                storage_client,
+                sim_name,
+                n_flood_maps,
+                m_rainfall,
+                max_chunks,
+            ):
+                yield (model_input, labels)
+
+    # Create the dataset for this simulation
+    dataset = tf.data.Dataset.from_generator(
+        generator=generator,
+        output_signature=(
+            dict(
+                geospatial=tf.TensorSpec(
+                    shape=(
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                        constants.GEO_FEATURES,
+                    ),
+                    dtype=tf.float32,
+                ),
+                temporal=tf.TensorSpec(
+                    shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
+                    dtype=tf.float32,
+                ),
+                spatiotemporal=tf.TensorSpec(
+                    shape=(
+                        n_flood_maps,
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                        1,
+                    ),
+                    dtype=tf.float32,
+                ),
+            ),
+            tf.TensorSpec(
+                shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                dtype=tf.float32,
+            ),
+        ),
+    )
+    if batch_size:
+        dataset = dataset.batch(batch_size)
+    return dataset
+
+
 def load_dataset_windowed(
     sim_names: list[str],
     batch_size: int = 4,
@@ -81,11 +162,7 @@ def load_dataset_windowed(
                     dtype=tf.float32,
                 ),
                 spatiotemporal=tf.TensorSpec(
-                    shape=(
-                        n_flood_maps,
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                    ),
+                    shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
                     dtype=tf.float32,
                 ),
             ),
@@ -94,7 +171,8 @@ def load_dataset_windowed(
             ),
         ),
     )
-    dataset = dataset.batch(batch_size)
+    if batch_size:
+        dataset = dataset.batch(batch_size)
     return dataset
 
 
@@ -135,7 +213,7 @@ def _extract_spatiotemporal(t: int, n: int, labels: tf.Tensor) -> tf.Tensor:
     (_, H, W, *_) = labels.shape
     zeros = tf.zeros(shape=(max(n - t, 0), H, W), dtype=tf.float32)
     data = labels[max(t - n, 0) : t]
-    return tf.concat([zeros, data], axis=0)
+    return tf.expand_dims(tf.concat([zeros, data], axis=0), axis=-1)
 
 
 def _iter_model_inputs(
