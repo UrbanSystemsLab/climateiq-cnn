@@ -13,7 +13,7 @@ from usl_models.flood_ml.metastore import FirestoreDataHandler
 from usl_models.flood_ml.settings import Settings
 from usl_models.flood_ml.featurelabelchunks import GenerateFeatureLabelChunks
 from usl_models.flood_ml import constants
-from usl_models.flood_ml.model import Input
+from usl_models.flood_ml.model import FloodModel
 
 """
     This class is used to generate the training data for the flood model.
@@ -71,8 +71,9 @@ class IncrementalTrainDataGenerator:
         """
         print("Generating temporal tensors...")
         # Get GCS URLs for npy chunks
-        temporal_chunks, sim_dict = self.featurelabelchunksgenerator.get_temporal_chunks(
-            sim_name)
+        temporal_chunks, sim_dict = (
+            self.featurelabelchunksgenerator.get_temporal_chunks(sim_name)
+        )
 
         if not temporal_chunks:
             print(f"No temporal chunks found for sim {sim_name}.")
@@ -134,7 +135,8 @@ class IncrementalTrainDataGenerator:
         )
 
         feature_chunks, _ = self.featurelabelchunksgenerator.get_feature_chunks(
-            sim_name)
+            sim_name
+        )
         label_chunks, _ = self.featurelabelchunksgenerator.get_label_chunks(sim_name)
 
         if not feature_chunks or not label_chunks:
@@ -154,7 +156,9 @@ class IncrementalTrainDataGenerator:
         # Shuffle the common indices
         random.shuffle(common_indices)  # Shuffle directly within the function
 
-        if len(common_indices) != len(feature_chunks) or len(common_indices) != len(label_chunks):
+        if len(common_indices) != len(feature_chunks) or len(common_indices) != len(
+            label_chunks
+        ):
             raise ValueError(
                 "Number of matching feature chunks and label chunks do not match."
             )
@@ -184,13 +188,13 @@ class IncrementalTrainDataGenerator:
                 dtype=tf.float32,
             )
             label_tensor = tf.convert_to_tensor(
-                np.load(BytesIO(label_data)),
-                dtype=tf.float32
+                np.load(BytesIO(label_data)), dtype=tf.float32
             )
 
             reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
             label_tensor = tf.ensure_shape(
-                reshaped_label_tensor, (rainfall_duration, 1000, 1000))
+                reshaped_label_tensor, (rainfall_duration, 1000, 1000)
+            )
 
             print("Finished creating feature and label tensors...")
             print(f"Feature tensor shape: {feature_tensor.shape}")
@@ -211,7 +215,7 @@ class IncrementalTrainDataGenerator:
         (_, H, W, *_) = labels.shape
         zeros = tf.zeros(shape=(max(n - t, 0), H, W), dtype=tf.float32)
         # print("labels:", labels.shape)
-        data = labels[max(t - n, 0):t]
+        data = labels[max(t - n, 0) : t]
         # print(f"labels[max(t - n, 0):{t}]:", data.shape)
         return tf.expand_dims(tf.concat([zeros, data], axis=0), axis=-1)
 
@@ -219,17 +223,17 @@ class IncrementalTrainDataGenerator:
     def extract_temporal(t: int, n: int, temporal: tf.Tensor) -> tf.Tensor:
         (_, D) = temporal.shape
         zeros = tf.zeros(shape=(max(n - t, 0), D))
-        data = temporal[max(t - n, 0):t]
+        data = temporal[max(t - n, 0) : t]
         return tf.concat([zeros, data], axis=0)
 
     @classmethod
-    def generate_windows(cls, input: Input,
-                         labels: tf.Tensor,
-                         n: int = constants.N_FLOOD_MAPS) -> Iterator[Tuple[Input, tf.Tensor]]:
+    def generate_windows(
+        cls, input: FloodModel.Input, labels: tf.Tensor, n: int = constants.N_FLOOD_MAPS
+    ) -> Iterator[Tuple[FloodModel.Input, tf.Tensor]]:
         """Generate inputs for a sliding time window of length n timesteps."""
         (T_max, H, W, *_) = labels.shape
         for t in range(T_max):
-            window_input = Input(
+            window_input = FloodModel.Input(
                 geospatial=input["geospatial"],
                 temporal=cls.extract_temporal(t, n, input["temporal"]),
                 spatiotemporal=cls.extract_spatiotemporal(t, n, labels),
@@ -241,7 +245,9 @@ class IncrementalTrainDataGenerator:
             # print("print(tf.math.reduce_max(labels[t]))", tf.math.reduce_max(labels[t]))
             yield window_input, labels[t]
 
-    def load_simulation_chunks(self, sim_name: str, max_chunks: int = 0) -> Iterator[Tuple[Input, tf.Tensor]]:
+    def load_simulation_chunks(
+        self, sim_name: str, max_chunks: int = 0
+    ) -> Iterator[Tuple[FloodModel.Input, tf.Tensor]]:
         """Loads a single simulation's spatial chunks."""
 
         feature_label_gen = self._generate_feature_label_tensors(sim_name)
@@ -254,17 +260,28 @@ class IncrementalTrainDataGenerator:
             if max_chunks > 0 and chunks > max_chunks:
                 break
 
-            input = Input(
+            input = FloodModel.Input(
                 temporal=temporal,
                 geospatial=geospatial,
-                spatiotemporal=tf.zeros(shape=(constants.N_FLOOD_MAPS, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1)))
+                spatiotemporal=tf.zeros(
+                    shape=(
+                        constants.N_FLOOD_MAPS,
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                        1,
+                    )
+                ),
+            )
             yield input, labels
 
-    def load_dataset(self, sim_names: list[str], batch_size: int = 1, max_chunks: int = 0) -> tf.data.Dataset:
+    def load_dataset(
+        self, sim_names: list[str], batch_size: int = 1, max_chunks: int = 0
+    ) -> tf.data.Dataset:
         """
-        Get a generator that yields smaller chunks of datasets for each simulation for training. 
+        Get a generator that yields smaller chunks of datasets for each simulation for training.
         The examples are generated from multiple simulations.
         """
+
         def generator():
             for sim_name in sim_names:
                 for input, labels in self.load_simulation_chunks(sim_name, max_chunks):
@@ -275,56 +292,89 @@ class IncrementalTrainDataGenerator:
             generator=generator,
             output_signature=(
                 dict(
-                    geospatial=tf.TensorSpec(shape=(
-                        constants.MAP_HEIGHT, constants.MAP_WIDTH, constants.GEO_FEATURES), dtype=tf.float32),
+                    geospatial=tf.TensorSpec(
+                        shape=(
+                            constants.MAP_HEIGHT,
+                            constants.MAP_WIDTH,
+                            constants.GEO_FEATURES,
+                        ),
+                        dtype=tf.float32,
+                    ),
                     temporal=tf.TensorSpec(
-                        shape=(constants.MAX_RAINFALL_DURATION,
-                               constants.M_RAINFALL), dtype=tf.float32
+                        shape=(constants.MAX_RAINFALL_DURATION, constants.M_RAINFALL),
+                        dtype=tf.float32,
                     ),
                     spatiotemporal=tf.TensorSpec(
-                        shape=(constants.N_FLOOD_MAPS, constants.MAP_HEIGHT,
-                               constants.MAP_WIDTH, 1), dtype=tf.float32
+                        shape=(
+                            constants.N_FLOOD_MAPS,
+                            constants.MAP_HEIGHT,
+                            constants.MAP_WIDTH,
+                            1,
+                        ),
+                        dtype=tf.float32,
                     ),
                 ),
-                tf.TensorSpec(shape=(None, constants.MAP_HEIGHT,
-                              constants.MAP_WIDTH), dtype=tf.float32),
-            )
+                tf.TensorSpec(
+                    shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                    dtype=tf.float32,
+                ),
+            ),
         )
         if batch_size:
             dataset = dataset.batch(batch_size)
         return dataset
 
-    def load_dataset_windowed(self, sim_names: list[str], batch_size: int = 1, max_chunks: int = 0) -> tf.data.Dataset:
+    def load_dataset_windowed(
+        self, sim_names: list[str], batch_size: int = 1, max_chunks: int = 0
+    ) -> tf.data.Dataset:
         """
-        Get a generator that yields smaller chunks of datasets for each simulation for training. 
+        Get a generator that yields smaller chunks of datasets for each simulation for training.
         The examples are generated from multiple simulations.
         Windowed for training on next-map prediction.
         """
+
         def generator():
             """Windowed generator for teacher-forcing training."""
             for sim_name in sim_names:
-                for input, labels in self.load_simulation_chunks(sim_name, max_chunks=max_chunks):
-                    for (window_input, window_label) in self.generate_windows(input, labels):
+                for input, labels in self.load_simulation_chunks(
+                    sim_name, max_chunks=max_chunks
+                ):
+                    for window_input, window_label in self.generate_windows(
+                        input, labels
+                    ):
                         yield (window_input, window_label)
+
         # Create the dataset for this simulation
         dataset = tf.data.Dataset.from_generator(
             generator=generator,
             output_signature=(
                 dict(
-                    geospatial=tf.TensorSpec(shape=(
-                        constants.MAP_HEIGHT, constants.MAP_WIDTH, constants.GEO_FEATURES), dtype=tf.float32),
+                    geospatial=tf.TensorSpec(
+                        shape=(
+                            constants.MAP_HEIGHT,
+                            constants.MAP_WIDTH,
+                            constants.GEO_FEATURES,
+                        ),
+                        dtype=tf.float32,
+                    ),
                     temporal=tf.TensorSpec(
-                        shape=(constants.N_FLOOD_MAPS,
-                               constants.M_RAINFALL), dtype=tf.float32
+                        shape=(constants.N_FLOOD_MAPS, constants.M_RAINFALL),
+                        dtype=tf.float32,
                     ),
                     spatiotemporal=tf.TensorSpec(
-                        shape=(constants.N_FLOOD_MAPS, constants.MAP_HEIGHT,
-                               constants.MAP_WIDTH, 1), dtype=tf.float32
+                        shape=(
+                            constants.N_FLOOD_MAPS,
+                            constants.MAP_HEIGHT,
+                            constants.MAP_WIDTH,
+                            1,
+                        ),
+                        dtype=tf.float32,
                     ),
                 ),
-                tf.TensorSpec(shape=(constants.MAP_HEIGHT,
-                              constants.MAP_WIDTH), dtype=tf.float32),
-            )
+                tf.TensorSpec(
+                    shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
+                ),
+            ),
         )
         if batch_size:
             dataset = dataset.batch(batch_size)

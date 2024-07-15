@@ -19,16 +19,14 @@ FloodModelData: TypeAlias = data_utils.FloodModelData
 FloodModelParams: TypeAlias = model_params.FloodModelParams
 
 
-class Input(TypedDict):
-    """Input tensors dictionary."""
-
-    geospatial: tf.Tensor
-    temporal: tf.Tensor
-    spatiotemporal: tf.Tensor
-
-
 class FloodModel:
     """Flood model class."""
+
+    class Input(TypedDict):
+        """Input tensors dictionary."""
+        geospatial: tf.Tensor
+        temporal: tf.Tensor
+        spatiotemporal: tf.Tensor
 
     def __init__(
         self,
@@ -287,7 +285,7 @@ class FloodConvLSTM(tf.keras.Model):
             name="output_cnn",
         )
 
-    def call(self, input: Input) -> tf.Tensor:
+    def call(self, input: FloodModel.Input) -> tf.Tensor:
         """Makes a single forward pass on a batch of data.
 
         The forward pass represents a single prediction on an input batch
@@ -345,7 +343,7 @@ class FloodConvLSTM(tf.keras.Model):
 
         return output
 
-    def call_n(self, full_input: Input, n: int = 1) -> tf.Tensor:
+    def call_n(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
         """Runs the entire autoregressive model.
 
         Args:
@@ -379,7 +377,7 @@ class FloodConvLSTM(tf.keras.Model):
         # We use 1-indexing for simplicity. Time step t represents the t-th flood
         # prediction.
         for t in range(1, n + 1):
-            input = Input(
+            input = FloodModel.Input(
                 geospatial=geospatial,
                 temporal=self._get_temporal_window(temporal, t, N),
                 spatiotemporal=spatiotemporal,

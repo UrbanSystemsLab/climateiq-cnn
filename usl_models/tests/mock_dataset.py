@@ -63,7 +63,7 @@ def mock_dataset(
     def generator():
         """Generate random tensors."""
         for i in range(batch_size * batch_count):
-            yield flood_model.Input(
+            yield flood_model.FloodModel.Input(
                 geospatial=tf.random.normal(shape=input_sig['geospatial'].shape),
                 temporal=tf.random.normal(shape=input_sig['temporal'].shape),
                 spatiotemporal=tf.random.normal(
