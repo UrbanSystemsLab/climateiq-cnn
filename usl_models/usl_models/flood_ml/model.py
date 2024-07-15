@@ -2,7 +2,7 @@
 
 import dataclasses
 import logging
-from typing import Optional, TypeAlias
+from typing import Optional, TypeAlias, TypedDict
 
 import tensorflow as tf
 from tensorflow.keras import layers
@@ -16,6 +16,12 @@ geo_tensor: TypeAlias = tf.Tensor
 temp_tensor: TypeAlias = tf.Tensor
 FloodModelData: TypeAlias = data_utils.FloodModelData
 FloodModelParams: TypeAlias = model_params.FloodModelParams
+
+
+class Input(TypedDict):
+    geospatial: tf.Tensor
+    temporal: tf.Tensor
+    spatiotemporal: tf.Tensor
 
 
 class FloodModel:
