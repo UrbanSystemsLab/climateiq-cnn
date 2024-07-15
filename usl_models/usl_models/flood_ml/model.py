@@ -113,12 +113,12 @@ class FloodModel:
         return data
 
     def call(self, input: Input) -> tf.Tensor:
-        """Call the model to predict the next timestep."""
+        """Predict the next timestep. See `FloodConvLSTM.call`."""
         return self._model.call(input)
 
-    def call_n(self, input: Input, n: int = 1) -> tf.Tensor:
-        """Call the model to predict the next n timesteps."""
-        return self._model.call_n(input, n=n)
+    def call_n(self, full_input: Input, n: int = 1) -> tf.Tensor:
+        """Predict the next n timesteps. See `FloodConvLSTM.call_n`."""
+        return self._model.call_n(full_input, n=n)
 
     def fit(
         self,
@@ -349,7 +349,9 @@ class FloodConvLSTM(tf.keras.Model):
         """Runs the entire autoregressive model.
 
         Args:
-            inputs: A dictionary of input tensors.
+            full_input: A dictionary of input tensors.
+                While `call` expects only input data for a single context window,
+                `call_n` requires the full temporal tensor.
             n: Number of autoregressive iterations to run.
 
         Returns:
