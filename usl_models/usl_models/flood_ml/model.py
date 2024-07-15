@@ -362,7 +362,6 @@ class FloodConvLSTM(tf.keras.Model):
         Returns:
             A tensor of all the flood predictions: [B, n, H, W].
         """
-
         spatiotemporal = full_input["spatiotemporal"]
         geospatial = full_input["geospatial"]
         temporal = full_input["temporal"]
