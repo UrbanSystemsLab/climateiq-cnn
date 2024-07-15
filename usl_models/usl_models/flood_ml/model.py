@@ -2,7 +2,7 @@
 
 import dataclasses
 import logging
-from typing import TypeAlias, TypedDict
+from typing import TypeAlias, TypedDict, List, Callable
 import datetime
 
 import tensorflow as tf
@@ -113,26 +113,28 @@ class FloodModel:
         return data
 
     def call(self, input: Input) -> tf.Tensor:
+        """Call the model to predict the next timestep."""
         return self._model.call(input)
 
     def call_n(self, input: Input, n: int = 1) -> tf.Tensor:
+        """Call the model to predict the next n timesteps."""
         return self._model.call_n(input, n=n)
 
-    def fit(self, dataset: tf.data.Dataset, epochs: int = 1, early_stopping: int | None = None):
+    def fit(self,
+            dataset: tf.data.Dataset,
+            epochs: int = 1,
+            early_stopping: int | None = None,
+            callbacks: List[Callable] | None = None):
         """Fit the model to the given dataset."""
-        # Create a TensorBoard callback
-        logs = "./logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        tb_callback = keras.callbacks.TensorBoard(log_dir=logs,
-                                                  histogram_freq=1,
-                                                  profile_batch='1,100')
-        es_callback = keras.callbacks.EarlyStopping(
-            monitor="val_loss", mode="min", patience=early_stopping
-        )
+        if callbacks is None:
+            callbacks = []
+        if early_stopping is not None:
+            callbacks.append(keras.callbacks.EarlyStopping(
+                monitor="val_loss", mode="min", patience=early_stopping
+            ))
+
         # Fit the model for this sample
-        return self._model.fit(
-            dataset, epochs=epochs, callbacks=[tb_callback]
-            + [es_callback] if early_stopping else []
-        )
+        return self._model.fit(dataset, epochs=epochs, callbacks=callbacks)
 
     def load_model(self, filepath: str) -> None:
         """Loads weights from an existing file.
@@ -299,7 +301,7 @@ class FloodConvLSTM(tf.keras.Model):
         temporal: tf.Tensor = input["temporal"]
 
         B = spatiotemporal.shape[0]
-        C = 1
+        C = 1  # Channel dimension for spatiotemporal tensor
         F = constants.GEO_FEATURES
         N = constants.N_FLOOD_MAPS
         M = constants.M_RAINFALL
@@ -352,7 +354,7 @@ class FloodConvLSTM(tf.keras.Model):
         temporal = full_input["temporal"]
 
         B = spatiotemporal.shape[0]
-        C = 1
+        C = 1  # Channel dimension for spatiotemporal tensor
         F, N, M = constants.GEO_FEATURES, constants.N_FLOOD_MAPS, constants.M_RAINFALL
         T_MAX = constants.MAX_RAINFALL_DURATION
         H, W = self._spatial_height, self._spatial_width
