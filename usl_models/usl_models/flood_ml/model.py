@@ -19,6 +19,12 @@ FloodModelData: TypeAlias = data_utils.FloodModelData
 FloodModelParams: TypeAlias = model_params.FloodModelParams
 
 
+class Input(TypedDict):
+    geospatial: tf.Tensor
+    temporal: tf.Tensor
+    spatiotemporal: tf.Tensor
+
+
 class FloodModel:
     """Flood model class."""
 

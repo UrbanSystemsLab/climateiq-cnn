@@ -30,14 +30,16 @@ grpcio==1.62.1
 grpcio-status==1.62.1
 gunicorn==21.2.0
 h5netcdf==1.3.0
+h5py==3.8.0
 idna==3.6
 itsdangerous==2.1.2
 Jinja2==3.1.3
 MarkupSafe==2.1.5
+matplotlib==3.7.5
 netCDF4==1.6.5
-numpy==1.26.4
+numpy==1.25.2
 packaging==24.0
-pandas==2.2.2
+pandas==2.0.0
 proto-plus==1.23.0
 protobuf==4.25.3
 pyasn1==0.6.0
@@ -48,6 +50,7 @@ python-dateutil==2.9.0.post0
 pytz==2024.1
 rasterio==1.3.9
 requests==2.31.0
+rioxarray==0.15.7
 rsa==4.9
 shapely==2.0.3
 six==1.16.0
@@ -56,4 +59,6 @@ tzdata==2024.1
 urllib3==2.2.1
 watchdog==4.0.0
 Werkzeug==3.0.1
+wrf-python==1.3.4.1; sys_platform != "linux"  # Install from PyPI if not Linux
+./wheels/wrf_python-1.3.4.1-cp311-cp311-linux_x86_64.whl; sys_platform == "linux" # Install from pre-generated wheel if on Linux
 xarray==2024.5.0
