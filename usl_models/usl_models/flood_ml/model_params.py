@@ -25,14 +25,3 @@ class FloodModelParams:
     # It is the user's responsibility to pass in a valid optimizer value.
     optimizer: tf.keras.Optimizer | str = "adam"
     epochs: int = 10
-
-
-# Used for testing.
-test_model_params = FloodModelParams(
-    batch_size=4,
-    m_rainfall=3,
-    n_flood_maps=3,
-    lstm_units=32,
-    lstm_kernel_size=3,
-    epochs=1,
-)

@@ -1,6 +1,5 @@
 """Tests for Flood model."""
 
-import dataclasses
 import pytest
 import tempfile
 
@@ -17,6 +16,18 @@ _TEST_GEO_FEATURES = 8
 _TEST_MAP_HEIGHT = 100
 _TEST_MAP_WIDTH = 100
 _TEST_MAX_RAINFALL = 36
+
+
+def pytest_model_params(epochs: int = 1) -> model_params.FloodModelParams:
+    """Defines FloodModelParams for testing."""
+    return model_params.FloodModelParams(
+        batch_size=4,
+        m_rainfall=3,
+        n_flood_maps=3,
+        lstm_units=32,
+        lstm_kernel_size=3,
+        epochs=epochs,
+    )
 
 
 def fake_flood_input_batch(
@@ -77,7 +88,7 @@ def test_convlstm_forward():
     batch_size = 4
     height, width = 100, 100
     flood_maps = 5
-    params = model_params.test_model_params
+    params = pytest_model_params()
 
     st_input = tf.random.normal((batch_size, flood_maps, height, width, 1))
     geo_input = tf.random.normal((batch_size, height, width, _TEST_GEO_FEATURES))
@@ -104,7 +115,7 @@ def test_convlstm_call():
     batch_size = 4
     height, width = 100, 100
     storm_duration = 12
-    params = model_params.test_model_params
+    params = pytest_model_params()
 
     # The FloodConvLSTM model expects the data to have been preprocessed, such
     # that it receives the full temporal inputs and a single flood map.
@@ -138,7 +149,7 @@ def test_train():
     """
     batch_size = 16
     height, width = 100, 100
-    params = model_params.test_model_params
+    params = pytest_model_params()
 
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
 
@@ -170,7 +181,7 @@ def test_bad_labels():
     """Tests validation of bad labels."""
     batch_size = 8
     height, width = 100, 100
-    params = model_params.test_model_params
+    params = pytest_model_params()
 
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
 
@@ -203,7 +214,7 @@ def test_early_stopping():
     batch_size = 16
     height, width = 100, 100
     # Set a large number of epochs to increase the odds of triggering early stopping.
-    params = dataclasses.replace(model_params.test_model_params, epochs=20)
+    params = pytest_model_params(epochs=20)
 
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
 
@@ -226,7 +237,7 @@ def test_model_checkpoint():
     """Tests saving and loading a model checkpoint."""
     batch_size = 16
     height, width = 100, 100
-    params = model_params.test_model_params
+    params = pytest_model_params()
 
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
 
