@@ -1,70 +1,15 @@
 """Tests for Flood model."""
-
-import dataclasses
-import pytest
 import tempfile
 
 import numpy as np
 import tensorflow as tf
 
-from usl_models.flood_ml import data_utils
 from usl_models.flood_ml import model as flood_model
 from usl_models.flood_ml import model_params
-
-# Use smaller feature spaces for testing, rather than the values provided in
-# constants.py.
-_TEST_GEO_FEATURES = 8
-_TEST_MAP_HEIGHT = 100
-_TEST_MAP_WIDTH = 100
-_TEST_MAX_RAINFALL = 36
+from tests.mock_dataset import mock_dataset
 
 
-def fake_flood_input_batch(
-    batch_size: int,
-    height: int = _TEST_MAP_HEIGHT,
-    width: int = _TEST_MAP_WIDTH,
-    storm_duration: int = 2,
-    include_flood_map: bool = False,
-    include_labels: bool = False,
-) -> dict[str, tf.Tensor]:
-    """Creates a fake training batch for testing.
-
-    All dimensions can be specified via optional args, otherwise will use the values
-    defined within constants.py.
-
-    Args:
-        batch_size: Batch size.
-        height: Optional height.
-        width: Optional width.
-        storm_duration: Storm duration.
-        include_flood_map: Whether or not to pass in a single flood map as the
-            spatiotemporal input.
-        include_labels: Whether or not to include labels associated with the
-            inputs.
-
-    Returns:
-        A dictionary of model inputs, with the following keys:
-        - "geospatial": Required. A 4D tensor [batch, height, width, features].
-        - "temporal": Required. A 2D tensor [batch, MAX_RAINFALL].
-        - "spatiotemporal": Optional. A 4D tensor of time series flood maps
-            [batch, height, width, 1].
-    """
-    geospatial = tf.random.normal((batch_size, height, width, _TEST_GEO_FEATURES))
-    temporal = tf.random.normal((batch_size, _TEST_MAX_RAINFALL))
-
-    input = {"geospatial": geospatial, "temporal": temporal}
-
-    if include_flood_map:
-        spatiotemporal = tf.random.normal((batch_size, height, width, 1))
-        input["spatiotemporal"] = spatiotemporal
-
-    if include_labels:
-        input["labels"] = tf.random.normal((batch_size, storm_duration, height, width))
-
-    return input
-
-
-def test_convlstm_forward():
+def test_convlstm_call():
     """Tests a single pass (prediction) of the model.
 
     Expected input shapes:
@@ -76,22 +21,16 @@ def test_convlstm_forward():
     """
     batch_size = 4
     height, width = 100, 100
-    flood_maps = 5
-    params = model_params.test_model_params
+    params = model_params.test_model_params()
 
-    st_input = tf.random.normal((batch_size, flood_maps, height, width, 1))
-    geo_input = tf.random.normal((batch_size, height, width, _TEST_GEO_FEATURES))
-    # The forward function assumes temp_input has been clipped to the same
-    # time slice as the flood maps, so we only create <flood_maps> values.
-    temp_input = tf.random.normal((batch_size, flood_maps))
-    temp_input = data_utils.temporal_window_view(temp_input, params.m_rainfall)
-
+    input, _ = next(iter(mock_dataset(
+        params, batch_size=batch_size, height=height, width=width)))
     model = flood_model.FloodConvLSTM(params, spatial_dims=(height, width))
-    prediction = model.forward(st_input, geo_input, temp_input)
+    prediction = model.call(input)
     assert prediction.shape == (batch_size, height, width, 1)
 
 
-def test_convlstm_call():
+def test_convlstm_call_n():
     """Tests the FloodConvLSTM model call.
 
     Expected input shapes:
@@ -104,25 +43,21 @@ def test_convlstm_call():
     batch_size = 4
     height, width = 100, 100
     storm_duration = 12
-    params = model_params.test_model_params
+    params = model_params.test_model_params()
 
     # The FloodConvLSTM model expects the data to have been preprocessed, such
     # that it receives the full temporal inputs and a single flood map.
-    fake_input = fake_flood_input_batch(
-        batch_size,
+    input, _ = next(iter(mock_dataset(
+        params,
         height=height,
         width=width,
-        include_flood_map=True,
-    )
-    full_temp_input = data_utils.temporal_window_view(
-        fake_input["temporal"], params.m_rainfall
-    )
-    fake_input["temporal"] = full_temp_input
-
+        batch_size=batch_size,
+        n=storm_duration
+    )))
     model = flood_model.FloodConvLSTM(
-        params, n_predictions=storm_duration, spatial_dims=(height, width)
+        params, spatial_dims=(height, width)
     )
-    prediction = model(fake_input)
+    prediction = model.call_n(input, n=storm_duration)
     assert prediction.shape == (batch_size, storm_duration, height, width)
 
 
@@ -138,54 +73,19 @@ def test_train():
     """
     batch_size = 16
     height, width = 100, 100
-    params = model_params.test_model_params
+    params = model_params.test_model_params()
 
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
-
-    storm_1 = 4
-    fake_input_1 = fake_flood_input_batch(
-        batch_size,
+    epochs = 2
+    dataset = mock_dataset(
+        params,
         height=height,
         width=width,
-        storm_duration=storm_1,
-        include_labels=True,
+        batch_size=batch_size,
+        batch_count=epochs
     )
-    fake_data_1 = flood_model.FloodModelData(storm_duration=storm_1, **fake_input_1)
-
-    storm_2 = 8
-    fake_input_2 = fake_flood_input_batch(
-        batch_size // 2,
-        height=height,
-        width=width,
-        storm_duration=storm_2,
-        include_labels=True,
-    )
-    fake_data_2 = flood_model.FloodModelData(storm_duration=storm_2, **fake_input_2)
-
-    history = model.train([fake_data_1, fake_data_2])
-    assert len(history) == 2
-
-
-def test_bad_labels():
-    """Tests validation of bad labels."""
-    batch_size = 8
-    height, width = 100, 100
-    params = model_params.test_model_params
-
-    model = flood_model.FloodModel(params, spatial_dims=(height, width))
-
-    storm_duration = 4
-    fake_input = fake_flood_input_batch(
-        batch_size,
-        height=height,
-        width=width,
-        storm_duration=8,  # labels do not match storm_duration
-        include_labels=True,
-    )
-    fake_data = flood_model.FloodModelData(storm_duration=storm_duration, **fake_input)
-
-    with pytest.raises(AssertionError):
-        model.train([fake_data])
+    history = model.fit(dataset, epochs=epochs, steps_per_epoch=1)
+    assert len(history.history["loss"]) == epochs
 
 
 def test_early_stopping():
@@ -200,46 +100,41 @@ def test_early_stopping():
     # To ensure determinism, we set a random seed so the model is reproducible.
     tf.keras.utils.set_random_seed(1)
 
-    batch_size = 16
+    batch_size = 4
     height, width = 100, 100
     # Set a large number of epochs to increase the odds of triggering early stopping.
-    params = dataclasses.replace(model_params.test_model_params, epochs=20)
-
+    params = model_params.test_model_params()
+    epochs = 20
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
 
-    storm_duration = 4
-    fake_input = fake_flood_input_batch(
-        batch_size,
+    dataset = mock_dataset(
+        params,
         height=height,
         width=width,
-        storm_duration=storm_duration,
-        include_labels=True,
+        batch_size=batch_size,
+        batch_count=epochs,
     )
-    fake_data = flood_model.FloodModelData(storm_duration=storm_duration, **fake_input)
-
-    history = model.train([fake_data], early_stopping=1)
+    history = model.fit(dataset, early_stopping=1, epochs=epochs, steps_per_epoch=1)
     # Check whether the model history indicates early stopping.
-    assert len(history[0].history["val_loss"]) < params.epochs
+    assert len(history.history["loss"]) < epochs
 
 
 def test_model_checkpoint():
     """Tests saving and loading a model checkpoint."""
     batch_size = 16
     height, width = 100, 100
-    params = model_params.test_model_params
+    params = model_params.test_model_params()
 
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
 
-    storm_duration = 4
-    fake_input = fake_flood_input_batch(
-        batch_size,
+    dataset = mock_dataset(
+        params,
         height=height,
         width=width,
-        storm_duration=storm_duration,
-        include_labels=True,
+        batch_size=batch_size,
+        batch_count=1,
     )
-    fake_data = flood_model.FloodModelData(storm_duration=storm_duration, **fake_input)
-    model.train([fake_data])
+    model.fit(dataset, steps_per_epoch=1)
 
     with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
         model.save_model(tmp.name, overwrite=True)
@@ -251,3 +146,16 @@ def test_model_checkpoint():
     new_weights = new_model._model.get_weights()
     for old, new in zip(old_weights, new_weights):
         np.testing.assert_array_equal(old, new)
+
+
+def test_get_temporal_window():
+    """Tests copmuting the temporal window."""
+    B, T_MAX, M = 1, 16, 6
+    temporal = tf.random.normal((B, T_MAX, M))
+
+    t = 1  # Timestep
+    n = 5  # Window size
+    actual = flood_model.FloodConvLSTM._get_temporal_window(temporal, t=t, n=n)
+    assert actual.shape == (B, n, M)
+    expected = tf.concat([np.zeros((B, n - t, M)), temporal[:, 0:t]], axis=1)
+    np.testing.assert_array_equal(actual, expected)

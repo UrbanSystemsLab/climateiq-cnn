@@ -24,14 +24,16 @@ class FloodModelParams:
     # Keras parameters.
     # Keras models support both Optimizer objects and (valid) string names.
     # It is the user's responsibility to pass in a valid optimizer value.
-    optimizer: Any = dataclasses.field(default_factory=lambda: tf.keras.optimizers.Adam(learning_rate=1e-3))
+    optimizer: Any = dataclasses.field(
+        default_factory=lambda: tf.keras.optimizers.Adam(learning_rate=1e-3))
 
 
 # Used for testing.
-test_model_params = FloodModelParams(
-    batch_size=4,
-    m_rainfall=3,
-    n_flood_maps=3,
-    lstm_units=32,
-    lstm_kernel_size=3,
-)
+def test_model_params() -> FloodModelParams:
+    return FloodModelParams(
+        batch_size=4,
+        m_rainfall=3,
+        n_flood_maps=3,
+        lstm_units=32,
+        lstm_kernel_size=3,
+    )

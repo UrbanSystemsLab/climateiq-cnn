@@ -3,7 +3,6 @@
 import dataclasses
 import logging
 from typing import TypeAlias, TypedDict, List, Callable
-import datetime
 
 import tensorflow as tf
 import keras
@@ -123,6 +122,7 @@ class FloodModel:
     def fit(self,
             dataset: tf.data.Dataset,
             epochs: int = 1,
+            steps_per_epoch: int | None = None,
             early_stopping: int | None = None,
             callbacks: List[Callable] | None = None):
         """Fit the model to the given dataset."""
@@ -130,11 +130,14 @@ class FloodModel:
             callbacks = []
         if early_stopping is not None:
             callbacks.append(keras.callbacks.EarlyStopping(
-                monitor="val_loss", mode="min", patience=early_stopping
+                monitor="loss", mode="min", patience=early_stopping
             ))
 
         # Fit the model for this sample
-        return self._model.fit(dataset, epochs=epochs, callbacks=callbacks)
+        return self._model.fit(
+            dataset, epochs=epochs,
+            steps_per_epoch=steps_per_epoch,
+            callbacks=callbacks)
 
     def load_model(self, filepath: str) -> None:
         """Loads weights from an existing file.
@@ -288,7 +291,7 @@ class FloodConvLSTM(tf.keras.Model):
         internal ConvLSTM and ignores autoregressive steps.
 
         Args:
-            input: Dictionary containing: 
+            input: Dictionary containing:
               - spatiotemporal: Flood maps tensor of shape [B, n, H, W, 1].
               - geospatial: Geospatial tensor of shape [B, H, W, f].
               - temporal: Rainfall windows tensor of shape [B, n, m].
@@ -303,8 +306,8 @@ class FloodConvLSTM(tf.keras.Model):
         B = spatiotemporal.shape[0]
         C = 1  # Channel dimension for spatiotemporal tensor
         F = constants.GEO_FEATURES
-        N = constants.N_FLOOD_MAPS
-        M = constants.M_RAINFALL
+        N = self._params.n_flood_maps
+        M = self._params.m_rainfall
         H, W = self._spatial_height, self._spatial_width
 
         tf.ensure_shape(spatiotemporal, (B, N, H, W, C))
@@ -355,7 +358,8 @@ class FloodConvLSTM(tf.keras.Model):
 
         B = spatiotemporal.shape[0]
         C = 1  # Channel dimension for spatiotemporal tensor
-        F, N, M = constants.GEO_FEATURES, constants.N_FLOOD_MAPS, constants.M_RAINFALL
+        F = constants.GEO_FEATURES
+        N, M = self._params.n_flood_maps, self._params.m_rainfall
         T_MAX = constants.MAX_RAINFALL_DURATION
         H, W = self._spatial_height, self._spatial_width
 
@@ -385,8 +389,9 @@ class FloodConvLSTM(tf.keras.Model):
         # Drop channels dimension.
         return tf.squeeze(predictions, axis=-1)
 
-    def _get_temporal_window(self, temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
-        """Returns a zero-padded n-sized window into the temporal tensor at timestep t."""
+    @staticmethod
+    def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
+        """Returns a zero-padded n-sized window at timestep t."""
         B, _, M = temporal.shape
         return tf.concat([tf.zeros(shape=(B, max(n - t, 0), M)),
                           temporal[:, max(t - n, 0):t]],

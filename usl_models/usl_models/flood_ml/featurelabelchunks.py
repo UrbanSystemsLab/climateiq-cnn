@@ -9,7 +9,6 @@ This class is used to generate the feature, label, rainfall and temporal chunks 
 
 The class has checks for the existence of the simulation name in the Metastore.
 When a simulation name is found, it is cross referanced with study_area to make sure feature chunks can be generated
-
 """
 
 
@@ -117,7 +116,8 @@ class GenerateFeatureLabelChunks:
                 chunks = [doc.to_dict() for doc in chunks_collection_ref.stream()]
 
                 # Extract feature_matrix_path from each chunk and store in a list
-                feature_matrix_paths = [chunk["feature_matrix_path"] for chunk in chunks]
+                feature_matrix_paths = [chunk["feature_matrix_path"]
+                                        for chunk in chunks]
 
                 # Sort the list based on the numbers in the paths
                 feature_matrix_paths.sort(
@@ -204,7 +204,7 @@ class GenerateFeatureLabelChunks:
         """
         This method fetches the rainfall configuration for each simulation.
         """
-        #print("Generating rainfall data...")
+        # print("Generating rainfall data...")
         sim_name, configuration, study_area_ref = (
             self._get_study_area_config_from_sim_name(sim_name)
         )
