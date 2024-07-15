@@ -85,12 +85,23 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
         "x_ll_corner": 0.0,
         "y_ll_corner": 0.0,
         "cell_size": 1.0,
+        "state": metastore.StudyAreaState.INIT,
+        "chunk_x_count": 5,
+        "chunk_y_count": 10,
     }
 
     # Simulate empty elevation min & max on the study area.
     mock_db.collection().document().get().get.side_effect = KeyError
 
+    # Current chunk wasn't present in metadata when this processing started.
     mock_db.collection().document().collection().document().get().exists = False
+
+    # Simulate that all the 50 chunks are present in metadata after current one is
+    # processed.
+    chunk_metadata_ref_mock = mock.MagicMock()
+    mock_db.collection().document().collection().list_documents.return_value = [
+        chunk_metadata_ref_mock for _ in range(50)
+    ]
 
     main.build_feature_matrix(
         functions_framework.CloudEvent(
@@ -169,9 +180,13 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
         mock_db.collection().document(),
         {"elevation_min": 2, "elevation_max": 6},
     )
-    mock_db.collection().document().update.assert_called_once_with(
-        {"chunk_size": 2, "chunk_x_count": 5, "chunk_y_count": 10}
-    ),
+    # Ensure that study area chunk-related fields and the state were updated
+    mock_db.collection().document().update.assert_has_calls(
+        [
+            mock.call({"chunk_size": 2, "chunk_x_count": 5, "chunk_y_count": 10}),
+            mock.call({"state": metastore.StudyAreaState.CHUNKS_UPLOADED}),
+        ]
+    )
 
 
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
@@ -821,6 +836,7 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
                     "y_ll_corner": 2.0,
                     "cell_size": 1.0,
                     "crs": "EPSG:32618",
+                    "state": metastore.StudyAreaState.INIT,
                 }
             ),
         ]
@@ -1679,6 +1695,10 @@ def test_rescale_feature_matrices_trigger_files_generated(mock_firestore_client)
         ]
     )
 
+    mock_db.collection().document().update.assert_called_once_with(
+        {"state": metastore.StudyAreaState.FEATURE_MATRICES_CREATED}
+    )
+
 
 @mock.patch.object(main.firestore, "Client", autospec=True)
 def test_rescale_feature_matrices_trigger_file_processed(mock_firestore_client):
@@ -1739,6 +1759,17 @@ def test_rescale_feature_matrices_trigger_file_processed(mock_firestore_client):
         trigger_mock_blob,
     ]
 
+    # Simulate that all 2 chunks are present in metadata and got READY state after the
+    # current one is processed.
+    chunk_metadata_ref_mock = mock.MagicMock()
+    chunk_metadata_ref_mock.get().to_dict.return_value = {
+        "state": metastore.StudyAreaChunkState.FEATURE_MATRIX_READY
+    }
+    mock_db.collection().document().collection().list_documents.return_value = [
+        chunk_metadata_ref_mock,
+        chunk_metadata_ref_mock,
+    ]
+
     main._start_feature_rescaling_if_ready(
         feature_bucket, "TestArea/chunk_0_0.scale_trigger"
     )
@@ -1791,6 +1822,19 @@ def test_rescale_feature_matrices_trigger_file_processed(mock_firestore_client):
                     + "scaled_chunk_0_0.npy",
                     "error": firestore.DELETE_FIELD,
                 },
+            ),
+            mock.call.collection("study_areas"),
+            mock.call.collection().document("TestArea"),
+            mock.call.collection().document().collection("chunks"),
+            mock.call.collection().document().collection().list_documents(),
+            mock.call.collection("study_areas"),
+            mock.call.collection().document("TestArea"),
+            mock.call.collection()
+            .document()
+            .update(
+                {
+                    "state": metastore.StudyAreaState.RESCALING_DONE,
+                }
             ),
         ]
     )

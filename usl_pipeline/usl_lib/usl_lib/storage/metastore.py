@@ -23,6 +23,13 @@ SIMULATIONS = "simulations"
 SIMULATION_LABEL_CHUNKS = "label_chunks"
 
 
+class StudyAreaState(enum.StrEnum):
+    INIT = "init"
+    CHUNKS_UPLOADED = "chunks-uploaded"
+    FEATURE_MATRICES_CREATED = "feature-matrices-created"
+    RESCALING_DONE = "rescaling-done"
+
+
 @dataclasses.dataclass(slots=True)
 class StudyArea:
     """A geography for either training or prediction.
@@ -36,6 +43,7 @@ class StudyArea:
         cell_size: Size of cells in the raster.
         crs: Coordinate system connecting global geographic coordinates and local
             projected ones.
+        state: An optional state of the area reflecting phases of processing in GCP.
     """
 
     name: str
@@ -45,6 +53,7 @@ class StudyArea:
     y_ll_corner: float
     cell_size: float
     crs: Optional[str] = None
+    state: Optional[StudyAreaState] = None
     elevation_min: Optional[float] = None
     elevation_max: Optional[float] = None
     chunk_size: Optional[int] = None
@@ -87,7 +96,7 @@ class StudyArea:
 
         Args:
           db: The firestore database client to use for the read.
-          study_area_name: The study area to retrieve.
+          name: The study area to retrieve.
 
         Returns:
           A StudyArea object representing the database's contents.
@@ -180,6 +189,36 @@ class StudyArea:
         for doc in docs:
             doc.delete()
 
+    @staticmethod
+    def list_all_chunk_refs(
+        db: firestore.Client,
+        study_area_name: str,
+    ) -> list[firestore.DocumentReference]:
+        """Lists all the chunks from chunk sub-collection for a given study area.
+
+        Args:
+            db: The firestore database client to use.
+            study_area_name: The study area to delete.
+        """
+        return [
+            ref
+            for ref in db.collection(STUDY_AREAS)
+            .document(study_area_name)
+            .collection(STUDY_AREA_CHUNKS)
+            .list_documents()
+        ]
+
+    @staticmethod
+    def update_state(db: firestore.Client, study_area_name: str, state: StudyAreaState):
+        """Updates the state for a given study area.
+
+        Args:
+            db: The firestore database client to use.
+            study_area_name: The study area to delete.
+            state: New state that study area should be set to.
+        """
+        db.collection(STUDY_AREAS).document(study_area_name).update({"state": state})
+
     def _as_dict(self) -> dict:
         as_dict = {}
         for field in self.__dataclass_fields__:
@@ -246,6 +285,11 @@ class StudyAreaChunk:
             raise ValueError(f'No such chunk {chunk_name} within {study_area_name}"')
 
         return cls(id_=chunk_name, **ref.to_dict())
+
+    @classmethod
+    def from_ref(cls, ref: firestore.DocumentReference) -> "StudyAreaChunk":
+        """Creates an instance of the chunk class based on retrieved reference."""
+        return cls(id_=ref.id, **ref.get().to_dict())
 
     @staticmethod
     def get_ref(
