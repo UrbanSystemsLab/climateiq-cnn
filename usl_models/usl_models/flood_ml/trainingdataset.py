@@ -290,7 +290,8 @@ class IncrementalTrainDataGenerator:
                               constants.MAP_WIDTH), dtype=tf.float32),
             )
         )
-        dataset = dataset.batch(batch_size)
+        if batch_size:
+            dataset = dataset.batch(batch_size)
         return dataset
 
     def load_dataset_windowed(self, sim_names: list[str], batch_size: int = 1, max_chunks: int = 0) -> tf.data.Dataset:
@@ -325,5 +326,6 @@ class IncrementalTrainDataGenerator:
                               constants.MAP_WIDTH), dtype=tf.float32),
             )
         )
-        dataset = dataset.batch(batch_size)
+        if batch_size:
+            dataset = dataset.batch(batch_size)
         return dataset
