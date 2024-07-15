@@ -1,4 +1,5 @@
 """Construct mock datasets."""
+
 import tensorflow as tf
 
 from usl_models.flood_ml import model as flood_model
@@ -7,43 +8,41 @@ from usl_models.flood_ml import constants
 
 
 def input_signature(
-        params: model_params.FloodModelParams,
-        height: int = 100,
-        width: int = 100,
-        n: int = 0) -> dict[str, tf.TensorSpec]:
+    params: model_params.FloodModelParams,
+    height: int = 100,
+    width: int = 100,
+    n: int = 0,
+) -> dict[str, tf.TensorSpec]:
     """Returns the input signature for a dataset with n timesteps."""
     # If the datset specifies a number of timesteps, temporal tensor is of max size.
     temporal_duration = constants.MAX_RAINFALL_DURATION if n else params.n_flood_maps
     return dict(
-        geospatial=tf.TensorSpec(shape=(
-            height, width, constants.GEO_FEATURES), dtype=tf.float32),
+        geospatial=tf.TensorSpec(
+            shape=(height, width, constants.GEO_FEATURES), dtype=tf.float32
+        ),
         temporal=tf.TensorSpec(
-            shape=(temporal_duration,
-                   params.m_rainfall), dtype=tf.float32
+            shape=(temporal_duration, params.m_rainfall), dtype=tf.float32
         ),
         spatiotemporal=tf.TensorSpec(
-            shape=(params.n_flood_maps, height,
-                   width, 1), dtype=tf.float32
+            shape=(params.n_flood_maps, height, width, 1), dtype=tf.float32
         ),
     )
 
 
-def label_signature(
-        height: int = 100,
-        width: int = 100,
-        n: int = 0) -> tf.TensorSpec:
+def label_signature(height: int = 100, width: int = 100, n: int = 0) -> tf.TensorSpec:
     """Returns the label signature for a dataset with n timesteps."""
     shape = (n, height, width) if n else (height, width)
     return tf.TensorSpec(shape=shape, dtype=tf.float32)
 
 
 def mock_dataset(
-        params: model_params.FloodModelParams,
-        height: int = 100,
-        width: int = 100,
-        batch_count: int = 1,
-        batch_size: int = 1,
-        n: int = 0) -> tf.data.Dataset:
+    params: model_params.FloodModelParams,
+    height: int = 100,
+    width: int = 100,
+    batch_count: int = 1,
+    batch_size: int = 1,
+    n: int = 0,
+) -> tf.data.Dataset:
     """Constructs a dataset of random mock data.
 
     Args:
@@ -65,15 +64,15 @@ def mock_dataset(
         """Generate random tensors."""
         for i in range(batch_size * batch_count):
             yield flood_model.FloodModel.Input(
-                geospatial=tf.random.normal(shape=input_sig['geospatial'].shape),
-                temporal=tf.random.normal(shape=input_sig['temporal'].shape),
+                geospatial=tf.random.normal(shape=input_sig["geospatial"].shape),
+                temporal=tf.random.normal(shape=input_sig["temporal"].shape),
                 spatiotemporal=tf.random.normal(
-                    shape=input_sig['spatiotemporal'].shape),
+                    shape=input_sig["spatiotemporal"].shape
+                ),
             ), tf.random.normal(label_sig.shape)
 
     dataset = tf.data.Dataset.from_generator(
-        generator=generator,
-        output_signature=(input_sig, label_sig)
+        generator=generator, output_signature=(input_sig, label_sig)
     )
     if batch_size:
         dataset = dataset.batch(batch_size)

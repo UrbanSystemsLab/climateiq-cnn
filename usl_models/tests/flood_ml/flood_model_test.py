@@ -1,4 +1,5 @@
 """Tests for Flood model."""
+
 import tempfile
 
 import numpy as np
@@ -23,8 +24,9 @@ def test_convlstm_call():
     height, width = 100, 100
     params = model_params.test_model_params()
 
-    input, _ = next(iter(mock_dataset(
-        params, batch_size=batch_size, height=height, width=width)))
+    input, _ = next(
+        iter(mock_dataset(params, batch_size=batch_size, height=height, width=width))
+    )
     model = flood_model.FloodConvLSTM(params, spatial_dims=(height, width))
     prediction = model.call(input)
     assert prediction.shape == (batch_size, height, width, 1)
@@ -47,16 +49,18 @@ def test_convlstm_call_n():
 
     # The FloodConvLSTM model expects the data to have been preprocessed, such
     # that it receives the full temporal inputs and a single flood map.
-    input, _ = next(iter(mock_dataset(
-        params,
-        height=height,
-        width=width,
-        batch_size=batch_size,
-        n=storm_duration
-    )))
-    model = flood_model.FloodConvLSTM(
-        params, spatial_dims=(height, width)
+    input, _ = next(
+        iter(
+            mock_dataset(
+                params,
+                height=height,
+                width=width,
+                batch_size=batch_size,
+                n=storm_duration,
+            )
+        )
     )
+    model = flood_model.FloodConvLSTM(params, spatial_dims=(height, width))
     prediction = model.call_n(input, n=storm_duration)
     assert prediction.shape == (batch_size, storm_duration, height, width)
 
@@ -78,11 +82,7 @@ def test_train():
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
     epochs = 2
     dataset = mock_dataset(
-        params,
-        height=height,
-        width=width,
-        batch_size=batch_size,
-        batch_count=epochs
+        params, height=height, width=width, batch_size=batch_size, batch_count=epochs
     )
     history = model.fit(dataset, epochs=epochs, steps_per_epoch=1)
     assert len(history.history["loss"]) == epochs
