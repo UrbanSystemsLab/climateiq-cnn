@@ -54,6 +54,7 @@ def mock_dataset(
         batch_size: size of each batch
         n: optional number of timesteps.
             Required for producing data for use with `model.call_n`.
+
     Returns:
         The TF dataset.
     """
