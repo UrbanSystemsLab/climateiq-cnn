@@ -30,6 +30,7 @@ class FloodModel:
 
     class Input(TypedDict):
         """Input tensors dictionary."""
+
         geospatial: tf.Tensor
         temporal: tf.Tensor
         spatiotemporal: tf.Tensor
