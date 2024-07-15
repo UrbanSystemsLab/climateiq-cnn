@@ -42,3 +42,47 @@ def test_boundary_pairs():
 
     pairs = data_utils.boundary_pairs(input)
     np_testing.assert_array_equal(pairs, expected_output)
+
+
+def test_split_time_step_pairs():
+    """Tests the time step splitting."""
+    # Input:  [1, 3, 2, 2, 4]
+    # [
+    #     [[[0, 1, 2, 3], [4, 5, 6, 7]], [[8, 9, 10, 11], [12, 13, 14, 15]]],
+    #     [[[16, 17, 18, 19], [20, 21, 22, 23]], [[24, 25, 26, 27], [28, 29, 30, 31]]],
+    #     [[[32, 33, 34, 35], [36, 37, 38, 39]], [[40, 41, 42, 43], [44, 45, 46, 47]]],
+    # ]
+    input = tf.reshape(tf.range(48), (1, 3, 2, 2, 4))
+
+    # Output: [1, 6, 2, 2, 2]
+    expected_output = (
+        [
+            [
+                [[0, 1], [4, 5]],
+                [[8, 9], [12, 13]],
+            ],
+            [
+                [[2, 3], [6, 7]],
+                [[10, 11], [14, 15]],
+            ],
+            [
+                [[16, 17], [20, 21]],
+                [[24, 25], [28, 29]],
+            ],
+            [
+                [[18, 19], [22, 23]],
+                [[26, 27], [30, 31]],
+            ],
+            [
+                [[32, 33], [36, 37]],
+                [[40, 41], [44, 45]],
+            ],
+            [
+                [[34, 35], [38, 39]],
+                [[42, 43], [46, 47]],
+            ],
+        ],
+    )
+
+    split_pairs = data_utils.split_time_step_pairs(input)
+    np_testing.assert_array_equal(split_pairs, expected_output)
