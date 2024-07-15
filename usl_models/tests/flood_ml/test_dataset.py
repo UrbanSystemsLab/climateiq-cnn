@@ -86,45 +86,48 @@ def test_load_dataset_windowed(mock_metastore) -> None:
     # geospatial will have the labels creeping into a sequence of zeros.
     numpy.testing.assert_array_almost_equal(
         element["spatiotemporal"].numpy(),
-        numpy.array(
-            [
-                numpy.array(
-                    [
-                        numpy.zeros((1000, 1000)),
-                        numpy.zeros((1000, 1000)),
-                        numpy.zeros((1000, 1000)),
-                        numpy.zeros((1000, 1000)),
-                        numpy.zeros((1000, 1000)),
-                    ]
-                ),
-                numpy.array(
-                    [
-                        numpy.zeros((1000, 1000)),
-                        numpy.zeros((1000, 1000)),
-                        numpy.zeros((1000, 1000)),
-                        numpy.zeros((1000, 1000)),
-                        mock_labels[:, :, 0],
-                    ]
-                ),
-                numpy.array(
-                    [
-                        numpy.zeros((1000, 1000)),
-                        numpy.zeros((1000, 1000)),
-                        numpy.zeros((1000, 1000)),
-                        mock_labels[:, :, 0],
-                        mock_labels[:, :, 1],
-                    ]
-                ),
-                numpy.array(
-                    [
-                        numpy.zeros((1000, 1000)),
-                        numpy.zeros((1000, 1000)),
-                        mock_labels[:, :, 0],
-                        mock_labels[:, :, 1],
-                        mock_labels[:, :, 2],
-                    ]
-                ),
-            ]
+        numpy.expand_dims(
+            numpy.array(
+                [
+                    numpy.array(
+                        [
+                            numpy.zeros((1000, 1000)),
+                            numpy.zeros((1000, 1000)),
+                            numpy.zeros((1000, 1000)),
+                            numpy.zeros((1000, 1000)),
+                            numpy.zeros((1000, 1000)),
+                        ]
+                    ),
+                    numpy.array(
+                        [
+                            numpy.zeros((1000, 1000)),
+                            numpy.zeros((1000, 1000)),
+                            numpy.zeros((1000, 1000)),
+                            numpy.zeros((1000, 1000)),
+                            mock_labels[:, :, 0],
+                        ]
+                    ),
+                    numpy.array(
+                        [
+                            numpy.zeros((1000, 1000)),
+                            numpy.zeros((1000, 1000)),
+                            numpy.zeros((1000, 1000)),
+                            mock_labels[:, :, 0],
+                            mock_labels[:, :, 1],
+                        ]
+                    ),
+                    numpy.array(
+                        [
+                            numpy.zeros((1000, 1000)),
+                            numpy.zeros((1000, 1000)),
+                            mock_labels[:, :, 0],
+                            mock_labels[:, :, 1],
+                            mock_labels[:, :, 2],
+                        ]
+                    ),
+                ]
+            ),
+            axis=-1,
         ),
     )
 
