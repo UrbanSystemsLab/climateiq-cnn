@@ -28,7 +28,6 @@ def load_dataset(
     """Creates a dataset which generates chunks for flood model inference.
 
     The examples are generated from multiple simulations.
-    They are windowed for training on next-map prediction.
     The dataset iteratively yields examples read from Google Cloud Storage to avoid
     pulling all examples into memory at once.
 
@@ -48,7 +47,7 @@ def load_dataset(
     storage_client = storage_client or storage.Client()
 
     def generator():
-        """Windowed generator for teacher-forcing training."""
+        """Generator for producing full inputs and labels."""
         for sim_name in sim_names:
             for model_input, labels in _iter_model_inputs(
                 firestore_client,
