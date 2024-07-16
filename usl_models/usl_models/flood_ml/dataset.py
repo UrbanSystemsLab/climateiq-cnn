@@ -59,7 +59,7 @@ def load_dataset(
                 m_rainfall,
                 max_chunks,
             ):
-                yield (model_input, labels)
+                yield model_input, labels
 
     # Create the dataset for this simulation
     dataset = tf.data.Dataset.from_generator(
@@ -94,7 +94,10 @@ def load_dataset(
             ),
         ),
     )
+    # If no batch specified, do not batch the dataset, which is required
+    # for generating data for batch prediction in VertexAI.
     if batch_size:
+        print("batch: ", batch_size)
         dataset = dataset.batch(batch_size)
     return dataset
 
@@ -175,6 +178,8 @@ def load_dataset_windowed(
             ),
         ),
     )
+    # If no batch specified, do not batch the dataset, which is required
+    # for generating data for batch prediction in VertexAI.
     if batch_size:
         dataset = dataset.batch(batch_size)
     return dataset
