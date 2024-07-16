@@ -7,7 +7,7 @@ import tensorflow as tf
 
 from usl_models.flood_ml import model as flood_model
 from usl_models.flood_ml import model_params
-from tests.mock_dataset import mock_dataset
+from tests.flood_ml.mock_dataset import mock_dataset
 
 
 def pytest_model_params() -> model_params.FloodModelParams:
