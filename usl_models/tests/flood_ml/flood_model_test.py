@@ -2,6 +2,7 @@
 
 import tempfile
 
+import keras
 import numpy as np
 import tensorflow as tf
 
@@ -178,3 +179,30 @@ def test_get_temporal_window():
         ],
     ]
     np.testing.assert_array_equal(actual, expected)
+
+
+def test_keras_save_load():
+    """Ensures we can use keras to save and load the model."""
+    batch_size = 16
+    height, width = 100, 100
+    params = pytest_model_params()
+
+    model = flood_model.FloodModel(params, spatial_dims=(height, width))
+
+    dataset = mock_dataset(
+        params,
+        height=height,
+        width=width,
+        batch_size=batch_size,
+        batch_count=1,
+    )
+    model.fit(dataset, steps_per_epoch=1)
+
+    with tempfile.TemporaryDirectory() as tmp_name:
+        model.save_model(tmp_name, overwrite=True)
+
+        loaded_model = keras.models.load_model(tmp_name)
+
+    # Ensure call and call_n are both available on the model.
+    loaded_model.call
+    loaded_model.call_n

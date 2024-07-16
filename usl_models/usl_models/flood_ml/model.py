@@ -167,6 +167,46 @@ class FloodModel:
                 on whether to overwrite any existing model.
         """
         self._model.save(filepath, overwrite=overwrite)
+
+        self._model.save(
+            filepath,
+            overwrite=overwrite,
+            signatures=self._model.call_n.get_concrete_function(
+                {
+                    "spatiotemporal": tf.TensorSpec(
+                        shape=(
+                            None,
+                            self._model_params.n_flood_maps,
+                            self._spatial_dims[0],
+                            self._spatial_dims[1],
+                            1,
+                        ),
+                        dtype=tf.float32,
+                        name="spatiotemporal",
+                    ),
+                    "geospatial": tf.TensorSpec(
+                        shape=(
+                            None,
+                            self._spatial_dims[0],
+                            self._spatial_dims[1],
+                            constants.GEO_FEATURES,
+                        ),
+                        dtype=tf.float32,
+                        name="geospatial",
+                    ),
+                    "temporal": tf.TensorSpec(
+                        shape=(
+                            None,
+                            constants.MAX_RAINFALL_DURATION,
+                            self._model_params.m_rainfall,
+                        ),
+                        dtype=tf.float32,
+                        name="temporal",
+                    ),
+                }
+            ),
+        )
+
         logging.info("Saved model to %s", filepath)
 
 
@@ -350,6 +390,7 @@ class FloodConvLSTM(tf.keras.Model):
 
         return output
 
+    @tf.function
     def call_n(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
         """Runs the entire autoregressive model.
 
