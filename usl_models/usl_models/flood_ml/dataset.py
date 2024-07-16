@@ -97,7 +97,6 @@ def load_dataset(
     # If no batch specified, do not batch the dataset, which is required
     # for generating data for batch prediction in VertexAI.
     if batch_size:
-        print("batch: ", batch_size)
         dataset = dataset.batch(batch_size)
     return dataset
 
