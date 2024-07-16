@@ -1026,8 +1026,11 @@ def _write_wps_chunk_metastore_entry(
     db = firestore.Client()
     study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
 
+    # Remove unsupported characters for firestore
+    doc_id = chunk_name.replace(".", "_").replace(":", "_")
+
     metastore.StudyAreaTemporalChunk(
-        id_=chunk_name,
+        id_=doc_id,
         raw_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
         feature_matrix_path=f"gs://{feature_blob.bucket.name}/{feature_blob.name}",
         time=metadata.time,

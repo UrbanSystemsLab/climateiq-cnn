@@ -342,7 +342,9 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     )
 
     # Create an in-memory netcdf file and grab its bytes
-    ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile = netCDF4.Dataset(
+        "met_em.d03.2010-02-02_18:00:00.nc", mode="w", format="NETCDF4", memory=1
+    )
     ncfile.createDimension("Time", 1)
     # Create new dim to represent length of datetime str
     ncfile.createDimension("DateStrLen", 19)
@@ -374,13 +376,13 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     # Create a mock blob for the input file which will return the above netcdf when
     # opened.
     mock_archive_blob = mock.MagicMock()
-    mock_archive_blob.name = "study_area/met_em.d03_test.nc"
+    mock_archive_blob.name = "study_area/met_em.d03.2010-02-02_18:00:00.nc"
     mock_archive_blob.bucket.name = "bucket"
     mock_archive_blob.open.return_value = io.BytesIO(ncfile_bytes)
 
     # Create a mock blob for feature matrix we will upload.
     mock_feature_blob = mock.MagicMock()
-    mock_feature_blob.name = "study_area/met_em.d03_test.npy"
+    mock_feature_blob.name = "study_area/met_em.d03.2010-02-02_18:00:00.npy"
     mock_feature_blob.bucket.name = "climateiq-study-area-feature-chunks"
 
     # Return the mock blobs.
@@ -395,7 +397,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
             {"source": "test", "type": "event"},
             data={
                 "bucket": "bucket",
-                "name": "study_area/met_em.d03_test.nc",
+                "name": "study_area/met_em.d03.2010-02-02_18:00:00.nc",
                 "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             },
         )
@@ -405,9 +407,9 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     mock_storage_client.assert_has_calls(
         [
             mock.call().bucket("bucket"),
-            mock.call().bucket().blob("study_area/met_em.d03_test.nc"),
+            mock.call().bucket().blob("study_area/met_em.d03.2010-02-02_18:00:00.nc"),
             mock.call().bucket("climateiq-study-area-feature-chunks"),
-            mock.call().bucket().blob("study_area/met_em.d03_test.npy"),
+            mock.call().bucket().blob("study_area/met_em.d03.2010-02-02_18:00:00.npy"),
         ]
     )
 
@@ -430,11 +432,9 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
             mock.call().collection("study_areas"),
             mock.call().collection().document("study_area"),
             mock.call().collection().document().collection("chunks"),
-            mock.call()
-            .collection()
-            .document()
-            .collection()
-            .document("met_em.d03_test"),
+            mock.call().collection().document().collection()
+            # Periods replaced with underscores
+            .document("met_em_d03_2010-02-02_18_00_00"),
             mock.call()
             .collection()
             .document()
@@ -443,10 +443,12 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
             .set(
                 {
                     # For heat, we process each WPS netcdf file as a chunk (un-tar'ed)
-                    "raw_path": "gs://bucket/study_area/met_em.d03_test.nc",
+                    "raw_path": (
+                        "gs://bucket/study_area/" "met_em.d03.2010-02-02_18:00:00.nc"
+                    ),
                     "feature_matrix_path": (
                         "gs://climateiq-study-area-feature-chunks/study_area/"
-                        "met_em.d03_test.npy"
+                        "met_em.d03.2010-02-02_18:00:00.npy"
                     ),
                     "time": datetime.datetime(2010, 2, 2, 18, 0, 0),
                     "error": firestore.DELETE_FIELD,
@@ -687,7 +689,9 @@ def test_build_and_upload_study_area_chunk(
     source_crs = "EPSG:32618"
 
     # Create an in-memory netcdf file and grab its bytes
-    ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile = netCDF4.Dataset(
+        "met_em.d03.2010-02-02_18:00:00.nc", mode="w", format="NETCDF4", memory=1
+    )
     ncfile.setncattr("corner_lons", long_vals)
     ncfile.setncattr("corner_lats", lat_vals)
     ncfile.setncattr("DX", cell_size)
@@ -697,13 +701,13 @@ def test_build_and_upload_study_area_chunk(
 
     # Create a mock blob for the input file uploaded
     mock_input_blob = mock.MagicMock()
-    mock_input_blob.name = "study_area/met_em.d03_test.nc"
+    mock_input_blob.name = "study_area/met_em.d03.2010-02-02_18:00:00.nc"
     mock_input_blob.bucket.name = "input-bucket"
     mock_input_blob.open.return_value = io.BytesIO(ncfile_bytes)
 
     # Create a mock blob for the chunk we will upload.
     mock_chunk_blob = mock.MagicMock()
-    mock_chunk_blob.name = "study_area/met_em.d03_test.nc"
+    mock_chunk_blob.name = "study_area/met_em.d03.2010-02-02_18:00:00.nc"
     mock_chunk_blob.bucket.name = "climateiq-study-area-chunks"
 
     # Return the mock blobs.
@@ -720,7 +724,7 @@ def test_build_and_upload_study_area_chunk(
             {"source": "test", "type": "event"},
             data={
                 "bucket": "input-bucket",
-                "name": "study_area/met_em.d03_test.nc",
+                "name": "study_area/met_em.d03.2010-02-02_18:00:00.nc",
                 "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             },
         )
@@ -730,9 +734,9 @@ def test_build_and_upload_study_area_chunk(
     mock_storage_client.assert_has_calls(
         [
             mock.call().bucket("input-bucket"),
-            mock.call().bucket().blob("study_area/met_em.d03_test.nc"),
+            mock.call().bucket().blob("study_area/met_em.d03.2010-02-02_18:00:00.nc"),
             mock.call().bucket("climateiq-study-area-chunks"),
-            mock.call().bucket().blob("study_area/met_em.d03_test.nc"),
+            mock.call().bucket().blob("study_area/met_em.d03.2010-02-02_18:00:00.nc"),
         ]
     )
 
@@ -852,7 +856,9 @@ def test_build_wrf_label_matrix(
     mock_wrf_getvar, mock_storage_client, mock_firestore_client, _
 ):
     # Create an in-memory mock netcdf file and grab its bytes
-    ncfile = netCDF4.Dataset("met_em.d03_test.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile = netCDF4.Dataset(
+        "met_em.d03.2010-02-02_18:00:00.nc", mode="w", format="NETCDF4", memory=1
+    )
     ncfile.createDimension("Time", None)
     # Create new dim to represent length of datetime str
     ncfile.createDimension("DateStrLen", 19)
