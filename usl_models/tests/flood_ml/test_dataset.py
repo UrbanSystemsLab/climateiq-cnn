@@ -1,8 +1,8 @@
 import io
 from unittest import mock
 
-from google.cloud import firestore
-from google.cloud import storage
+from google.cloud import firestore  # type:ignore[attr-defined]
+from google.cloud import storage  # type:ignore[attr-defined]
 import numpy
 
 from usl_models.flood_ml import dataset
