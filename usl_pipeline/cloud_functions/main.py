@@ -234,6 +234,7 @@ def write_study_area_metadata(cloud_event: functions_framework.CloudEvent) -> No
         metastore.StudyArea.delete_all_chunks(db, study_area_name)
         study_area = metastore.StudyArea(
             name=study_area_name,
+            state=metastore.StudyAreaState.INIT,
             col_count=header.col_count,
             row_count=header.row_count,
             x_ll_corner=header.x_ll_corner,
@@ -427,7 +428,7 @@ def _write_wrf_label_chunk_metastore_entry(
     )
 )
 def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
-    """Builds a feature matrix when an a set of geo files is uploaded.
+    """Builds a feature matrix when a set of geo files is uploaded.
 
     This function is triggered when files containing geo data are uploaded to
     GCS. It produces a feature matrix for the geo data and writes that feature matrix to
@@ -963,6 +964,28 @@ def _update_study_area_metastore_entry(
     if metadata.chunk_size is not None:
         metastore.StudyArea.update_chunk_info(db, study_area_name, metadata.chunk_size)
 
+        # Let's update study area state to CHUNKS_UPLOADED if it's still INIT and all
+        # the chunks are present in metadata (in any state) meaning that every chunk
+        # TAR-file was placed in the chunk bucket and did trigger processing event.
+        study_area_metadata = metastore.StudyArea.get(db, study_area_name)
+        if (
+            study_area_metadata.state == metastore.StudyAreaState.INIT
+            and study_area_metadata.chunk_x_count is not None
+            and study_area_metadata.chunk_y_count is not None
+        ):
+            expected_chunk_count = (
+                study_area_metadata.chunk_x_count * study_area_metadata.chunk_y_count
+            )
+            current_chunk_count = len(
+                metastore.StudyArea.list_all_chunk_refs(db, study_area_name)
+            )
+            if current_chunk_count == expected_chunk_count:
+                # All the chunk metadata objects were registered, let's update the state
+                # of the study area.
+                metastore.StudyArea.update_state(
+                    db, study_area_name, metastore.StudyAreaState.CHUNKS_UPLOADED
+                )
+
 
 def _write_flood_chunk_metastore_entry(chunk_blob: storage.Blob) -> None:
     """Updates the metastore with new information for the given flood chunks.
@@ -1135,6 +1158,9 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
             study_area_name,
             chunk_count,
         )
+        metastore.StudyArea.update_state(
+            db, study_area_name, metastore.StudyAreaState.FEATURE_MATRICES_CREATED
+        )
         for feature_blob in feature_blobs:
             _, blob_chunk_name = _parse_chunk_path(feature_blob.name)
             trigger_blob = feature_bucket.blob(
@@ -1180,6 +1206,18 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
             feature_bucket.blob(blob_path).delete()
         except exceptions.NotFound:
             pass
+
+        # Let's check if all the chunks are rescaled and the whole study area can be
+        # switched to finalized state.
+        ref_list = metastore.StudyArea.list_all_chunk_refs(db, study_area_name)
+        chunk_list = [metastore.StudyAreaSpatialChunk.from_ref(ref) for ref in ref_list]
+        if all(
+            chunk.state == metastore.StudyAreaChunkState.FEATURE_MATRIX_READY
+            for chunk in chunk_list
+        ):
+            metastore.StudyArea.update_state(
+                db, study_area_name, metastore.StudyAreaState.RESCALING_DONE
+            )
 
 
 @functions_framework.cloud_event

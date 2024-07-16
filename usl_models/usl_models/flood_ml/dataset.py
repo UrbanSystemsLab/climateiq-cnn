@@ -27,6 +27,8 @@ def load_dataset(
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for flood model inference.
 
+    This dataset produces the input for `model.call_n`.
+    For training with teacher-forcing, `load_dataset_windowed` should be used instead.
     The examples are generated from multiple simulations.
     The dataset iteratively yields examples read from Google Cloud Storage to avoid
     pulling all examples into memory at once.
@@ -108,6 +110,8 @@ def load_dataset_windowed(
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for flood model training.
 
+    This dataset produces the input for `model.call`.
+    For getting data to input into `model.call_n`, use `load_dataset` instead.
     The examples are generated from multiple simulations.
     They are windowed for training on next-map prediction.
     The dataset iteratively yields examples read from Google Cloud Storage to avoid
