@@ -3,7 +3,7 @@
 from typing import TypeAlias, TypedDict
 
 import tensorflow as tf
-from tensorflow.keras import layers
+from keras import layers
 
 # from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils

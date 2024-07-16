@@ -27,6 +27,7 @@ def load_dataset(
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for flood model inference.
 
+    For training with teacher-forcing, `load_dataset_windowed` should be used instead.
     The examples are generated from multiple simulations.
     The dataset iteratively yields examples read from Google Cloud Storage to avoid
     pulling all examples into memory at once.
@@ -57,7 +58,7 @@ def load_dataset(
                 m_rainfall,
                 max_chunks,
             ):
-                yield (model_input, labels)
+                yield model_input, labels
 
     # Create the dataset for this simulation
     dataset = tf.data.Dataset.from_generator(
@@ -92,7 +93,10 @@ def load_dataset(
             ),
         ),
     )
+    # If no batch specified, do not batch the dataset, which is required
+    # for generating data for batch prediction in VertexAI.
     if batch_size:
+        print("batch: ", batch_size)
         dataset = dataset.batch(batch_size)
     return dataset
 
@@ -108,6 +112,7 @@ def load_dataset_windowed(
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for flood model training.
 
+    For getting data to input into `model.call_n`, use `load_dataset` instead.
     The examples are generated from multiple simulations.
     They are windowed for training on next-map prediction.
     The dataset iteratively yields examples read from Google Cloud Storage to avoid
@@ -171,6 +176,8 @@ def load_dataset_windowed(
             ),
         ),
     )
+    # If no batch specified, do not batch the dataset, which is required
+    # for generating data for batch prediction in VertexAI.
     if batch_size:
         dataset = dataset.batch(batch_size)
     return dataset
