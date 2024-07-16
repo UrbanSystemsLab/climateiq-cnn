@@ -411,7 +411,7 @@ class FloodConvLSTM(tf.keras.Model):
             n: window size
 
         Returns:
-            Returns a zero-padded n-sized window at timestep t
+            Returns a zero-padded n-sized window at timestep t of shape (B, n, M)
         """
         B, _, M = temporal.shape
         return tf.concat(
