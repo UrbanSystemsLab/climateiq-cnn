@@ -5,7 +5,7 @@ import logging
 from typing import Optional, TypeAlias, TypedDict
 
 import tensorflow as tf
-from tensorflow.keras import layers
+from keras import layers
 
 from usl_models.flood_ml import constants
 from usl_models.flood_ml import data_utils
