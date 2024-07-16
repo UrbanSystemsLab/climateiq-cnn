@@ -1,11 +1,9 @@
 """Flood model parameters."""
 
 import dataclasses
-
-import tensorflow as tf
+from typing import Any, Mapping
 
 from usl_models.flood_ml import constants
-from typing import Any
 
 
 @dataclasses.dataclass(kw_only=True, slots=True)
@@ -21,9 +19,11 @@ class FloodModelParams:
     lstm_dropout: float = 0.2
     lstm_recurrent_dropout: float = 0.2
 
-    # Keras parameters.
-    # Keras models support both Optimizer objects and (valid) string names.
-    # It is the user's responsibility to pass in a valid optimizer value.
-    optimizer: Any = dataclasses.field(
-        default_factory=lambda: tf.keras.optimizers.Adam(learning_rate=1e-3)
+    # The optimizer configuration.
+    # We use the dictionary definition to ensure the model is serializable.
+    optimizer_config: Mapping[str, Any] = dataclasses.field(
+        default_factory=lambda: {
+            "class_name": "Adam",
+            "config": {"learning_rate": 1e-3},
+        }
     )

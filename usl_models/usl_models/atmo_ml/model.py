@@ -1,6 +1,6 @@
 """AtmoML model definition."""
 
-from typing import TypeAlias, TypedDict
+from typing import Any, TypeAlias, TypedDict
 
 import tensorflow as tf
 from keras import layers
@@ -48,7 +48,7 @@ class AtmoConvLSTM(tf.keras.Model):
 
     def __init__(
         self,
-        params: AtmoModelParams,
+        params: dict[str, Any],
         spatial_dims: tuple[int, int],
         num_spatial_features: int,
         num_spatiotemporal_features: int,
@@ -66,7 +66,7 @@ class AtmoConvLSTM(tf.keras.Model):
         """
         super().__init__()
 
-        self._params = params
+        self._params = model_params.AtmoModelParams(**params)
         self._spatial_height, self._spatial_width = spatial_dims
         self._spatial_features = num_spatial_features
         self._spatiotemporal_features = num_spatiotemporal_features

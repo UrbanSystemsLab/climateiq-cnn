@@ -1,5 +1,7 @@
 """Tests for Atmo model."""
 
+import dataclasses
+
 import tensorflow as tf
 
 from usl_models.atmo_ml import model as atmo_model
@@ -65,7 +67,7 @@ def test_atmo_convlstm():
     fake_input = fake_input_batch(batch_size)
 
     model = atmo_model.AtmoConvLSTM(
-        params,
+        dataclasses.asdict(params),
         spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
         num_spatial_features=_TEST_SPATIAL_FEATURES,
         num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,

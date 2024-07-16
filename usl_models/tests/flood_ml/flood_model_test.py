@@ -1,5 +1,6 @@
 """Tests for Flood model."""
 
+import dataclasses
 import tempfile
 
 import numpy as np
@@ -38,7 +39,9 @@ def test_convlstm_call():
     input, _ = next(
         iter(mock_dataset(params, batch_size=batch_size, height=height, width=width))
     )
-    model = flood_model.FloodConvLSTM(params, spatial_dims=(height, width))
+    model = flood_model.FloodConvLSTM(
+        dataclasses.asdict(params), spatial_dims=(height, width)
+    )
     prediction = model.call(input)
     assert prediction.shape == (batch_size, height, width, 1)
 
@@ -71,7 +74,9 @@ def test_convlstm_call_n():
             )
         )
     )
-    model = flood_model.FloodConvLSTM(params, spatial_dims=(height, width))
+    model = flood_model.FloodConvLSTM(
+        dataclasses.asdict(params), spatial_dims=(height, width)
+    )
     prediction = model.call_n(input, n=storm_duration)
     assert prediction.shape == (batch_size, storm_duration, height, width)
 

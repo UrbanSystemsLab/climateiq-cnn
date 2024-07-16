@@ -2,7 +2,7 @@
 
 import dataclasses
 import logging
-from typing import TypeAlias, TypedDict, List, Callable
+from typing import Any, TypeAlias, TypedDict, List, Callable
 
 import tensorflow as tf
 import keras
@@ -54,9 +54,13 @@ class FloodModel:
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
-        model = FloodConvLSTM(self._model_params, spatial_dims=self._spatial_dims)
+        model = FloodConvLSTM(
+            # Pass FloodModelParams as a dictionary to ensure the model is serializable.
+            dataclasses.asdict(self._model_params),
+            spatial_dims=self._spatial_dims,
+        )
         model.compile(
-            optimizer=self._model_params.optimizer,
+            optimizer=tf.keras.optimizers.get(self._model_params.optimizer_config),
             loss=tf.keras.losses.MeanSquaredError(),
             metrics=[
                 tf.keras.metrics.MeanAbsoluteError(),
@@ -200,20 +204,22 @@ class FloodConvLSTM(tf.keras.Model):
 
     def __init__(
         self,
-        params: FloodModelParams,
+        params: dict[str, Any],
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
     ):
         """Creates the ConvLSTM model.
 
         Args:
-            params: A FloodModelParams object of configurable model parameters.
+            params: A dictionary representation of a FloodModelParams object for
+                configurable model parameters. We take a dictionary rather than a
+                FloodModelParams object to ensure the model is serializable.
             spatial_dims: Tuple of spatial height and width input dimensions.
                 Needed for defining input shapes. This is an optional arg that
                 can be changed (primarily for testing/debugging).
         """
         super().__init__()
 
-        self._params = params
+        self._params = model_params.FloodModelParams(**params)
         self._spatial_height, self._spatial_width = spatial_dims
 
         # Spatiotemporal CNN
