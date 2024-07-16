@@ -4,9 +4,9 @@ import dataclasses
 import logging
 from typing import TypeAlias, TypedDict, List, Callable
 
-import tensorflow as tf
 import keras
 from keras import layers
+import tensorflow as tf
 
 from usl_models.flood_ml import constants
 from usl_models.flood_ml import data_utils
