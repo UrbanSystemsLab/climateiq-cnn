@@ -358,3 +358,59 @@ def test_create_get_study_area_temporal_chunk(firestore_db):
         )
         == chunk
     )
+
+
+def test_study_area_list_all_chunk_refs(firestore_db):
+    """Ensures all study area chunks can be listed for a given study area."""
+    study_area = metastore.StudyArea(
+        name="study_area_name",
+        col_count=1,
+        row_count=2,
+        x_ll_corner=3,
+        y_ll_corner=4,
+        cell_size=5,
+        crs="crs",
+    )
+    study_area.create(firestore_db)
+
+    for i in range(3):
+        metastore.StudyAreaChunk(id_=f"chunk_{i}", raw_path=f"tar_{i}!").merge(
+            firestore_db, "study_area_name"
+        )
+
+    ref_list = metastore.StudyArea.list_all_chunk_refs(firestore_db, "study_area_name")
+    chunk_list = [metastore.StudyAreaChunk.from_ref(ref) for ref in ref_list]
+    assert chunk_list == [
+        metastore.StudyAreaChunk(id_="chunk_0", raw_path="tar_0!"),
+        metastore.StudyAreaChunk(id_="chunk_1", raw_path="tar_1!"),
+        metastore.StudyAreaChunk(id_="chunk_2", raw_path="tar_2!"),
+    ]
+
+
+def test_study_area_update_state(firestore_db):
+    """Ensures all study area chunks can be listed for a given study area."""
+    study_area = metastore.StudyArea(
+        name="StudyArea1",
+        col_count=1,
+        row_count=2,
+        x_ll_corner=3,
+        y_ll_corner=4,
+        cell_size=5,
+        crs="crs",
+    )
+    study_area.create(firestore_db)
+
+    metastore.StudyArea.update_state(
+        firestore_db, "StudyArea1", metastore.StudyAreaState.INIT
+    )
+
+    assert metastore.StudyArea.get(firestore_db, "StudyArea1") == metastore.StudyArea(
+        name="StudyArea1",
+        col_count=1,
+        row_count=2,
+        x_ll_corner=3,
+        y_ll_corner=4,
+        cell_size=5,
+        crs="crs",
+        state=metastore.StudyAreaState.INIT,
+    )
