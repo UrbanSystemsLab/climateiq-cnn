@@ -3,7 +3,7 @@ from pathlib import Path
 
 from google.cloud.aiplatform.prediction import LocalModel
 from usl_models.flood_ml.predictor import FloodModelPredictor 
-from usl_models.flood_ml.dataset import load_dataset_windowed
+from usl_models.flood_ml.dataset import load_dataset
 import json
 import numpy as np
 from google.cloud import firestore
@@ -38,11 +38,9 @@ def tensor_to_json_serializable(tensor):
 
 def create_jsonl_file():
     sim_names = ["Manhattan-config_v1/Rainfall_Data_1.txt", "Manhattan-config_v1/Rainfall_Data_2.txt"]
-    batch_size = 0 # On A100, use batch_size = 4
-    dataset = load_dataset_windowed(sim_names, batch_size=batch_size, max_chunks=8,
+    dataset = load_dataset(sim_names, max_chunks=1, batch_size = 0,
                                     firestore_client=firestore.Client(project='climateiq-test'),
                                     storage_client=storage.Client(project='climateiq-test'))
-
     inputs, labels = next(iter(dataset))
     print("Input shapes:")
     for key, value in inputs.items():
@@ -50,7 +48,7 @@ def create_jsonl_file():
 
     print("\nLabel shape:", labels.shape)
 
-    outfile = 'data/batch_pred_josiahkp.jsonl'
+    outfile = 'batch_pred_2.jsonl'
 
     # Convert inputs to JSON serializable format
     json_serializable_inputs = {
@@ -71,22 +69,14 @@ def load_jsonl_to_numpy(file_path):
         'temporal': [],
         'spatiotemporal': []
     }
+    data = {'geospatial': [], 'temporal': [], 'spatiotemporal': []}  # Initialize the dictionary
 
     with open(file_path, 'r') as file:
         for line in file:
             item = json.loads(line)
-            data['geospatial'].append(np.array(item['geospatial'], dtype=np.float32))
-            data['temporal'].append(np.array(item['temporal'], dtype=np.float32))
-            data['spatiotemporal'].append(np.array(item['spatiotemporal'], dtype=np.float32))
-
-    # Convert lists of arrays to single numpy arrays and ensure correct shapes
-    data['geospatial'] = np.array(data['geospatial'])
-    data['temporal'] = np.array(data['temporal'])
-    data['spatiotemporal'] = np.array(data['spatiotemporal'])
-
-    # Ensure 'spatiotemporal' has the correct number of dimensions
-    if data['spatiotemporal'].ndim == 3:
-        data['spatiotemporal'] = np.expand_dims(data['spatiotemporal'], axis=-1)
+            data['geospatial'] = np.array(item['geospatial'], dtype=np.float32)
+            data['temporal'] = np.array(item['temporal'], dtype=np.float32)
+            data['spatiotemporal'] = np.array(item['spatiotemporal'], dtype=np.float32)
 
     # Print shapes for debugging
     print("Loaded data shapes:")
@@ -100,14 +90,13 @@ def main():
     from usl_models.flood_ml.predictor import FloodModelPredictor 
 
     n = 9
-
     predictor = FloodModelPredictor()
-   # create_jsonl_file()
+    create_jsonl_file()
 
     predictor.load("gs://climateiq-vertexai/aiplatform-custom-training-2024-07-15-13:32:01.898/")
 
-    # Usage
-    file_path = 'data/batch_pred_josiahkp.jsonl'
+    # # Usage
+    file_path = 'batch_pred_2.jsonl'
     instances = load_jsonl_to_numpy(file_path)
 
     predictor.predict(instances, n)
