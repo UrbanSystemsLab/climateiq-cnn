@@ -4,9 +4,9 @@ import dataclasses
 import logging
 from typing import TypeAlias, TypedDict, List, Callable
 
+import tensorflow as tf
 import keras
 from keras import layers
-import tensorflow as tf
 
 from usl_models.flood_ml import constants
 from usl_models.flood_ml import data_utils
@@ -403,7 +403,16 @@ class FloodConvLSTM(tf.keras.Model):
 
     @staticmethod
     def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
-        """Returns a zero-padded n-sized window at timestep t."""
+        """Returns a zero-padded n-sized window at timestep t.
+
+        Args:
+            temporal: Temporal tensor of shape (B, T_MAX, M)
+            t: timestep to fetch the windows for. At time t, we use at temporal[t-n:t].
+            n: window size
+
+        Returns:
+            Returns a zero-padded n-sized window at timestep t
+        """
         B, _, M = temporal.shape
         return tf.concat(
             [tf.zeros(shape=(B, max(n - t, 0), M)), temporal[:, max(t - n, 0) : t]],
