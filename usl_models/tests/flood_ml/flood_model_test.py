@@ -10,6 +10,17 @@ from usl_models.flood_ml import model_params
 from tests.mock_dataset import mock_dataset
 
 
+def pytest_model_params() -> model_params.FloodModelParams:
+    """Defines FloodModelParams for testing."""
+    return model_params.FloodModelParams(
+        batch_size=4,
+        m_rainfall=3,
+        n_flood_maps=3,
+        lstm_units=32,
+        lstm_kernel_size=3,
+    )
+
+
 def test_convlstm_call():
     """Tests a single pass (prediction) of the model.
 
@@ -22,7 +33,7 @@ def test_convlstm_call():
     """
     batch_size = 4
     height, width = 100, 100
-    params = model_params.test_model_params()
+    params = pytest_model_params()
 
     input, _ = next(
         iter(mock_dataset(params, batch_size=batch_size, height=height, width=width))
@@ -45,7 +56,7 @@ def test_convlstm_call_n():
     batch_size = 4
     height, width = 100, 100
     storm_duration = 12
-    params = model_params.test_model_params()
+    params = pytest_model_params()
 
     # The FloodConvLSTM model expects the data to have been preprocessed, such
     # that it receives the full temporal inputs and a single flood map.
@@ -77,7 +88,7 @@ def test_train():
     """
     batch_size = 16
     height, width = 100, 100
-    params = model_params.test_model_params()
+    params = pytest_model_params()
 
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
     epochs = 2
@@ -103,7 +114,7 @@ def test_early_stopping():
     batch_size = 4
     height, width = 100, 100
     # Set a large number of epochs to increase the odds of triggering early stopping.
-    params = model_params.test_model_params()
+    params = pytest_model_params()
     epochs = 20
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
 
@@ -123,7 +134,7 @@ def test_model_checkpoint():
     """Tests saving and loading a model checkpoint."""
     batch_size = 16
     height, width = 100, 100
-    params = model_params.test_model_params()
+    params = pytest_model_params()
 
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
 

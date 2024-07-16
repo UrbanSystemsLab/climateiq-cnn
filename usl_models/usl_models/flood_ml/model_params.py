@@ -27,14 +27,3 @@ class FloodModelParams:
     optimizer: Any = dataclasses.field(
         default_factory=lambda: tf.keras.optimizers.Adam(learning_rate=1e-3)
     )
-
-
-# Used for testing.
-def test_model_params() -> FloodModelParams:
-    return FloodModelParams(
-        batch_size=4,
-        m_rainfall=3,
-        n_flood_maps=3,
-        lstm_units=32,
-        lstm_kernel_size=3,
-    )
