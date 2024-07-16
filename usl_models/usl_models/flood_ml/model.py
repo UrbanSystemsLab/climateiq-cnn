@@ -2,9 +2,10 @@
 
 import dataclasses
 import logging
-from typing import Optional, TypeAlias, TypedDict
+from typing import TypeAlias, TypedDict, List, Callable
 
 import tensorflow as tf
+import keras
 from keras import layers
 
 from usl_models.flood_ml import constants
@@ -27,6 +28,13 @@ class Input(TypedDict):
 class FloodModel:
     """Flood model class."""
 
+    class Input(TypedDict):
+        """Input tensors dictionary."""
+
+        geospatial: tf.Tensor
+        temporal: tf.Tensor
+        spatiotemporal: tf.Tensor
+
     def __init__(
         self,
         model_params: FloodModelParams,
@@ -44,7 +52,7 @@ class FloodModel:
         self._spatial_dims = spatial_dims
         self._model = self._build_model()
 
-    def _build_model(self) -> tf.keras.Model:
+    def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
         model = FloodConvLSTM(self._model_params, spatial_dims=self._spatial_dims)
         model.compile(
@@ -109,80 +117,36 @@ class FloodModel:
         data = dataclasses.replace(data, spatiotemporal=st_input)
         return data
 
-    def _model_fit(
-        self, data: FloodModelData, early_stopping: Optional[int]
-    ) -> tf.keras.callbacks.History:
-        """Fits the model on a single batch of FloodModelData.
+    def call(self, input: Input) -> tf.Tensor:
+        """Predict the next timestep. See `FloodConvLSTM.call`."""
+        return self._model.call(input)
 
-        Args:
-            data: A FloodModelData object.
-            early_stopping: Optional integer representing the number of epochs to assign
-                as the patience when enabling early stopping. See the train method for
-                more details.
+    def call_n(self, full_input: Input, n: int = 1) -> tf.Tensor:
+        """Predict the next n timesteps. See `FloodConvLSTM.call_n`."""
+        return self._model.call_n(full_input, n=n)
 
-        Returns: A History object containing the training and validation loss
-            and metrics.
-        """
-        inputs = {
-            "spatiotemporal": data.spatiotemporal,
-            "geospatial": data.geospatial,
-            "temporal": data.temporal,
-        }
-        self._model.set_n_predictions(data.storm_duration)
-
-        callbacks = None
-        if early_stopping:
-            es_callback = tf.keras.callbacks.EarlyStopping(
-                monitor="val_loss", mode="min", patience=early_stopping
-            )
-            callbacks = [es_callback]
-
-        history = self._model.fit(
-            inputs,
-            data.labels,
-            batch_size=self._model_params.batch_size,
-            epochs=self._model_params.epochs,
-            validation_split=0.2,
-            callbacks=callbacks,
-        )
-        return history
-
-    def train(
+    def fit(
         self,
-        data: list[FloodModelData],
-        early_stopping: Optional[int] = None,
-    ) -> list[tf.keras.callbacks.History]:
-        """Trains the model.
+        dataset: tf.data.Dataset,
+        epochs: int = 1,
+        steps_per_epoch: int | None = None,
+        early_stopping: int | None = None,
+        callbacks: List[Callable] | None = None,
+    ):
+        """Fit the model to the given dataset."""
+        if callbacks is None:
+            callbacks = []
+        if early_stopping is not None:
+            callbacks.append(
+                keras.callbacks.EarlyStopping(
+                    monitor="loss", mode="min", patience=early_stopping
+                )
+            )
 
-        The internal flood model architecture is restricted to a single storm
-        duration for each training run. In order to train on varying storm durations,
-        the model must be trained incrementally via several `fit` calls.
-        This function provides a wrapper around the incremental training logic,
-        allowing the user to pass in data for multiple storm durations at once
-        via a list of FloodModelData objects.
-
-        Each FloodModelData instance is associated with a single storm duration.
-        In other words, data for different storm durations must be passed in as
-        separate FloodModelData objects.
-
-        Args:
-            data: A list of FloodModelData objects. Labels are required for training.
-            early_stopping: Optional integer representing the number of epochs to assign
-                as the patience when enabling early stopping. The model will stop
-                training if the validation loss doesn't improve after that many
-                epochs, up until the total number of epochs set for training.
-
-        Returns: A list of History objects containing the record of training and,
-            if applicable, validation loss and metrics.
-        """
-        model_history = []
-        processed = [self._validate_and_preprocess_data(x, training=True) for x in data]
-
-        for x in processed:
-            history = self._model_fit(x, early_stopping=early_stopping)
-            model_history.append(history)
-
-        return model_history
+        # Fit the model for this sample
+        return self._model.fit(
+            dataset, epochs=epochs, steps_per_epoch=steps_per_epoch, callbacks=callbacks
+        )
 
     def load_model(self, filepath: str) -> None:
         """Loads weights from an existing file.
@@ -237,14 +201,12 @@ class FloodConvLSTM(tf.keras.Model):
     def __init__(
         self,
         params: FloodModelParams,
-        n_predictions: int = 1,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
     ):
         """Creates the ConvLSTM model.
 
         Args:
             params: A FloodModelParams object of configurable model parameters.
-            n_predictions: The number of predictions to make; storm duration.
             spatial_dims: Tuple of spatial height and width input dimensions.
                 Needed for defining input shapes. This is an optional arg that
                 can be changed (primarily for testing/debugging).
@@ -252,7 +214,6 @@ class FloodConvLSTM(tf.keras.Model):
         super().__init__()
 
         self._params = params
-        self._n_predictions = n_predictions
         self._spatial_height, self._spatial_width = spatial_dims
 
         # Spatiotemporal CNN
@@ -331,16 +292,7 @@ class FloodConvLSTM(tf.keras.Model):
             name="output_cnn",
         )
 
-    def set_n_predictions(self, n_predictions: int) -> None:
-        """Updates n_predictions."""
-        self._n_predictions = n_predictions
-
-    def forward(
-        self,
-        st_input: st_tensor,
-        geo_input: geo_tensor,
-        temp_input: temp_tensor,
-    ) -> tf.Tensor:
+    def call(self, input: FloodModel.Input) -> tf.Tensor:
         """Makes a single forward pass on a batch of data.
 
         The forward pass represents a single prediction on an input batch
@@ -348,30 +300,46 @@ class FloodConvLSTM(tf.keras.Model):
         internal ConvLSTM and ignores autoregressive steps.
 
         Args:
-            st_input: Flood maps tensor of shape [B, n, H, W, 1].
-            geo_input: Geospatial tensor of shape [B, H, W, f].
-            temp_input: Rainfall windows tensor of shape [B, n, m].
+            input: Dictionary containing:
+              - spatiotemporal: Flood maps tensor of shape [B, n, H, W, 1].
+              - geospatial: Geospatial tensor of shape [B, H, W, f].
+              - temporal: Rainfall windows tensor of shape [B, n, m].
 
         Returns:
             The flood map prediction. A tensor of shape [B, H, W, 1].
         """
+        spatiotemporal: tf.Tensor = input["spatiotemporal"]
+        geospatial: tf.Tensor = input["geospatial"]
+        temporal: tf.Tensor = input["temporal"]
+
+        B = spatiotemporal.shape[0]
+        C = 1  # Channel dimension for spatiotemporal tensor
+        F = constants.GEO_FEATURES
+        N = self._params.n_flood_maps
+        M = self._params.m_rainfall
+        H, W = self._spatial_height, self._spatial_width
+
+        tf.ensure_shape(spatiotemporal, (B, N, H, W, C))
+        tf.ensure_shape(geospatial, (B, H, W, F))
+        tf.ensure_shape(temporal, (B, N, M))
+
         # Spatiotemporal CNN
         # [B, n, H, W, 1] -> [B, n, H', W', k1]
-        st_cnn_output = self.st_cnn(st_input)
+        st_cnn_output = self.st_cnn(spatiotemporal)
 
         # Geospatial CNN
         # [B, H, W, f ]-> [B, H', W', k2]
         # Add a new time axis and repeat n times -> [B, n, H', W', k2].
-        geo_cnn_output = self.geo_cnn(geo_input)
+        geo_cnn_output = self.geo_cnn(geospatial)
         geo_cnn_output = geo_cnn_output[:, tf.newaxis, :, :, :]
-        n = st_input.shape[1]
+        n = spatiotemporal.shape[1]
         geo_cnn_output = tf.repeat(geo_cnn_output, [n], axis=1)
 
         # Expand temporal inputs into maps
         # [B, n, m] -> [B, n, H', W', m]
         H_out = st_cnn_output.shape[2]
         W_out = st_cnn_output.shape[3]
-        temp_input = temp_input[:, :, tf.newaxis, tf.newaxis, :]
+        temp_input = temporal[:, :, tf.newaxis, tf.newaxis, :]
         temp_input = tf.tile(temp_input, [1, 1, H_out, W_out, 1])
 
         # Concatenate and feed into remaining ConvLSTM and TransposeConv layers
@@ -382,75 +350,74 @@ class FloodConvLSTM(tf.keras.Model):
 
         return output
 
-    def call(self, inputs: dict[str, tf.Tensor]) -> tf.Tensor:
+    def call_n(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
         """Runs the entire autoregressive model.
 
         Args:
-            inputs: A dictionary of input tensors.
+            full_input: A dictionary of input tensors.
+                While `call` expects only input data for a single context window,
+                `call_n` requires the full temporal tensor.
+            n: Number of autoregressive iterations to run.
 
         Returns:
-            A tensor of all the flood predictions: [B, T, H, W].
+            A tensor of all the flood predictions: [B, n, H, W].
         """
-        st_input = inputs["spatiotemporal"]
-        geo_input = inputs["geospatial"]
-        full_temp_input = inputs["temporal"]
+        spatiotemporal = full_input["spatiotemporal"]
+        geospatial = full_input["geospatial"]
+        temporal = full_input["temporal"]
 
-        # This array stores the initial flood map and the n_predictions.
-        # The initial flood map is added to align indexing between flood maps
-        # and rainfall, i.e., the current flooding conditions and rainfall at
-        # time t are stored at index t along the temporal axis.
-        flood_maps = tf.TensorArray(
-            tf.float32, size=self._n_predictions + 1, clear_after_read=False
-        )
-        flood_maps = flood_maps.write(0, st_input)
+        B = spatiotemporal.shape[0]
+        C = 1  # Channel dimension for spatiotemporal tensor
+        F = constants.GEO_FEATURES
+        N, M = self._params.n_flood_maps, self._params.m_rainfall
+        T_MAX = constants.MAX_RAINFALL_DURATION
+        H, W = self._spatial_height, self._spatial_width
+
+        tf.ensure_shape(spatiotemporal, (B, N, H, W, C))
+        tf.ensure_shape(geospatial, (B, H, W, F))
+        tf.ensure_shape(temporal, (B, T_MAX, M))
+
+        # This array stores the n predictions.
+        predictions = tf.TensorArray(tf.float32, size=n)
 
         # We use 1-indexing for simplicity. Time step t represents the t-th flood
         # prediction.
-        for t in range(1, self._n_predictions + 1):
-            st_input, temp_input = self._update_temporal_inputs(
-                flood_maps, full_temp_input, t
+        for t in range(1, n + 1):
+            input = FloodModel.Input(
+                geospatial=geospatial,
+                temporal=self._get_temporal_window(temporal, t, N),
+                spatiotemporal=spatiotemporal,
             )
-            prediction = self.forward(st_input, geo_input, temp_input)
-            flood_maps = flood_maps.write(t, prediction)
+            prediction = self.call(input)
+            predictions = predictions.write(t - 1, prediction)
 
-        # Concatenate the predictions.
-        # This gathers the predictions along axis 0, so we need to permute the
-        # time (0) and batch (1) axes.
-        predictions = flood_maps.gather(tf.range(1, self._n_predictions + 1))
-        predictions = tf.transpose(predictions, perm=[1, 0, 2, 3, 4])
-        predictions = tf.squeeze(predictions, axis=-1)
+            # Append new predictions along time axis, drop the first.
+            spatiotemporal = tf.concat(
+                [spatiotemporal, tf.expand_dims(prediction, axis=1)], axis=1
+            )[:, 1:]
 
-        # Close the TensorArray and clean up the cached geo_cnn_output.
-        flood_maps.close()
-        self.geo_cnn_output = None
+        # Gather dense tensor out of TensorArray along the time axis.
+        predictions = tf.stack(tf.unstack(predictions.stack()), axis=1)
+        # Drop channels dimension.
+        return tf.squeeze(predictions, axis=-1)
 
-        return predictions
-
-    def _update_temporal_inputs(
-        self, flood_maps: tf.TensorArray, full_temp_input: tf.Tensor, t: int
-    ) -> tuple[tf.Tensor, tf.Tensor]:
-        """Updates temporal inputs for a new time step (prediction).
-
-        Returns the appropriate rainfall and flood map inputs for the t-th
-        prediction. The number n of flood maps and rainfall windows returned is
-        the minimum of self._params.n_flood_maps and t.
+    @staticmethod
+    def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
+        """Returns a zero-padded n-sized window at timestep t.
 
         Args:
-            flood_maps: A TensorArray of all flood maps.
-            full_time_input: The [T, m] tensor of all rainfall windows. This
-                function retrieves the appropriate windows given the time step.
-            t: Time step in the autoregression.
+            temporal: Temporal tensor of shape (B, T_MAX, M)
+            t: timestep to fetch the windows for. At time t, we use at temporal[t-n:t].
+            n: window size
 
         Returns:
-            A tuple of tensors for the flood maps and rainfall, having shapes
-            [n, H, W, 1] and [n, m], respectively.
+            Returns a zero-padded n-sized window at timestep t of shape (B, n, M)
         """
-        n = min(self._params.n_flood_maps, t)
-        step_range = tf.range(t - n, t)
-        # Gather the relevant flood maps. This will stack them along axis 0, so
-        # we need to permute the time (0) and batch (1) axes.
-        st_input = flood_maps.gather(step_range)
-        st_input = tf.transpose(st_input, perm=[1, 0, 2, 3, 4])
-        # Gather the relevant rainfall windows.
-        temp_input = tf.gather(full_temp_input, step_range, axis=1)
-        return (st_input, temp_input)
+        B, _, M = temporal.shape
+        return tf.concat(
+            [
+                tf.zeros(shape=(B, tf.maximum(n - t, 0), M)),
+                temporal[:, tf.maximum(t - n, 0) : t],
+            ],
+            axis=1,
+        )
