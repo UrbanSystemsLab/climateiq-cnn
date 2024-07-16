@@ -415,6 +415,9 @@ class FloodConvLSTM(tf.keras.Model):
         """
         B, _, M = temporal.shape
         return tf.concat(
-            [tf.zeros(shape=(B, tf.maximum(n - t, 0), M)), temporal[:, tf.maximum(t - n, 0) : t]],
+            [
+                tf.zeros(shape=(B, tf.maximum(n - t, 0), M)),
+                temporal[:, tf.maximum(t - n, 0) : t],
+            ],
             axis=1,
         )
