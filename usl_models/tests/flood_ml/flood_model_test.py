@@ -162,7 +162,7 @@ def test_model_checkpoint():
 def test_get_temporal_window():
     """Tests copmuting the temporal window."""
     B, T_MAX, M = 1, 8, 6
-    temporal = tf.constant([[[t] * M for t in range(T_MAX)]], dtype=tf.float32)
+    temporal = tf.constant([[[t + 1] * M for t in range(T_MAX)]], dtype=tf.float32)
 
     t = 3  # Timestep
     n = 5  # Window size
@@ -172,9 +172,9 @@ def test_get_temporal_window():
         [
             np.zeros((M)),
             np.zeros((M)),
-            np.zeros((M)),
             [1, 1, 1, 1, 1, 1],
             [2, 2, 2, 2, 2, 2],
+            [3, 3, 3, 3, 3, 3],
         ],
     ]
     np.testing.assert_array_equal(actual, expected)
