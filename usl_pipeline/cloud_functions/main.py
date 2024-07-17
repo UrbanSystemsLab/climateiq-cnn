@@ -175,20 +175,24 @@ def build_and_upload_study_area_chunk(
             study_area_chunk_bucket = storage_client.bucket(
                 cloud_storage.STUDY_AREA_CHUNKS_BUCKET
             )
+            # TODO: Consider cheaper alt: `copy_blob()` here since file is a straight
+            # copy
             study_area_chunk_bucket.blob(str(file_name)).upload_from_file(fd)
 
             # File names should be in the form <study_area_name>/<file_name>
             study_area_name = file_name.parent.name
 
+            fd.seek(0)  # Seek to the beginning so the file can be read.
             nc_bytes = fd.read()
+            # create a netCDF in-memory dataset from the bytes object.
             with netCDF4.Dataset("in_memory.nc", memory=nc_bytes) as ds:
                 study_area = metastore.StudyArea(
                     name=study_area_name,
                     # Grid dimension will always be 200x200 for all cities
                     col_count=200,
                     row_count=200,
-                    x_ll_corner=ds.getncattr("corner_lons")[0],
-                    y_ll_corner=ds.getncattr("corner_lats")[0],
+                    x_ll_corner=float(ds.getncattr("corner_lons")[0]),
+                    y_ll_corner=float(ds.getncattr("corner_lats")[0]),
                     # https://www2.mmm.ucar.edu/wrf/users/namelist_best_prac_wps.html#dx_dy
                     cell_size=int(ds.getncattr("DX")),
                     # https://www2.mmm.ucar.edu/wrf/users/namelist_best_prac_wps.html#map_proj
@@ -1026,8 +1030,11 @@ def _write_wps_chunk_metastore_entry(
     db = firestore.Client()
     study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
 
+    # Remove unsupported characters for firestore
+    doc_id = chunk_name.replace(".", "_").replace(":", "_")
+
     metastore.StudyAreaTemporalChunk(
-        id_=chunk_name,
+        id_=doc_id,
         raw_path=f"gs://{chunk_blob.bucket.name}/{chunk_blob.name}",
         feature_matrix_path=f"gs://{feature_blob.bucket.name}/{feature_blob.name}",
         time=metadata.time,
