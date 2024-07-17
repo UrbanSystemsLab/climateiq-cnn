@@ -2,7 +2,7 @@
 
 import dataclasses
 import logging
-from typing import Any, TypeAlias, TypedDict, List, Callable
+from typing import TypeAlias, TypedDict, List, Callable
 
 import tensorflow as tf
 import keras
@@ -43,7 +43,7 @@ class FloodModel:
         """Creates the flood model.
 
         Args:
-            model_params: A FloodModelParams object of configurable model parameters.
+            model_params: A dictionary of configurable model parameters.
             spatial_dims: Tuple of spatial height and width input dimensions.
                 Needed for defining input shapes. This is an optional arg that
                 can be changed (primarily for testing/debugging).
@@ -55,12 +55,11 @@ class FloodModel:
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
         model = FloodConvLSTM(
-            # Pass FloodModelParams as a dictionary to ensure the model is serializable.
-            dataclasses.asdict(self._model_params),
+            self._model_params,
             spatial_dims=self._spatial_dims,
         )
         model.compile(
-            optimizer=tf.keras.optimizers.get(self._model_params.optimizer_config),
+            optimizer=tf.keras.optimizers.get(self._model_params["optimizer_config"]),
             loss=tf.keras.losses.MeanSquaredError(),
             metrics=[
                 tf.keras.metrics.MeanAbsoluteError(),
@@ -101,14 +100,14 @@ class FloodModel:
         # Check whether the temporal data is already windowed. If it is, checks
         # the expected shape. Otherwise, create the window view.
         if tf.rank(data.temporal) == 3:  # windowed: (B, T_max, m)
-            assert data.temporal.shape[-1] == self._model_params.m_rainfall, (
+            assert data.temporal.shape[-1] == self._model_params["m_rainfall"], (
                 "Mismatch between the temporal data window size "
                 f"({data.temporal.shape[-1]}) and the expected window size "
-                f"(m = {self._model_params.m_rainfall})."
+                f"(m = {self._model_params['m_rainfall']})."
             )
         else:
             full_temp_input = data_utils.temporal_window_view(
-                data.temporal, self._model_params.m_rainfall
+                data.temporal, self._model_params["m_rainfall"]
             )
             data = dataclasses.replace(data, temporal=full_temp_input)
 
@@ -204,22 +203,20 @@ class FloodConvLSTM(tf.keras.Model):
 
     def __init__(
         self,
-        params: dict[str, Any],
+        params: FloodModelParams,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
     ):
         """Creates the ConvLSTM model.
 
         Args:
-            params: A dictionary representation of a FloodModelParams object for
-                configurable model parameters. We take a dictionary rather than a
-                FloodModelParams object to ensure the model is serializable.
+            params: A dictionary of configurable model parameters.
             spatial_dims: Tuple of spatial height and width input dimensions.
                 Needed for defining input shapes. This is an optional arg that
                 can be changed (primarily for testing/debugging).
         """
         super().__init__()
 
-        self._params = model_params.FloodModelParams(**params)
+        self._params = params
         self._spatial_height, self._spatial_width = spatial_dims
 
         # Spatiotemporal CNN
@@ -264,7 +261,7 @@ class FloodConvLSTM(tf.keras.Model):
         # and the rainfall window size.
         conv_lstm_height = self._spatial_height // 4
         conv_lstm_width = self._spatial_width // 4
-        conv_lstm_channels = 16 + 64 + self._params.m_rainfall
+        conv_lstm_channels = 16 + 64 + self._params["m_rainfall"]
         self.conv_lstm = tf.keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
@@ -272,13 +269,13 @@ class FloodConvLSTM(tf.keras.Model):
                     (None, conv_lstm_height, conv_lstm_width, conv_lstm_channels)
                 ),
                 layers.ConvLSTM2D(
-                    self._params.lstm_units,
-                    self._params.lstm_kernel_size,
+                    self._params["lstm_units"],
+                    self._params["lstm_kernel_size"],
                     strides=1,
                     padding="same",
                     activation="tanh",
-                    dropout=self._params.lstm_dropout,
-                    recurrent_dropout=self._params.lstm_recurrent_dropout,
+                    dropout=self._params["lstm_dropout"],
+                    recurrent_dropout=self._params["lstm_recurrent_dropout"],
                 ),
             ],
             name="conv_lstm",
@@ -290,7 +287,7 @@ class FloodConvLSTM(tf.keras.Model):
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
-                    (conv_lstm_height, conv_lstm_width, self._params.lstm_units)
+                    (conv_lstm_height, conv_lstm_width, self._params["lstm_units"])
                 ),
                 layers.Conv2DTranspose(8, 4, strides=4, **output_cnn_params),
                 layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params),
@@ -321,8 +318,8 @@ class FloodConvLSTM(tf.keras.Model):
         B = spatiotemporal.shape[0]
         C = 1  # Channel dimension for spatiotemporal tensor
         F = constants.GEO_FEATURES
-        N = self._params.n_flood_maps
-        M = self._params.m_rainfall
+        N = self._params["n_flood_maps"]
+        M = self._params["m_rainfall"]
         H, W = self._spatial_height, self._spatial_width
 
         tf.ensure_shape(spatiotemporal, (B, N, H, W, C))
@@ -375,7 +372,7 @@ class FloodConvLSTM(tf.keras.Model):
         B = spatiotemporal.shape[0]
         C = 1  # Channel dimension for spatiotemporal tensor
         F = constants.GEO_FEATURES
-        N, M = self._params.n_flood_maps, self._params.m_rainfall
+        N, M = self._params["n_flood_maps"], self._params["m_rainfall"]
         T_MAX = constants.MAX_RAINFALL_DURATION
         H, W = self._spatial_height, self._spatial_width
 

@@ -1,7 +1,5 @@
 """Tests for Atmo model."""
 
-import dataclasses
-
 import tensorflow as tf
 
 from usl_models.atmo_ml import model as atmo_model
@@ -16,12 +14,16 @@ _TEST_SPATIOTEMPORAL_FEATURES = 6
 
 def pytest_model_params() -> model_params.AtmoModelParams:
     """Defines AtmoModelParams for testing."""
-    return model_params.AtmoModelParams(
-        batch_size=4,
-        lstm_units=32,
-        lstm_kernel_size=3,
-        epochs=1,
+    params = model_params.default_params()
+    params.update(
+        {
+            "batch_size": 4,
+            "lstm_units": 32,
+            "lstm_kernel_size": 3,
+            "epochs": 1,
+        }
     )
+    return params
 
 
 def fake_input_batch(
@@ -67,7 +69,7 @@ def test_atmo_convlstm():
     fake_input = fake_input_batch(batch_size)
 
     model = atmo_model.AtmoConvLSTM(
-        dataclasses.asdict(params),
+        params,
         spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
         num_spatial_features=_TEST_SPATIAL_FEATURES,
         num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
