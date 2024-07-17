@@ -116,13 +116,15 @@ def train(model, dataset):
 with strategy.scope():
     # Creation of dataset, and model building/compiling need to be within
     # `strategy.scope()`.
+
+    model_params = usl_models.flood_ml.model_params.default_params()
+    if args.batch_size is not None:
+        model_params["batch_size"] = args.batch_size
+    model = usl_models.flood_ml.model.FloodModel(model_params=model_params)
+
     kwargs = {}
     if args.batch_size is not None:
         kwargs["batch_size"] = args.batch_size
-    model_params = usl_models.flood_ml.model_params.FloodModelParams(**kwargs)
-
-    model = usl_models.flood_ml.model.FloodModel(model_params=model_params)
-
     dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
         sim_names=args.sim_names,
         firestore_client=firestore.Client(project="climateiq"),
