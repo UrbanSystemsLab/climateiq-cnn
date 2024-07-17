@@ -41,45 +41,58 @@ class FloodModelPredictor(Predictor):
         for output_name, output_tensor in serving_signature.structured_outputs.items():
             print(f"  {output_name}: {output_tensor.shape}")
 
-    def preprocess(self, gcs_url: str) -> dict:
-        """Loads data from a JSONL file in a GCS bucket into a NumPy dictionary.
+
+    def preprocess(self, input_data) -> dict:
+        """Loads and preprocesses data from either a GCS URL or a dictionary of instances.
 
         Args:
-            gcs_url: The GCS URL of the JSONL file (e.g., "gs://your-bucket/your-file.jsonl").
+            input_data: Either a GCS URL string or a dictionary containing an "instances" key with a list of instances.
 
         Returns:
-            A dictionary where keys are the field names from the JSONL file (e.g., 'geospatial', 'temporal', 'spatiotemporal')
+            A dictionary where keys are the field names (e.g., 'geospatial', 'temporal', 'spatiotemporal')
             and values are NumPy arrays with a batch dimension added.
         """
         data = {}
 
-        # Initialize a GCS client
-        storage_client = storage.Client()
+        if isinstance(input_data, str) and input_data.startswith("gs://"):
+            # Input is a GCS URL
+            storage_client = storage.Client()
 
-        # Parse the GCS URL
-        bucket_name = gcs_url[5:].split('/')[0]
-        blob_name = '/'.join(gcs_url[5:].split('/')[1:])
+            # Parse the GCS URL
+            bucket_name = input_data[5:].split('/')[0]
+            blob_name = '/'.join(input_data[5:].split('/')[1:])
 
-        # Get the bucket and blob
-        bucket = storage_client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
+            # Get the bucket and blob
+            bucket = storage_client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
 
-        # Download the blob content as a string
-        blob_string = blob.download_as_string().decode('utf-8')
+            # Download the blob content as a string
+            blob_string = blob.download_as_string().decode('utf-8')
 
-        # Iterate over lines in the blob string
-        for line_num, line in enumerate(blob_string.splitlines()):
-            item = json.loads(line)
+            # Iterate over lines in the blob string
+            for line_num, line in enumerate(blob_string.splitlines()):
+                item = json.loads(line)
 
-            # Create NumPy arrays and add batch dimension directly
+                # Create NumPy arrays and add batch dimension directly
+                for key in ['geospatial', 'temporal', 'spatiotemporal']:
+                    arr = np.array(item[key], dtype=np.float32)
+                    arr = np.expand_dims(arr, axis=0)
+
+                    if key in data:
+                        data[key] = np.concatenate([data[key], arr], axis=0)
+                    else:
+                        data[key] = arr
+
+        elif isinstance(input_data, dict) and "instances" in input_data:
+            # Input is a dictionary of instances
+            instances = input_data["instances"]
+
+            # Batch the instances
             for key in ['geospatial', 'temporal', 'spatiotemporal']:
-                arr = np.array(item[key], dtype=np.float32)
-                arr = np.expand_dims(arr, axis=0)
+                data[key] = np.stack([np.array(instance[key], dtype=np.float32) for instance in instances], axis=0)
 
-                if key in data:
-                    data[key] = np.concatenate([data[key], arr], axis=0)
-                else:
-                    data[key] = arr
+        else:
+            raise ValueError("Invalid input_data format. Expected a GCS URL or a dictionary with 'instances'.")
 
         # Print shapes for debugging
         print("Loaded data shapes:")
@@ -88,7 +101,6 @@ class FloodModelPredictor(Predictor):
 
         return data
 
-    
     @staticmethod
     def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
         """Returns a zero-padded n-sized window at timestep t."""
