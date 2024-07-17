@@ -47,7 +47,8 @@ six==1.16.0
 tensorboard==2.16.2
 tensorboard-data-server==0.7.2
 tensorflow==2.16.1
-tensorflow-io-gcs-filesystem==0.36.0
+# This package is not available on Windows
+tensorflow-io-gcs-filesystem==0.36.0; sys_platform == "linux"
 termcolor==2.4.0
 typing_extensions==4.11.0
 urllib3==2.2.1
