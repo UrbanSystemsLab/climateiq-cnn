@@ -8,6 +8,7 @@ from google.cloud.aiplatform.prediction.predictor import Predictor
 from google.cloud import storage
 from usl_models.flood_ml.model import FloodModel, constants
 
+
 class FloodModelPredictor(Predictor):
     def __init__(self):
         """Initializes the FloodModelPredictor."""
@@ -192,3 +193,7 @@ class FloodModelPredictor(Predictor):
             The postprocessed prediction results.
         """
         return {tf.math.reduce_max(prediction_results, axis=1)}
+    
+    def health(self):
+     return 'Healthy', 200, {'Content-Type': 'text/plain'}
+
