@@ -14,12 +14,16 @@ _TEST_SPATIOTEMPORAL_FEATURES = 6
 
 def pytest_model_params() -> model_params.AtmoModelParams:
     """Defines AtmoModelParams for testing."""
-    return model_params.AtmoModelParams(
-        batch_size=4,
-        lstm_units=32,
-        lstm_kernel_size=3,
-        epochs=1,
+    params = model_params.default_params()
+    params.update(
+        {
+            "batch_size": 4,
+            "lstm_units": 32,
+            "lstm_kernel_size": 3,
+            "epochs": 1,
+        }
     )
+    return params
 
 
 def fake_input_batch(

@@ -56,7 +56,7 @@ class AtmoConvLSTM(tf.keras.Model):
         """Creates the Atmo ConvLSTM model.
 
         Args:
-            params: An object of configurable model parameters.
+            params: An dictionary of configurable model parameters.
             spatial_dims: Tuple of spatial height and width input dimensions.
                 Needed for defining input shapes.
             num_spatial_features: Total dimensionality of the spatial features.
@@ -130,14 +130,14 @@ class AtmoConvLSTM(tf.keras.Model):
                     (None, conv_lstm_height, conv_lstm_width, conv_lstm_channels)
                 ),
                 layers.ConvLSTM2D(
-                    self._params.lstm_units,
-                    self._params.lstm_kernel_size,
+                    self._params["lstm_units"],
+                    self._params["lstm_kernel_size"],
                     return_sequences=True,
                     strides=1,
                     padding="same",
                     activation="tanh",
-                    dropout=self._params.lstm_dropout,
-                    recurrent_dropout=self._params.lstm_recurrent_dropout,
+                    dropout=self._params["lstm_dropout"],
+                    recurrent_dropout=self._params["lstm_recurrent_dropout"],
                 ),
             ],
             name="conv_lstm",
@@ -151,7 +151,7 @@ class AtmoConvLSTM(tf.keras.Model):
             None,
             conv_lstm_height,
             conv_lstm_width,
-            self._params.lstm_units // 2,
+            self._params["lstm_units"] // 2,
         )
 
         # Output: T2 (2m temperature)

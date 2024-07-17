@@ -12,13 +12,17 @@ from tests.flood_ml.mock_dataset import mock_dataset
 
 def pytest_model_params() -> model_params.FloodModelParams:
     """Defines FloodModelParams for testing."""
-    return model_params.FloodModelParams(
-        batch_size=4,
-        m_rainfall=3,
-        n_flood_maps=3,
-        lstm_units=32,
-        lstm_kernel_size=3,
+    params = model_params.default_params()
+    params.update(
+        {
+            "batch_size": 4,
+            "m_rainfall": 3,
+            "n_flood_maps": 3,
+            "lstm_units": 32,
+            "lstm_kernel_size": 3,
+        }
     )
+    return params
 
 
 def test_convlstm_call():
