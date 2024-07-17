@@ -1,6 +1,6 @@
 import os
 
-from google.cloud import firestore
+from google.cloud import firestore  # type:ignore[attr-defined]
 import pytest
 import requests
 

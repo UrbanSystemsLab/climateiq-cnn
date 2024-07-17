@@ -1,7 +1,7 @@
 from typing import Any, Sequence, TypeVar
 import urllib.parse
 
-from google.cloud import firestore
+from google.cloud import firestore  # type:ignore[attr-defined]
 
 
 def get_temporal_feature_metadata(

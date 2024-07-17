@@ -5,8 +5,8 @@ import random
 from typing import Iterator, Optional, Tuple
 import urllib.parse
 
-from google.cloud import firestore
-from google.cloud import storage
+from google.cloud import firestore  # type:ignore[attr-defined]
+from google.cloud import storage  # type:ignore[attr-defined]
 import numpy
 from numpy.typing import NDArray
 import tensorflow as tf
