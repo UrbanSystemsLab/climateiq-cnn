@@ -5,6 +5,7 @@ import pytest
 import requests
 
 from usl_models.flood_ml import metastore
+from usl_models.flood_ml import model_params
 
 _GCP_PROJECT_ID = "integation-test"
 
@@ -320,3 +321,21 @@ def test_get_label_chunk_metadata_missing_features(firestore_db) -> None:
         )
 
     assert "Indices missing from features: (0, 1)" in str(excinfo.value)
+
+
+def test_write_model_metadata(firestore_db) -> None:
+    id_ = metastore.write_model_metadata(
+        firestore_db,
+        "gs://the/model",
+        ["sim-1", "sim-2"],
+        model_params.default_params(),
+    )
+    result = firestore_db.collection("models").document(id_).get().to_dict()
+    # We won't know what time it is, just make sure it's present.
+    assert "trained_at_utc" in result
+    assert result["gcs_model_dir"] == "gs://the/model"
+    assert result["model_params"] == model_params.default_params()
+    assert result["trained_on"] == [
+        firestore_db.collection("simulations").document("sim-1"),
+        firestore_db.collection("simulations").document("sim-2"),
+    ]

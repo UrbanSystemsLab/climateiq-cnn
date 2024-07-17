@@ -165,16 +165,14 @@ class FloodModel:
         self._model.load_weights(filepath)
         logging.info("Loaded model weights from %s", filepath)
 
-    def save_model(self, filepath: str, overwrite: bool = False) -> None:
+    def save_model(self, filepath: str, **kwargs) -> None:
         """Saves a .keras model to the specified path.
 
         Args:
             filepath: Path to which to save the model. Must end in ".keras".
-            overwrite: If True and the specified filepath already exists, the model
-                will overwrite the existing file. Otherwise, the user will be prompted
-                on whether to overwrite any existing model.
+            kwargs: Additional arguments to pass to keras' model.save method.
         """
-        self._model.save(filepath, overwrite=overwrite)
+        self._model.save(filepath, **kwargs)
         logging.info("Saved model to %s", filepath)
 
 
