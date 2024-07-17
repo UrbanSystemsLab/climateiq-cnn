@@ -1,4 +1,4 @@
-import logging
+import json
 
 import numpy as np
 import tensorflow as tf
@@ -10,12 +10,9 @@ from usl_models.flood_ml.model import FloodModel, constants
 
 
 class FloodModelPredictor(Predictor):
-    """Default Predictor implementation for Sklearn models."""
-
     def __init__(self):
         """Initializes the FloodModelPredictor."""
         self._model = None
-        logging.basicConfig(level=logging.INFO)
 
     def load(self, artifacts_uri: str) -> None:
         """Loads the model artifact.
@@ -28,13 +25,10 @@ class FloodModelPredictor(Predictor):
             ValueError: If there's no required model files provided in the artifacts
                 uri.
         """
-        #prediction_utils.download_model_artifacts(artifacts_uri)
-         # Load the saved model
-        #loaded_model = tf.saved_model.load('model')
-        loaded_model = tf.saved_model.load('flood_model_tf213_local_1')
+        prediction_utils.download_model_artifacts(artifacts_uri)
+        # Load the saved model
+        loaded_model = tf.saved_model.load('model')
 
-        # model_params = FloodModelParams()  # You may need to adjust this
-        # self._model = FloodModel(model_params)
         self._model = loaded_model
 
         # Get the serving_default signature
@@ -48,16 +42,37 @@ class FloodModelPredictor(Predictor):
         for output_name, output_tensor in serving_signature.structured_outputs.items():
             print(f"  {output_name}: {output_tensor.shape}")
 
-    def preprocess(self, prediction_input: dict) -> np.ndarray:
+    def preprocess(self, file_path: str) -> np.ndarray:
         """Converts the request body to a numpy array before prediction.
         Args:
-            prediction_input (dict):
-                Required. The prediction input that needs to be preprocessed.
+            file_path:
+                Required. The GCS url of the jsonl file containing instances (unbatched).
         Returns:
-            The preprocessed prediction input.
+            Dictionary containing inputs to the model. The tensors will be batched equal to
+            number of lines in the file.
         """
-        instances = prediction_input["instances"]
-        return instances
+        data = {}  # Initialize an empty dictionary
+
+        with open(file_path, 'r') as file:
+            for line_num, line in enumerate(file):  # Enumerate to keep track of line number (batch index)
+                item = json.loads(line)
+                
+                # Create NumPy arrays and add batch dimension directly
+                for key in ['geospatial', 'temporal', 'spatiotemporal']:
+                    arr = np.array(item[key], dtype=np.float32)
+                    arr = np.expand_dims(arr, axis=0)  # Add batch dimension 
+                    
+                    if key in data:
+                        data[key] = np.concatenate([data[key], arr], axis=0) 
+                    else:
+                        data[key] = arr
+
+        # Print shapes for debugging
+        print("Loaded data shapes:")
+        for key, value in data.items():
+            print(f"{key}: {value.shape}")
+
+        return data
     
     @staticmethod
     def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
@@ -76,11 +91,11 @@ class FloodModelPredictor(Predictor):
             axis=1
         )
 
-    def predict(self, full_input, n=1):
+    def predict(self, data: dict, n=1):
         """Runs the entire autoregressive model.
 
             Args:
-                full_input: A dictionary of input tensors.
+                data: A dictionary of input tensors.
                     While `call` expects only input data for a single context window,
                     `call_n` requires the full temporal tensor.
                 n: Number of autoregressive iterations to run.
@@ -92,9 +107,9 @@ class FloodModelPredictor(Predictor):
             raise ValueError("Model not loaded. Call load() first.")
 
         try:
-            spatiotemporal = full_input["spatiotemporal"]
-            geospatial = full_input["geospatial"]
-            temporal = full_input["temporal"]
+            spatiotemporal = data["spatiotemporal"]
+            geospatial = data["geospatial"]
+            temporal = data["temporal"]
 
             B = spatiotemporal.shape[0]
             C = 1  # Channel dimension for spatiotemporal tensor
@@ -109,7 +124,6 @@ class FloodModelPredictor(Predictor):
 
             # This array stores the n predictions.
             predictions = tf.TensorArray(tf.float32, size=n)
-            print("Prediction size: ", predictions.size())
 
             # We use 1-indexing for simplicity. Time step t represents the t-th flood
             # prediction.
@@ -127,14 +141,15 @@ class FloodModelPredictor(Predictor):
                 prediction = prediction_dict['output_1']
 
                 predictions = predictions.write(t - 1, prediction)
-                print("Prediction shape: ", prediction.shape)
+                
 
                 # Append new predictions along time axis, drop the first.
                 spatiotemporal = tf.concat(
                     [spatiotemporal, tf.expand_dims(prediction, axis=1)], axis=1
                 )[:, 1:]
 
-            predictions = tf.stack(tf.unstack(predictions.stack(), num=n ),axis=1)
+            predictions = tf.stack(tf.unstack(predictions.stack()),axis=1)
+            print("Prediction shape (before sequeeze): ", predictions.shape)
             # Drop channels dimension.
             return tf.squeeze(predictions, axis=-1)
 
@@ -149,4 +164,4 @@ class FloodModelPredictor(Predictor):
         Returns:
             The postprocessed prediction results.
         """
-        return {tf.math.reduce_max(prediction_results, axis=0)}
+        return {tf.math.reduce_max(prediction_results, axis=1)}
