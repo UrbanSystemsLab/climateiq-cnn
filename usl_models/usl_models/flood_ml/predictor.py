@@ -3,11 +3,10 @@ import json
 import numpy as np
 import tensorflow as tf
 
-from google.cloud.aiplatform.constants import prediction
 from google.cloud.aiplatform.utils import prediction_utils
 from google.cloud.aiplatform.prediction.predictor import Predictor
+from google.cloud import storage
 from usl_models.flood_ml.model import FloodModel, constants
-
 
 class FloodModelPredictor(Predictor):
     def __init__(self):
@@ -42,30 +41,45 @@ class FloodModelPredictor(Predictor):
         for output_name, output_tensor in serving_signature.structured_outputs.items():
             print(f"  {output_name}: {output_tensor.shape}")
 
-    def preprocess(self, file_path: str) -> np.ndarray:
-        """Converts the request body to a numpy array before prediction.
-        Args:
-            file_path:
-                Required. The GCS url of the jsonl file containing instances (unbatched).
-        Returns:
-            Dictionary containing inputs to the model. The tensors will be batched equal to
-            number of lines in the file.
-        """
-        data = {}  # Initialize an empty dictionary
+    def preprocess(self, gcs_url: str) -> dict:
+        """Loads data from a JSONL file in a GCS bucket into a NumPy dictionary.
 
-        with open(file_path, 'r') as file:
-            for line_num, line in enumerate(file):  # Enumerate to keep track of line number (batch index)
-                item = json.loads(line)
-                
-                # Create NumPy arrays and add batch dimension directly
-                for key in ['geospatial', 'temporal', 'spatiotemporal']:
-                    arr = np.array(item[key], dtype=np.float32)
-                    arr = np.expand_dims(arr, axis=0)  # Add batch dimension 
-                    
-                    if key in data:
-                        data[key] = np.concatenate([data[key], arr], axis=0) 
-                    else:
-                        data[key] = arr
+        Args:
+            gcs_url: The GCS URL of the JSONL file (e.g., "gs://your-bucket/your-file.jsonl").
+
+        Returns:
+            A dictionary where keys are the field names from the JSONL file (e.g., 'geospatial', 'temporal', 'spatiotemporal')
+            and values are NumPy arrays with a batch dimension added.
+        """
+        data = {}
+
+        # Initialize a GCS client
+        storage_client = storage.Client()
+
+        # Parse the GCS URL
+        bucket_name = gcs_url[5:].split('/')[0]
+        blob_name = '/'.join(gcs_url[5:].split('/')[1:])
+
+        # Get the bucket and blob
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+
+        # Download the blob content as a string
+        blob_string = blob.download_as_string().decode('utf-8')
+
+        # Iterate over lines in the blob string
+        for line_num, line in enumerate(blob_string.splitlines()):
+            item = json.loads(line)
+
+            # Create NumPy arrays and add batch dimension directly
+            for key in ['geospatial', 'temporal', 'spatiotemporal']:
+                arr = np.array(item[key], dtype=np.float32)
+                arr = np.expand_dims(arr, axis=0)
+
+                if key in data:
+                    data[key] = np.concatenate([data[key], arr], axis=0)
+                else:
+                    data[key] = arr
 
         # Print shapes for debugging
         print("Loaded data shapes:")
@@ -73,6 +87,7 @@ class FloodModelPredictor(Predictor):
             print(f"{key}: {value.shape}")
 
         return data
+
     
     @staticmethod
     def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
