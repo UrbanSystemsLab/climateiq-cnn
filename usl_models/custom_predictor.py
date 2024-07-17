@@ -27,6 +27,22 @@ def create_cotainer():
         predictor=PREDICTOR_CLASS,
         requirements_path=PATH_TO_REQUIREMENTS_TXT
     )
+    print(local_model.get_serving_container_spec())
+
+    return local_model
+
+def deploy_locally(BUCKET_URI, MODEL_ARTIFACT_DIR, INPUT_FILE):
+    local_model = create_cotainer()
+    with local_model.deploy_to_local_endpoint(
+    artifact_uri=f"{BUCKET_URI}/{MODEL_ARTIFACT_DIR}"
+     ) as local_endpoint:
+        predict_response = local_endpoint.predict(
+            request_file=INPUT_FILE,
+            headers={"Content-Type": "application/json"},
+        )
+    print(predict_response.json())
+    local_endpoint.stop()
+
 
 def tensor_to_json_serializable(tensor):
     if isinstance(tensor, tf.Tensor):
@@ -36,12 +52,8 @@ def tensor_to_json_serializable(tensor):
     else:
         return tensor
 
-def create_jsonl_file():
-    sim_names = ["Manhattan-config_v1/Rainfall_Data_1.txt", "Manhattan-config_v1/Rainfall_Data_2.txt"]
-    batch_size = 0 # On A100, use batch_size = 4
-    # dataset = load_dataset_windowed(sim_names, batch_size=batch_size, max_chunks=8,
-    #                                 firestore_client=firestore.Client(project='climateiq-test'),
-    #                                 storage_client=storage.Client(project='climateiq-test'))
+def create_jsonl_file(sim_names: list):
+    batch_size = 0 
     dataset = load_dataset(sim_names, batch_size=batch_size, max_chunks=8,
                                      firestore_client=firestore.Client(project='climateiq-test'),
                                      storage_client=storage.Client(project='climateiq-test'))
@@ -95,20 +107,34 @@ def load_jsonl_to_numpy(file_path):
 
 def main():
     from usl_models.flood_ml.predictor import FloodModelPredictor 
-
-    n = 9
-
     predictor = FloodModelPredictor()
-    #create_jsonl_file()
+    sim_names = ["Manhattan-config_v1/Rainfall_Data_1.txt", "Manhattan-config_v1/Rainfall_Data_2.txt"]
+    use_local = False
+    model_gcs_url = "gs://climateiq-vertexai/aiplatform-custom-training-2024-07-16-17:40:15.640/"
+    # create prediction container
+    #create_cotainer()
+    # # load model , model can be in GCS or local, present in "model" directory
+    
+    # #create_jsonl_file(sim_names=sim_names)
 
-    #predictor.load("gs://climateiq-vertexai/aiplatform-custom-training-2024-07-15-13:32:01.898/")
-    predictor.load('./flood_model_tf213_local_1/')
+    # if not use_local:
+    #     predictor.load(model_gcs_url)
+    # else:
+    #     predictor.load('model/')
 
-    # Usage
-    file_path = 'batch_pred_6.jsonl'
-    instances = load_jsonl_to_numpy(file_path)
+    # # # load unbatched input data and batch, this is typically done by Vertex
+    # batch_data_file = "batch_pred_6.jsonl"
+    # instances = load_jsonl_to_numpy(batch_data_file)
+    
+    # # call predict
+    # n = 9
+    # predictor.predict(instances, n)
+    
+    BUCKET_URI="gs://climateiq-vertexai"
+    MODEL_ARTIFACT_DIR="aiplatform-custom-training-2024-07-16-17:40:15.640"
+    INPUT_FILE="batch_pred_6.jsonl"
 
-    predictor.predict(instances, n)
+    deploy_locally(BUCKET_URI, MODEL_ARTIFACT_DIR, INPUT_FILE)
 
 if __name__ == "__main__":
     main()
