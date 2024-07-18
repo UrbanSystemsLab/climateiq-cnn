@@ -87,6 +87,7 @@ def load_dataset(
                     ),
                     dtype=tf.float32,
                 ),
+                n = tf.TensorSpec(shape=(), dtype=tf.int32)
             ),
             tf.TensorSpec(
                 shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
@@ -241,6 +242,9 @@ def _iter_model_inputs(
         firestore_client, storage_client, sim_name
     )
 
+    rainfall_config = metastore.get_temporal_feature_metadata(firestore_client, sim_name)
+    rainfall = rainfall_config["rainfall_duration"]
+
     for i, (geospatial, labels) in enumerate(feature_label_gen):
         if max_chunks is not None and i >= max_chunks:
             return
@@ -256,6 +260,7 @@ def _iter_model_inputs(
                     1,
                 )
             ),
+            n = rainfall
         )
         yield model_input, labels
 
