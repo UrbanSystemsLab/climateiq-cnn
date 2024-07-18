@@ -153,7 +153,7 @@ def main():
     use_local = False
     # model_gcs_url = "gs://climateiq-vertexai/aiplatform-custom-training-2024-07-16-17:40:15.640/"
     # create prediction container
-    create_cotainer()
+    #create_cotainer()
     # # load model , model can be in GCS or local, present in "model" directory
     # predictor.load(model_gcs_url)
     # #create_jsonl_file(sim_names=sim_names)
@@ -173,9 +173,9 @@ def main():
     
     BUCKET_URI="gs://climateiq-vertexai"
     MODEL_ARTIFACT_DIR="aiplatform-custom-training-2024-07-16-17:40:15.640"
-    INPUT_FILE="gs://flood_ml_batch_input/batch_pred_josiahkp.jsonl"
+    INPUT_FILE="./batch_pred_6.jsonl"
 
-    #deploy_locally(BUCKET_URI, MODEL_ARTIFACT_DIR, INPUT_FILE)
+    deploy_locally(BUCKET_URI, MODEL_ARTIFACT_DIR, INPUT_FILE)
 
 if __name__ == "__main__":
     main()
