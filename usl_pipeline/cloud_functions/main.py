@@ -179,8 +179,9 @@ def build_and_upload_study_area_chunk(
             # copy
             study_area_chunk_bucket.blob(str(file_name)).upload_from_file(fd)
 
-            # File names should be in the form <study_area_name>/<file_name>
-            study_area_name = file_name.parent.name
+            # File names can be in the form <study_area_name>/<file_name>
+            # or <study_area_name>/<some_sub_folder>/<file_name>
+            study_area_name = file_name.parts[0]
 
             fd.seek(0)  # Seek to the beginning so the file can be read.
             nc_bytes = fd.read()
@@ -1028,9 +1029,16 @@ def _write_wps_chunk_metastore_entry(
       metadata: Additional metadata describing the features.
     """
     db = firestore.Client()
-    study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
 
-    # Remove unsupported characters for firestore
+    # Pick out the study_area and file/chunk name from GCS path
+    # File names can be in the form <study_area_name>/<file_name>
+    # or <study_area_name>/<some_sub_folder>/<file_name>
+    file_path = pathlib.PurePosixPath(chunk_blob.name)
+    file_path_parts = file_path.parts
+    study_area_name = file_path_parts[0]
+    chunk_name = file_path.stem  # name of file w/o extension
+
+    # Sanitize unsupported characters for firestore
     doc_id = chunk_name.replace(".", "_").replace(":", "_")
 
     metastore.StudyAreaTemporalChunk(

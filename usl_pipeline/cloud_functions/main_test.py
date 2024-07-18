@@ -625,6 +625,76 @@ def test_compute_custom_wps_variables_wind():
     assert processed_ds.data_vars["WSPD10"].values.shape == (1, 3, 3, 3)
 
 
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+def test_write_wps_chunk_metastore_entry_handles_subfolders(
+    mock_storage_client, mock_firestore_client
+):
+    # Create an in-memory netcdf file and grab its bytes
+    ncfile = netCDF4.Dataset(
+        "met_em.d03.2010-02-02_18:00:00.nc", mode="w", format="NETCDF4", memory=1
+    )
+    memfile = ncfile.close()
+    ncfile_bytes = memfile.tobytes()
+
+    # Create a mock blob for the input file which will return the above netcdf when
+    # opened.
+    mock_chunk_blob = mock.MagicMock()
+    mock_chunk_blob.name = "NYC_Heat/Summer_2010/met_em.d03.2010-02-02_18:00:00.nc"
+    mock_chunk_blob.bucket.name = "input_bucket"
+    mock_chunk_blob.open.return_value = io.BytesIO(ncfile_bytes)
+
+    # Create a mock blob for feature matrix we will upload.
+    mock_feature_blob = mock.MagicMock()
+    mock_feature_blob.name = "NYC_Heat/Summer_2010/met_em.d03.2010-02-02_18:00:00.npy"
+    mock_feature_blob.bucket.name = "climateiq-study-area-feature-chunks"
+
+    mock_storage_client.reset_mock()
+
+    main._write_wps_chunk_metastore_entry(
+        mock_chunk_blob,
+        mock_feature_blob,
+        main.FeatureMetadata(time=datetime.datetime(2010, 2, 2, 18, 0, 0)),
+    )
+
+    # Ensure we wrote firestore entries for the chunk.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("study_areas"),
+            # Ensure that the StudyArea doc name will always reference root folder
+            # and files within nested sub directories under the same study area do
+            # not trigger a new metastore write.
+            mock.call().collection().document("NYC_Heat"),
+            mock.call().collection().document().collection("chunks"),
+            mock.call().collection().document().collection()
+            # Periods replaced with underscores
+            .document("met_em_d03_2010-02-02_18_00_00"),
+            mock.call()
+            .collection()
+            .document()
+            .collection()
+            .document()
+            .set(
+                {
+                    # For heat, we process each WPS netcdf file as a chunk (un-tar'ed)
+                    "raw_path": (
+                        "gs://input_bucket/NYC_Heat/Summer_2010/"
+                        "met_em.d03.2010-02-02_18:00:00.nc"
+                    ),
+                    "feature_matrix_path": (
+                        "gs://climateiq-study-area-feature-chunks/NYC_Heat/Summer_2010/"
+                        "met_em.d03.2010-02-02_18:00:00.npy"
+                    ),
+                    "time": datetime.datetime(2010, 2, 2, 18, 0, 0),
+                    "error": firestore.DELETE_FIELD,
+                },
+                merge=True,
+            ),
+        ]
+    )
+
+
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
@@ -752,6 +822,104 @@ def test_build_and_upload_study_area_chunk(
             mock.call(),
             mock.call().collection("study_areas"),
             mock.call().collection().document("study_area"),
+            mock.call()
+            .collection()
+            .document()
+            .set(
+                {
+                    "col_count": 200,
+                    "row_count": 200,
+                    "x_ll_corner": long_vals[0],
+                    "y_ll_corner": lat_vals[0],
+                    "cell_size": cell_size,
+                    "crs": source_crs,
+                }
+            ),
+        ]
+    )
+
+
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(main, "_get_crs_from_wps", autospec=True)
+def test_build_and_upload_study_area_chunk_handles_subfolders(
+    mock_get_crs_from_wps, mock_storage_client, mock_firestore_client
+):
+    # Get some random data to place in a netcdf file
+    lat_vals = [40, 45]
+    long_vals = [-79, -80]
+    cell_size = 500
+    source_crs = "EPSG:32618"
+
+    # Create an in-memory netcdf file and grab its bytes
+    ncfile = netCDF4.Dataset(
+        "met_em.d03.2010-02-02_18:00:00.nc", mode="w", format="NETCDF4", memory=1
+    )
+    ncfile.setncattr("corner_lons", long_vals)
+    ncfile.setncattr("corner_lats", lat_vals)
+    ncfile.setncattr("DX", cell_size)
+
+    memfile = ncfile.close()
+    ncfile_bytes = memfile.tobytes()
+
+    # Create mock buckets
+    mock_input_bucket = mock.Mock()
+    mock_input_bucket.name = "input-bucket"
+    mock_study_area_chunk_bucket = mock.Mock()
+    mock_study_area_chunk_bucket.name = "climateiq-study-area-chunks"
+
+    # Create a mock blob for the input file uploaded
+    mock_input_blob = mock.MagicMock()
+    mock_input_blob.name = "NYC_Heat/Summer_2010/met_em.d03.2010-02-02_18:00:00.nc"
+    mock_input_blob.open.return_value = io.BytesIO(ncfile_bytes)
+
+    # Configure the mock client to return the mock buckets when called with
+    # specific bucket names
+    mock_storage_client.return_value.bucket.side_effect = {
+        "input-bucket": mock_input_bucket,
+        "climateiq-study-area-chunks": mock_study_area_chunk_bucket,
+    }.get  # Use a dictionary to map bucket names to mock objects
+
+    # Return the mock blob
+    mock_input_bucket.blob.return_value = mock_input_blob
+
+    mock_storage_client.reset_mock()
+
+    mock_get_crs_from_wps.return_value = source_crs
+
+    main.build_and_upload_study_area_chunk(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "input-bucket",
+                # Parent folder (aka Study Area) = NYC_Heat
+                # Sub folder = Summer_2010
+                "name": "NYC_Heat/Summer_2010/met_em.d03.2010-02-02_18:00:00.nc",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we worked with the right GCP paths.
+    mock_storage_client.assert_has_calls(
+        [
+            mock.call().bucket("input-bucket"),
+            mock.call().bucket("climateiq-study-area-chunks"),
+        ]
+    )
+
+    # Ensure we opened the input file for further processing
+    mock_input_blob.open.assert_called_once_with("rb")
+
+    # Ensure we wrote the firestore entry for the study area.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("study_areas"),
+            # Ensure that the StudyArea doc name will always reference root folder
+            # and files within nested sub directories under the same study area do
+            # not trigger a new metastore write.
+            mock.call().collection().document("NYC_Heat"),
             mock.call()
             .collection()
             .document()
