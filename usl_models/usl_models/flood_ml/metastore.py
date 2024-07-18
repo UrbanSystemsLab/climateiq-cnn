@@ -53,7 +53,7 @@ def get_spatial_feature_chunk_metadata(
     return [doc.to_dict() for doc in study_area_ref.collection("chunks").stream()]
 
 
-def get_spatial_feature_and_label_chunk_metadata(
+def get_test_spatial_feature_and_label_chunk_metadata(
     db: firestore.Client, sim_name: str
 ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     """Retrieves metadata for the location of (feature, label) pairs in GCS.
@@ -76,9 +76,46 @@ def get_spatial_feature_and_label_chunk_metadata(
     feature_metadata = get_spatial_feature_chunk_metadata(db, sim_name)
 
     # Retrieve all label chunks for the simulation.
-    label_chunks_collection = _get_simulation_doc(db, sim_name).collection(
-        "label_chunks"
+    label_chunks_collection = (
+        _get_simulation_doc(db, sim_name)
+        .collection("label_chunks")
+        .where(filter=firestore.FieldFilter("in_test_set", "==", True))
     )
+    return _group_features_and_labels(feature_metadata, label_chunks_collection)
+
+
+def get_train_spatial_feature_and_label_chunk_metadata(
+    db: firestore.Client, sim_name: str
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Retrieves metadata for the location of (feature, label) pairs in GCS.
+
+    Args:
+      db: The firestore client to use when retrieving metadata.
+      sim_name: The simulation for which to retrieve metadata.
+
+    Returns:
+      A sequence of (feature, label) tuples, where `feature` is a dictionary with key
+      'feature_matrix_path' stating the location in GCS of the feature tensor and
+      `label` is a dictionary with key 'gcs_uri' stating the location in GCS of the
+      accompanying label tensor.
+
+    Raises:
+      ValueError: If a simulation `sim_name` can not be found.
+      AssertionError: If the labels and spatial features for the simulation do not
+                      contain the same set of chunks.
+    """
+    feature_metadata = get_spatial_feature_chunk_metadata(db, sim_name)
+
+    # Retrieve all label chunks for the simulation.
+    label_chunks_collection = (
+        _get_simulation_doc(db, sim_name)
+        .collection("label_chunks")
+        .where(filter=firestore.FieldFilter("in_test_set", "==", False))
+    )
+    return _group_features_and_labels(feature_metadata, label_chunks_collection)
+
+
+def _group_features_and_labels(feature_metadata, label_chunks_collection):
     label_metadata = [doc.to_dict() for doc in label_chunks_collection.stream()]
 
     # Map the features and labels by their chunk indices.
@@ -91,19 +128,17 @@ def get_spatial_feature_and_label_chunk_metadata(
     }
 
     # Ensure we have the same chunk indices for features and labels.
-    missing_labels = _missing_keys(features_by_chunk_index, labels_by_chunk_index)
     missing_features = _missing_keys(labels_by_chunk_index, features_by_chunk_index)
-    if missing_labels or missing_features:
+    if missing_features:
         raise AssertionError(
             "Features and label chunks do not line up. "
-            f'Indices missing from labels: {", ".join(map(str, missing_labels))} '
             f'Indices missing from features: {", ".join(map(str, missing_features))}'
         )
 
     # Return feature & matching label metadata associated with the same indices.
     return [
-        (feature, labels_by_chunk_index[index])
-        for index, feature in features_by_chunk_index.items()
+        (features_by_chunk_index[index], label)
+        for index, label in labels_by_chunk_index.items()
     ]
 
 

@@ -24,7 +24,7 @@ def load_dataset(
     max_chunks: Optional[int] = None,
     firestore_client: Optional[firestore.Client] = None,
     storage_client: Optional[storage.Client] = None,
-) -> tf.data.Dataset:
+) -> tuple[tf.data.Dataset, tf.data.Dataset]:
     """Creates a dataset which generates chunks for flood model inference.
 
     This dataset produces the input for `model.call_n`.
@@ -48,7 +48,7 @@ def load_dataset(
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 
-    def generator():
+    def train_generator():
         """Generator for producing full inputs and labels."""
         for sim_name in sim_names:
             for model_input, labels in _iter_model_inputs(
@@ -58,10 +58,38 @@ def load_dataset(
                 n_flood_maps,
                 m_rainfall,
                 max_chunks,
+                training_set=True,
             ):
                 yield model_input, labels
 
-    # Create the dataset for this simulation
+    def test_generator():
+        """Generator for producing full inputs and labels."""
+        for sim_name in sim_names:
+            for model_input, labels in _iter_model_inputs(
+                firestore_client,
+                storage_client,
+                sim_name,
+                n_flood_maps,
+                m_rainfall,
+                max_chunks,
+                training_set=False,
+            ):
+                yield model_input, labels
+
+    train_dataset = _dataset_from_generator(
+        batch_size, m_rainfall, n_flood_maps, train_generator
+    )
+    test_dataset = _dataset_from_generator(
+        batch_size, m_rainfall, n_flood_maps, test_generator
+    )
+
+    return train_dataset, test_dataset
+
+
+def _dataset_from_generator(
+    batch_size: int, m_rainfall: int, n_flood_maps: int, generator
+):
+    """Creates a dataset given a generator yielding tensors."""
     dataset = tf.data.Dataset.from_generator(
         generator=generator,
         output_signature=(
@@ -97,7 +125,6 @@ def load_dataset(
     # If no batch specified, do not batch the dataset, which is required
     # for generating data for batch prediction in VertexAI.
     if batch_size:
-        print("batch: ", batch_size)
         dataset = dataset.batch(batch_size)
     return dataset
 
@@ -110,7 +137,7 @@ def load_dataset_windowed(
     max_chunks: Optional[int] = None,
     firestore_client: Optional[firestore.Client] = None,
     storage_client: Optional[storage.Client] = None,
-) -> tf.data.Dataset:
+) -> tuple[tf.data.Dataset, tf.data.Dataset]:
     """Creates a dataset which generates chunks for flood model training.
 
     This dataset produces the input for `model.call`.
@@ -135,7 +162,7 @@ def load_dataset_windowed(
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 
-    def generator():
+    def train_generator():
         """Windowed generator for teacher-forcing training."""
         for sim_name in sim_names:
             for model_input, labels in _iter_model_inputs(
@@ -145,12 +172,43 @@ def load_dataset_windowed(
                 n_flood_maps,
                 m_rainfall,
                 max_chunks,
+                training_set=True,
             ):
                 for window_input, window_label in _generate_windows(
                     model_input, labels, n_flood_maps
                 ):
                     yield (window_input, window_label)
 
+    def test_generator():
+        """Windowed generator for teacher-forcing training."""
+        for sim_name in sim_names:
+            for model_input, labels in _iter_model_inputs(
+                firestore_client,
+                storage_client,
+                sim_name,
+                n_flood_maps,
+                m_rainfall,
+                max_chunks,
+                training_set=False,
+            ):
+                for window_input, window_label in _generate_windows(
+                    model_input, labels, n_flood_maps
+                ):
+                    yield (window_input, window_label)
+
+    train_dataset = _windowed_dataset_from_generator(
+        batch_size, m_rainfall, n_flood_maps, train_generator
+    )
+    test_dataset = _windowed_dataset_from_generator(
+        batch_size, m_rainfall, n_flood_maps, test_generator
+    )
+    return train_dataset, test_dataset
+
+
+def _windowed_dataset_from_generator(
+    batch_size: int, m_rainfall: int, n_flood_maps: int, generator
+):
+    """Creates a windowed dataset given a generator yielding tensors."""
     # Create the dataset for this simulation
     dataset = tf.data.Dataset.from_generator(
         generator=generator,
@@ -232,13 +290,14 @@ def _iter_model_inputs(
     n_flood_maps: int,
     m_rainfall: int,
     max_chunks: Optional[int],
+    training_set: bool,
 ) -> Iterator[Tuple[model.Input, tf.Tensor]]:
     """Yields model inputs for each spatial chunk in the simulation."""
     temporal = _generate_temporal_tensor(
         firestore_client, storage_client, sim_name, m_rainfall
     )
     feature_label_gen = _iter_geo_feature_label_tensors(
-        firestore_client, storage_client, sim_name
+        firestore_client, storage_client, sim_name, training_set
     )
 
     for i, (geospatial, labels) in enumerate(feature_label_gen):
@@ -281,12 +340,25 @@ def _generate_temporal_tensor(
 
 
 def _iter_geo_feature_label_tensors(
-    firestore_client: firestore.Client, storage_client: storage.Client, sim_name: str
+    firestore_client: firestore.Client,
+    storage_client: storage.Client,
+    sim_name: str,
+    training_set: bool,
 ) -> Iterator[tuple[tf.Tensor, tf.Tensor]]:
     """Yields feature and label tensors from chunks stored in GCS."""
-    feature_label_metadata = metastore.get_spatial_feature_and_label_chunk_metadata(
-        firestore_client, sim_name
-    )
+    if training_set:
+        feature_label_metadata = (
+            metastore.get_train_spatial_feature_and_label_chunk_metadata(
+                firestore_client, sim_name
+            )
+        )
+    else:
+        feature_label_metadata = (
+            metastore.get_test_spatial_feature_and_label_chunk_metadata(
+                firestore_client, sim_name
+            )
+        )
+
     random.shuffle(feature_label_metadata)
 
     for feature_metadata, label_metadata in feature_label_metadata:

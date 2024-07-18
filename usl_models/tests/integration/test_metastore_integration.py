@@ -130,8 +130,11 @@ def test_get_spatial_feature_chunk_metadata_raises_on_missing_sim(firestore_db) 
         metastore.get_spatial_feature_chunk_metadata(firestore_db, "dir%2Fsim_name")
 
 
-def test_get_spatial_feature_and_label_chunk_metadata(firestore_db) -> None:
-    """Ensures we can retrieve metadata for combined spatial features & labels."""
+def test_get_train_test_spatial_feature_and_label_chunk_metadata(firestore_db) -> None:
+    """Ensures we can retrieve metadata for combined spatial features & labels.
+
+    Ensures we can retrieve separate metadata for labels in the test & train sets.
+    """
     firestore_db.collection("simulations").document("dir%2Fsim_name").set(
         {
             "study_area": firestore_db.collection("study_areas").document(
@@ -153,20 +156,48 @@ def test_get_spatial_feature_and_label_chunk_metadata(firestore_db) -> None:
         {"feature_matrix_path": "gs://bucket/chunk_0_1.npy", "x_index": 0, "y_index": 1}
     )
 
+    firestore_db.collection("study_areas").document("study_area_name").collection(
+        "chunks"
+    ).document("chunk_0_2").set(
+        {"feature_matrix_path": "gs://bucket/chunk_0_2.npy", "x_index": 0, "y_index": 2}
+    )
+
     # Insert matching labels.
     firestore_db.collection("simulations").document("dir%2Fsim_name").collection(
         "label_chunks"
     ).document("0_0").set(
-        {"gcs_uri": "gs://bucket/0_0.npy", "x_index": 0, "y_index": 0}
+        {
+            "gcs_uri": "gs://bucket/0_0.npy",
+            "x_index": 0,
+            "y_index": 0,
+            "in_test_set": False,
+        }
     )
 
     firestore_db.collection("simulations").document("dir%2Fsim_name").collection(
         "label_chunks"
     ).document("0_1").set(
-        {"gcs_uri": "gs://bucket/0_1.npy", "x_index": 0, "y_index": 1}
+        {
+            "gcs_uri": "gs://bucket/0_1.npy",
+            "x_index": 0,
+            "y_index": 1,
+            "in_test_set": False,
+        }
     )
 
-    assert metastore.get_spatial_feature_and_label_chunk_metadata(
+    firestore_db.collection("simulations").document("dir%2Fsim_name").collection(
+        "label_chunks"
+    ).document("0_2").set(
+        {
+            "gcs_uri": "gs://bucket/0_2.npy",
+            "x_index": 0,
+            "y_index": 2,
+            "in_test_set": True,
+        }
+    )
+
+    # Ensure we can retrieve the training set.
+    assert metastore.get_train_spatial_feature_and_label_chunk_metadata(
         firestore_db, "dir%2Fsim_name"
     ) == [
         (
@@ -175,7 +206,12 @@ def test_get_spatial_feature_and_label_chunk_metadata(firestore_db) -> None:
                 "x_index": 0,
                 "y_index": 0,
             },
-            {"gcs_uri": "gs://bucket/0_0.npy", "x_index": 0, "y_index": 0},
+            {
+                "gcs_uri": "gs://bucket/0_0.npy",
+                "x_index": 0,
+                "y_index": 0,
+                "in_test_set": False,
+            },
         ),
         (
             {
@@ -183,12 +219,36 @@ def test_get_spatial_feature_and_label_chunk_metadata(firestore_db) -> None:
                 "x_index": 0,
                 "y_index": 1,
             },
-            {"gcs_uri": "gs://bucket/0_1.npy", "x_index": 0, "y_index": 1},
+            {
+                "gcs_uri": "gs://bucket/0_1.npy",
+                "x_index": 0,
+                "y_index": 1,
+                "in_test_set": False,
+            },
+        ),
+    ]
+
+    # Ensure we can retrieve the test set.
+    assert metastore.get_test_spatial_feature_and_label_chunk_metadata(
+        firestore_db, "dir%2Fsim_name"
+    ) == [
+        (
+            {
+                "feature_matrix_path": "gs://bucket/chunk_0_2.npy",
+                "x_index": 0,
+                "y_index": 2,
+            },
+            {
+                "gcs_uri": "gs://bucket/0_2.npy",
+                "x_index": 0,
+                "y_index": 2,
+                "in_test_set": True,
+            },
         ),
     ]
 
 
-def test_get_spatial_feature_and_label_chunk_metadata_unquoted_name(
+def test_get_train_spatial_feature_and_label_chunk_metadata_unquoted_name(
     firestore_db,
 ) -> None:
     """Ensures we can retrieve metadata when given unquoted names."""
@@ -211,10 +271,15 @@ def test_get_spatial_feature_and_label_chunk_metadata_unquoted_name(
     firestore_db.collection("simulations").document("dir%2Fsim_name").collection(
         "label_chunks"
     ).document("0_0").set(
-        {"gcs_uri": "gs://bucket/0_0.npy", "x_index": 0, "y_index": 0}
+        {
+            "gcs_uri": "gs://bucket/0_0.npy",
+            "x_index": 0,
+            "y_index": 0,
+            "in_test_set": False,
+        }
     )
 
-    assert metastore.get_spatial_feature_and_label_chunk_metadata(
+    assert metastore.get_train_spatial_feature_and_label_chunk_metadata(
         firestore_db, "dir/sim_name"
     ) == [
         (
@@ -223,17 +288,22 @@ def test_get_spatial_feature_and_label_chunk_metadata_unquoted_name(
                 "x_index": 0,
                 "y_index": 0,
             },
-            {"gcs_uri": "gs://bucket/0_0.npy", "x_index": 0, "y_index": 0},
+            {
+                "gcs_uri": "gs://bucket/0_0.npy",
+                "x_index": 0,
+                "y_index": 0,
+                "in_test_set": False,
+            },
         ),
     ]
 
 
-def test_get_spatial_feature_and_label_chunk_metadata_raises_on_missing_sim(
+def test_get_train_spatial_feature_and_label_chunk_metadata_raises_on_missing_sim(
     firestore_db,
 ) -> None:
     """Ensures we raise an error for missing simulations."""
     with pytest.raises(ValueError):
-        metastore.get_spatial_feature_and_label_chunk_metadata(
+        metastore.get_train_spatial_feature_and_label_chunk_metadata(
             firestore_db, "dir%2Fsim_name"
         )
 
@@ -259,60 +329,28 @@ def test_get_label_chunk_metadata_missing_features(firestore_db) -> None:
     firestore_db.collection("simulations").document("dir%2Fsim_name").collection(
         "label_chunks"
     ).document("0_0").set(
-        {"gcs_uri": "gs://bucket/0_0.npy", "x_index": 0, "y_index": 0}
+        {
+            "gcs_uri": "gs://bucket/0_0.npy",
+            "x_index": 0,
+            "y_index": 0,
+            "in_test_set": False,
+        }
     )
 
     firestore_db.collection("simulations").document("dir%2Fsim_name").collection(
         "label_chunks"
     ).document("0_1").set(
-        {"gcs_uri": "gs://bucket/0_1.npy", "x_index": 0, "y_index": 1}
-    )
-
-    with pytest.raises(AssertionError) as excinfo:
-        metastore.get_spatial_feature_and_label_chunk_metadata(
-            firestore_db, "dir%2Fsim_name"
-        )
-
-    assert "Indices missing from labels:  Indices missing from features: (0, 1)" in str(
-        excinfo.value
-    )
-
-
-def test_get_label_chunk_metadata_missing_labels(firestore_db) -> None:
-    """Ensures we raise an error if features do not match up with labels."""
-    firestore_db.collection("simulations").document("dir%2Fsim_name").set(
         {
-            "study_area": firestore_db.collection("study_areas").document(
-                "study_area_name"
-            )
+            "gcs_uri": "gs://bucket/0_1.npy",
+            "x_index": 0,
+            "y_index": 1,
+            "in_test_set": False,
         }
     )
 
-    # Insert 2 features.
-    firestore_db.collection("study_areas").document("study_area_name").collection(
-        "chunks"
-    ).document("chunk_0_0").set(
-        {"feature_matrix_path": "gs://bucket/chunk_0_0.npy", "x_index": 0, "y_index": 0}
-    )
-
-    firestore_db.collection("study_areas").document("study_area_name").collection(
-        "chunks"
-    ).document("chunk_0_1").set(
-        {"feature_matrix_path": "gs://bucket/chunk_0_1.npy", "x_index": 0, "y_index": 1}
-    )
-
-    # Insert 1 label.
-    firestore_db.collection("simulations").document("dir%2Fsim_name").collection(
-        "label_chunks"
-    ).document("0_0").set(
-        {"gcs_uri": "gs://bucket/0_0.npy", "x_index": 0, "y_index": 0}
-    )
-
     with pytest.raises(AssertionError) as excinfo:
-        metastore.get_spatial_feature_and_label_chunk_metadata(
+        metastore.get_train_spatial_feature_and_label_chunk_metadata(
             firestore_db, "dir%2Fsim_name"
         )
 
-    assert "Indices missing from labels: (0, 1) Indices missing from features:" in str(
-        excinfo.value
-    )
+    assert "Indices missing from features: (0, 1)" in str(excinfo.value)

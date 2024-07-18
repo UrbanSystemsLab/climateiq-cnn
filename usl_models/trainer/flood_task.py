@@ -125,7 +125,7 @@ with strategy.scope():
     kwargs = {}
     if args.batch_size is not None:
         kwargs["batch_size"] = args.batch_size
-    dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
+    train_dataset, test_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
         sim_names=args.sim_names,
         firestore_client=firestore.Client(project="climateiq"),
         storage_client=storage.Client(project="climateiq"),
@@ -133,4 +133,4 @@ with strategy.scope():
     )
 
 
-train(model, dataset)
+train(model, train_dataset)
