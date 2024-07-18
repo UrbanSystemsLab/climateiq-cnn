@@ -30,6 +30,22 @@ def create_cotainer():
     )
     print(local_model.get_serving_container_spec())
 
+    print("Pushing to GCP artifact registry")
+    local_model.push_image()
+
+    print("Pushing to Vertex Model Registry")
+    # generate sequence for versions
+    version = 1
+
+    GCS_PATH_TO_MODEL_ARTIFACTS = "gs://climateiq-vertexai/aiplatform-custom-training-2024-07-16-17:40:15.640/"
+    
+    model = aiplatform.Model.upload(
+        local_model=local_model,
+        display_name="flood_ml_cpr_version"+ str(version+1),
+        artifact_uri=GCS_PATH_TO_MODEL_ARTIFACTS,
+    )
+    print(model)
+
     return local_model
 
 def deploy_locally(BUCKET_URI, MODEL_ARTIFACT_DIR, INPUT_FILE):
@@ -137,7 +153,7 @@ def main():
     use_local = False
     # model_gcs_url = "gs://climateiq-vertexai/aiplatform-custom-training-2024-07-16-17:40:15.640/"
     # create prediction container
-    # create_cotainer()
+    create_cotainer()
     # # load model , model can be in GCS or local, present in "model" directory
     # predictor.load(model_gcs_url)
     # #create_jsonl_file(sim_names=sim_names)
@@ -159,7 +175,7 @@ def main():
     MODEL_ARTIFACT_DIR="aiplatform-custom-training-2024-07-16-17:40:15.640"
     INPUT_FILE="gs://flood_ml_batch_input/batch_pred_josiahkp.jsonl"
 
-    deploy_locally(BUCKET_URI, MODEL_ARTIFACT_DIR, INPUT_FILE)
+    #deploy_locally(BUCKET_URI, MODEL_ARTIFACT_DIR, INPUT_FILE)
 
 if __name__ == "__main__":
     main()
