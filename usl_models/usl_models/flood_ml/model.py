@@ -34,6 +34,7 @@ class FloodModel:
         geospatial: tf.Tensor
         temporal: tf.Tensor
         spatiotemporal: tf.Tensor
+        n: int
 
     def __init__(
         self,
@@ -295,7 +296,7 @@ class FloodConvLSTM(tf.keras.Model):
             name="output_cnn",
         )
 
-    def call(self, input: FloodModel.Input) -> tf.Tensor:
+    def call_v1(self, input: FloodModel.Input) -> tf.Tensor:
         """Makes a single forward pass on a batch of data.
 
         The forward pass represents a single prediction on an input batch
@@ -353,7 +354,7 @@ class FloodConvLSTM(tf.keras.Model):
 
         return output
 
-    def call_n(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
+    def call(self, full_input: FloodModel.Input) -> tf.Tensor:
         """Runs the entire autoregressive model.
 
         Args:
@@ -368,6 +369,9 @@ class FloodConvLSTM(tf.keras.Model):
         spatiotemporal = full_input["spatiotemporal"]
         geospatial = full_input["geospatial"]
         temporal = full_input["temporal"]
+        n = full_input["n"]
+        n = tf.squeeze(n)  # Remove any extra dimensions
+        n = tf.cast(n, tf.int32)  # Ensure it's an integer
 
         B = spatiotemporal.shape[0]
         C = 1  # Channel dimension for spatiotemporal tensor
@@ -390,9 +394,11 @@ class FloodConvLSTM(tf.keras.Model):
                 geospatial=geospatial,
                 temporal=self._get_temporal_window(temporal, t, N),
                 spatiotemporal=spatiotemporal,
+                n=n
             )
-            prediction = self.call(input)
+            prediction = self.call_v1(input)
             predictions = predictions.write(t - 1, prediction)
+            
 
             # Append new predictions along time axis, drop the first.
             spatiotemporal = tf.concat(
@@ -400,9 +406,13 @@ class FloodConvLSTM(tf.keras.Model):
             )[:, 1:]
 
         # Gather dense tensor out of TensorArray along the time axis.
-        predictions = tf.stack(tf.unstack(predictions.stack()), axis=1)
+        #predictions = tf.stack(tf.unstack(predictions.stack(), num=int(n.numpy())), axis=1)
+        predictions = predictions.gather(tf.range(1, n + 1))
+        predictions = tf.transpose(predictions, perm=[1, 0, 2, 3, 4])
+        predictions = tf.squeeze(predictions, axis=-1)
         # Drop channels dimension.
-        return tf.squeeze(predictions, axis=-1)
+        return predictions
+    
 
     @staticmethod
     def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
@@ -416,11 +426,28 @@ class FloodConvLSTM(tf.keras.Model):
         Returns:
             Returns a zero-padded n-sized window at timestep t of shape (B, n, M)
         """
-        B, _, M = temporal.shape
-        return tf.concat(
+        B = tf.shape(temporal)[0]
+        T_MAX = tf.shape(temporal)[1]
+        M = tf.shape(temporal)[2]
+
+        zero_padding_shape = (B, tf.maximum(n - t, 0), M)
+        temporal_slice_start = tf.maximum(t - n, 0)
+        temporal_slice_end = tf.minimum(t, T_MAX)
+        temporal_slice = temporal[:, temporal_slice_start:temporal_slice_end]
+
+        # Debug prints to inspect shapes and values
+        # print("Zero padding shape:", zero_padding_shape)
+        # print("Temporal slice start:", temporal_slice_start)
+        # print("Temporal slice end:", temporal_slice_end)
+        # print("Temporal slice shape:", temporal_slice.shape)
+        # print("Temporal slice values:", temporal_slice)
+
+        result = tf.concat(
             [
-                tf.zeros(shape=(B, tf.maximum(n - t, 0), M)),
-                temporal[:, tf.maximum(t - n, 0) : t],
+                tf.zeros(shape=zero_padding_shape),
+                temporal_slice,
             ],
             axis=1,
         )
+        return result
+
