@@ -1,12 +1,35 @@
-from typing import Any, Sequence, TypeVar
+from typing import Any, Sequence, TypeVar, TypedDict
 import urllib.parse
 
 from google.cloud import firestore
 
 
+class TemporalMetadata(TypedDict):
+    """Metadata from firestore describing a temporal data."""
+
+    as_vector_gcs_uri: str
+    rainfall_duration: int
+
+
+class GeoFeatureMetadata(TypedDict):
+    """Metadata from firestore describing a geo feature data."""
+
+    feature_matrix_path = str
+    x_index: int
+    y_index: int
+
+
+class LabelMetadata(TypedDict):
+    """Metadata from firestore describing label data."""
+
+    gcs_uri = str
+    x_index: int
+    y_index: int
+
+
 def get_temporal_feature_metadata(
     db: firestore.Client, sim_name: str
-) -> dict[str, Any]:
+) -> TemporalMetadata:
     """Retrieves metadata stating the location of temporal features in GCS.
 
     Args:
@@ -55,7 +78,7 @@ def get_spatial_feature_chunk_metadata(
 
 def get_spatial_feature_and_label_chunk_metadata(
     db: firestore.Client, sim_name: str
-) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+) -> list[tuple[GeoFeatureMetadata, LabelMetadata]]:
     """Retrieves metadata for the location of (feature, label) pairs in GCS.
 
     Args:
