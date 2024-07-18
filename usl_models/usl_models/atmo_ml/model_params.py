@@ -1,23 +1,37 @@
 """AtmoML model parameters."""
 
-from dataclasses import dataclass
-
-import tensorflow as tf
+from typing import Any, Mapping, TypedDict
 
 
-@dataclass(kw_only=True, slots=True)
-class AtmoModelParams:
+class AtmoModelParams(TypedDict):
     # General parameters.
-    batch_size: int = 64
+    batch_size: int
 
     # Layer-specific parameters.
-    lstm_units: int = 512
-    lstm_kernel_size: int = 5
-    lstm_dropout: float = 0.2
-    lstm_recurrent_dropout: float = 0.2
+    lstm_units: int
+    lstm_kernel_size: int
+    lstm_dropout: float
+    lstm_recurrent_dropout: float
 
-    # Keras parameters.
-    # Keras models support both Optimizer objects and (valid) string names.
-    # It is the user's responsibility to pass in a valid optimizer value.
-    optimizer: tf.keras.Optimizer | str = "adam"
-    epochs: int = 10
+    # The optimizer configuration.
+    # We use the dictionary definition to ensure the model is serializable.
+    # This value is passed to tf.keras.optimizers.get to build the optimizer object.
+    optimizer_config: Mapping[str, Any]
+
+    epochs: int
+
+
+def default_params() -> AtmoModelParams:
+    """Creates default model parameter values."""
+    return {
+        "batch_size": 64,
+        "lstm_units": 512,
+        "lstm_kernel_size": 5,
+        "lstm_dropout": 0.2,
+        "lstm_recurrent_dropout": 0.2,
+        "optimizer_config": {
+            "class_name": "Adam",
+            "config": {"learning_rate": 1e-3},
+        },
+        "epochs": 10,
+    }

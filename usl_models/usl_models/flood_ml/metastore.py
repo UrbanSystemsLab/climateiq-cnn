@@ -1,7 +1,7 @@
 from typing import Any, Sequence, TypeVar
 import urllib.parse
 
-from google.cloud import firestore
+from google.cloud import firestore  # type:ignore[attr-defined]
 
 
 def get_temporal_feature_metadata(
@@ -119,5 +119,11 @@ def _get_simulation_doc(
     db: firestore.Client, sim_name: str
 ) -> firestore.DocumentReference:
     """Retrieves the firestore document for the simulation with the given name."""
-    # Escape the name to avoid characters not allowed in IDs such as slashes.
-    return db.collection("simulations").document(urllib.parse.quote(sim_name, safe=()))
+    return db.collection("simulations").document(
+        # Quote the name to avoid characters not allowed in IDs such as slashes.
+        urllib.parse.quote(
+            # Unquote to support being passed both quoted & unquoted simulation names.
+            urllib.parse.unquote(sim_name),
+            safe=(),
+        )
+    )
