@@ -25,6 +25,7 @@ class FloodModelPredictor(Predictor):
             ValueError: If there's no required model files provided in the artifacts
                 uri.
         """
+        print("Going to load model from:" , artifacts_uri)
         prediction_utils.download_model_artifacts(artifacts_uri)
         # Load the saved model
         loaded_model = tf.saved_model.load('model')
@@ -41,7 +42,7 @@ class FloodModelPredictor(Predictor):
         print("\nModel output signature:")
         for output_name, output_tensor in serving_signature.structured_outputs.items():
             print(f"  {output_name}: {output_tensor.shape}")
-
+        print("\n Model loaded successfully.")
 
     def preprocess(self, input_data) -> dict:
         """Loads and preprocesses data from either a GCS URL or a dictionary of instances.
@@ -53,6 +54,7 @@ class FloodModelPredictor(Predictor):
             A dictionary where keys are the field names (e.g., 'geospatial', 'temporal', 'spatiotemporal')
             and values are NumPy arrays with a batch dimension added.
         """
+        print("Entering preprocess step.")
         data = {}
 
         if isinstance(input_data, str) and input_data.startswith("gs://"):
@@ -131,6 +133,7 @@ class FloodModelPredictor(Predictor):
             Returns:
                 A tensor of all the flood predictions: [B, n, H, W].
             """
+        print("Entering predict step.")
         if self._model is None:
             raise ValueError("Model not loaded. Call load() first.")
 
@@ -178,6 +181,7 @@ class FloodModelPredictor(Predictor):
 
             predictions = tf.stack(tf.unstack(predictions.stack()),axis=1)
             print("Prediction shape (before sequeeze): ", predictions.shape)
+            print("Prediction completed.")
             # Drop channels dimension.
             return tf.squeeze(predictions, axis=-1)
 
