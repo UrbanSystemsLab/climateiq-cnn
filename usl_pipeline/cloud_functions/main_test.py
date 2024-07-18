@@ -1141,13 +1141,13 @@ def test_build_wrf_label_matrix(
     # Create a mock blob for the input file which will return the above netcdf when
     # opened.
     mock_input_blob = mock.MagicMock()
-    mock_input_blob.name = "study_area/wrfout.d03_test"
+    mock_input_blob.name = "study_area/sim_config_group/wrfout.d03_test"
     mock_input_blob.bucket.name = "bucket"
     mock_input_blob.open.return_value = io.BytesIO(ncfile_bytes)
 
     # Create a mock blob for label matrix we will upload.
     mock_label_blob = mock.MagicMock()
-    mock_label_blob.name = "study_area/wrfout.d03_test.npy"
+    mock_label_blob.name = "study_area/sim_config_group/wrfout.d03_test.npy"
     mock_label_blob.bucket.name = "climateiq-study-area-label-chunks"
 
     # Return the mock blobs.
@@ -1177,7 +1177,7 @@ def test_build_wrf_label_matrix(
             {"source": "test", "type": "event"},
             data={
                 "bucket": "bucket",
-                "name": "study_area/wrfout.d03_test",
+                "name": "study_area/sim_config_group/wrfout.d03_test",
                 "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             },
         )
@@ -1187,9 +1187,11 @@ def test_build_wrf_label_matrix(
     mock_storage_client.assert_has_calls(
         [
             mock.call().bucket("bucket"),
-            mock.call().bucket().blob("study_area/wrfout.d03_test"),
+            mock.call().bucket().blob("study_area/sim_config_group/wrfout.d03_test"),
             mock.call().bucket("climateiq-study-area-label-chunks"),
-            mock.call().bucket().blob("study_area/wrfout.d03_test.npy"),
+            mock.call()
+            .bucket()
+            .blob("study_area/sim_config_group/wrfout.d03_test.npy"),
         ]
     )
 
@@ -1210,34 +1212,36 @@ def test_build_wrf_label_matrix(
     )
     numpy.testing.assert_array_equal(uploaded_array, expected_array)
 
-    mock_firestore_client.assert_has_calls(
-        [
-            mock.call().collection("simulations"),
-            mock.call().collection().document("study_area"),
-            mock.call().collection().document().collection("label_chunks"),
-            mock.call()
-            .collection()
-            .document()
-            .collection()
-            .document("2010-02-02 18:00:00"),
-            mock.call()
-            .collection()
-            .document()
-            .collection()
-            .document()
-            .set(
-                {
-                    "gcs_uri": (
-                        "gs://climateiq-study-area-label-chunks/study_area/"
-                        "wrfout.d03_test.npy"
-                    ),
-                    "time": datetime.datetime(2010, 2, 2, 18, 0, 0),
-                }
-            ),
-        ]
+    # Ensure Simulation entry was written to metastore
+    mock_firestore_client().collection().document().set.assert_called_once_with(
+        {
+            "gcs_prefix_uri": ("gs://bucket/study_area"),
+            "simulation_type": "WRF",
+            "study_area": mock_firestore_client().collection().document(),
+            "configuration": mock_firestore_client().collection().document(),
+        }
+    )
+
+    # Ensure Simulation Label Chunk entry was written to metastore
+    (
+        mock_firestore_client()
+        .collection()
+        .document()
+        .collection()
+        .document()
+        .set.assert_called_once_with(
+            {
+                "gcs_uri": (
+                    "gs://climateiq-study-area-label-chunks/study_area/"
+                    "sim_config_group/wrfout.d03_test.npy"
+                ),
+                "time": datetime.datetime(2010, 2, 2, 18, 0, 0),
+            }
+        )
     )
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_client, _):

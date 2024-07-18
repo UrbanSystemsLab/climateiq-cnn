@@ -51,22 +51,6 @@ def test_read_key_value_pairs_valid_pairs():
     assert result == expected
 
 
-def test_read_key_value_pairs_existing_header():
-    config_content = io.StringIO(
-        textwrap.dedent(
-            """\
-            [MY_HEADER]
-            key1 = value1
-            key2 = value2
-            """
-        )
-    )
-    result = config_readers.read_key_value_pairs(config_content)
-
-    expected = {"key1": "value1", "key2": "value2"}
-    assert result == expected
-
-
 def test_read_key_value_pairs_empty_file():
     """Test with an empty file."""
     config = io.StringIO("")

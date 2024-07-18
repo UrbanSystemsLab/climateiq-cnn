@@ -541,22 +541,15 @@ class Simulation:
     gcs_prefix_uri: str
     simulation_type: SimulationType
     study_area: firestore.DocumentReference
-    configuration: Optional[firestore.DocumentReference] = None
+    configuration: firestore.DocumentReference
 
     def set(self, db: firestore.Client) -> None:
         """Creates a simulation in the given DB."""
         if not self.study_area.get().exists:
             raise ValueError(f"No such study area exists: {self.study_area.id}")
 
-        # A valid configuration must exist for CityCAT simulations
-        if self.simulation_type == SimulationType.CITY_CAT:
-            if self.configuration is None:
-                raise ValueError("No configuration specified.")
-            else:
-                if not self.configuration.get().exists:
-                    raise ValueError(
-                        f"No such configuration exists: {self.configuration.id}"
-                    )
+        if not self.configuration.get().exists:
+            raise ValueError(f"No such configuration exists: {self.configuration.id}")
 
         as_dict = {
             "gcs_prefix_uri": self.gcs_prefix_uri,
@@ -564,18 +557,11 @@ class Simulation:
             "study_area": self.study_area,
             "configuration": self.configuration,
         }
-
-        if self.configuration is not None:
-            self.get_ref(
-                db,
-                urllib.parse.unquote(self.study_area.id),
-                urllib.parse.unquote(self.configuration.id),
-            ).set(as_dict)
-        else:
-            self.get_ref(
-                db,
-                urllib.parse.unquote(self.study_area.id),
-            ).set(as_dict)
+        self.get_ref(
+            db,
+            urllib.parse.unquote(self.study_area.id),
+            urllib.parse.unquote(self.configuration.id),
+        ).set(as_dict)
 
     @classmethod
     def get(
@@ -589,16 +575,11 @@ class Simulation:
 
     @staticmethod
     def get_ref(
-        db: firestore.Client, study_area_name: str, config_path: Optional[str] = None
+        db: firestore.Client, study_area_name: str, config_path: str
     ) -> firestore.DocumentReference:
         """Retrieves a reference for the simulation for the given study are & config."""
-        if config_path is not None:
-            ref_name = f"{study_area_name}-{config_path}"
-        else:
-            ref_name = f"{study_area_name}"
-
         return db.collection(SIMULATIONS).document(
-            urllib.parse.quote(ref_name, safe=())
+            urllib.parse.quote(f"{study_area_name}-{config_path}", safe=())
         )
 
 
@@ -731,9 +712,9 @@ class SimulationLabelTemporalChunk(SimulationLabelChunk):
 
     time: Optional[datetime.datetime] = None
 
-    def set(self, db: firestore.Client, study_area_name: str) -> None:
+    def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
         """Adds the label chunk to the given simulation."""
-        Simulation.get_ref(db, study_area_name, config_path=None).collection(
+        Simulation.get_ref(db, study_area_name, config_path).collection(
             SIMULATION_LABEL_CHUNKS
         ).document(str(self.time)).set(dataclasses.asdict(self))
 
