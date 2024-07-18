@@ -351,42 +351,90 @@ class FloodConvLSTM(tf.keras.Model):
 
         return output
 
+    # def call(self, full_input: FloodModel.Input) -> tf.Tensor:
+    #     """Runs the entire autoregressive model.
+
+    #     Args:
+    #         full_input: A dictionary of input tensors.
+    #             While `call` expects only input data for a single context window,
+    #             `call_n` requires the full temporal tensor.
+    #         n: Number of autoregressive iterations to run.
+
+    #     Returns:
+    #         A tensor of all the flood predictions: [B, n, H, W].
+    #     """
+    #     spatiotemporal = full_input["spatiotemporal"]
+    #     geospatial = full_input["geospatial"]
+    #     temporal = full_input["temporal"]
+    #     n = full_input["n"]
+    #     n = tf.squeeze(n)  # Remove any extra dimensions
+    #     n = tf.cast(n, tf.int32)  # Ensure it's an integer
+
+    #     B = spatiotemporal.shape[0]
+    #     C = 1  # Channel dimension for spatiotemporal tensor
+    #     F = constants.GEO_FEATURES
+    #     N, M = self._params.n_flood_maps, self._params.m_rainfall
+    #     T_MAX = constants.MAX_RAINFALL_DURATION
+    #     H, W = self._spatial_height, self._spatial_width
+
+    #     tf.ensure_shape(spatiotemporal, (B, N, H, W, C))
+    #     tf.ensure_shape(geospatial, (B, H, W, F))
+    #     tf.ensure_shape(temporal, (B, T_MAX, M))
+
+    #     # This array stores the n predictions.
+    #     predictions = tf.TensorArray(tf.float32, size=n)
+
+    #     # We use 1-indexing for simplicity. Time step t represents the t-th flood
+    #     # prediction.
+    #     for t in range(1, n + 1):
+    #         input = FloodModel.Input(
+    #             geospatial=geospatial,
+    #             temporal=self._get_temporal_window(temporal, t, N),
+    #             spatiotemporal=spatiotemporal,
+    #             n=n
+    #         )
+    #         prediction = self.call_v1(input)
+    #         predictions = predictions.write(t - 1, prediction)
+            
+
+    #         # Append new predictions along time axis, drop the first.
+    #         spatiotemporal = tf.concat(
+    #             [spatiotemporal, tf.expand_dims(prediction, axis=1)], axis=1
+    #         )[:, 1:]
+
+    #     # Gather dense tensor out of TensorArray along the time axis.
+    #     #predictions = tf.stack(tf.unstack(predictions.stack(), num=int(n.numpy())), axis=1)
+    #     predictions = predictions.gather(tf.range(1, n + 1))
+    #     predictions = tf.transpose(predictions, perm=[1, 0, 2, 3, 4])
+    #     predictions = tf.squeeze(predictions, axis=-1)
+    #     # Drop channels dimension.
+    #     return predictions
+
     def call(self, full_input: FloodModel.Input) -> tf.Tensor:
-        """Runs the entire autoregressive model.
-
-        Args:
-            full_input: A dictionary of input tensors.
-                While `call` expects only input data for a single context window,
-                `call_n` requires the full temporal tensor.
-            n: Number of autoregressive iterations to run.
-
-        Returns:
-            A tensor of all the flood predictions: [B, n, H, W].
-        """
         spatiotemporal = full_input["spatiotemporal"]
         geospatial = full_input["geospatial"]
         temporal = full_input["temporal"]
         n = full_input["n"]
-        n = tf.squeeze(n)  # Remove any extra dimensions
-        n = tf.cast(n, tf.int32)  # Ensure it's an integer
+        n = tf.squeeze(n)
+        n = tf.cast(n, tf.int32)
 
-        B = spatiotemporal.shape[0]
-        C = 1  # Channel dimension for spatiotemporal tensor
+        # Use tf.shape instead of .shape to get dynamic dimensions
+        B = tf.shape(spatiotemporal)[0]
+        N = tf.shape(spatiotemporal)[1]
+        H = tf.shape(spatiotemporal)[2]
+        W = tf.shape(spatiotemporal)[3]
+        C = tf.shape(spatiotemporal)[4]
+
         F = constants.GEO_FEATURES
-        N, M = self._params.n_flood_maps, self._params.m_rainfall
+        M = self._params.m_rainfall
         T_MAX = constants.MAX_RAINFALL_DURATION
-        H, W = self._spatial_height, self._spatial_width
 
-        tf.ensure_shape(spatiotemporal, (B, N, H, W, C))
-        tf.ensure_shape(geospatial, (B, H, W, F))
-        tf.ensure_shape(temporal, (B, T_MAX, M))
+        # Instead of ensure_shape, use tf.debugging.assert_equal for runtime checks
+        tf.debugging.assert_equal(tf.shape(spatiotemporal), [B, N, H, W, C])
+        tf.debugging.assert_equal(tf.shape(geospatial), [B, H, W, F])
+        tf.debugging.assert_equal(tf.shape(temporal), [B, T_MAX, M])
 
-        # This array stores the n predictions.
-        predictions = tf.TensorArray(tf.float32, size=n)
-
-        # We use 1-indexing for simplicity. Time step t represents the t-th flood
-        # prediction.
-        for t in range(1, n + 1):
+        def loop_body(t, spatiotemporal, predictions):
             input = FloodModel.Input(
                 geospatial=geospatial,
                 temporal=self._get_temporal_window(temporal, t, N),
@@ -396,18 +444,22 @@ class FloodConvLSTM(tf.keras.Model):
             prediction = self.call_v1(input)
             predictions = predictions.write(t - 1, prediction)
             
-
-            # Append new predictions along time axis, drop the first.
             spatiotemporal = tf.concat(
-                [spatiotemporal, tf.expand_dims(prediction, axis=1)], axis=1
-            )[:, 1:]
+                [spatiotemporal[:, 1:], tf.expand_dims(prediction, axis=1)], 
+                axis=1
+            )
+            return t + 1, spatiotemporal, predictions
 
-        # Gather dense tensor out of TensorArray along the time axis.
-        #predictions = tf.stack(tf.unstack(predictions.stack(), num=int(n.numpy())), axis=1)
-        predictions = predictions.gather(tf.range(1, n + 1))
+        _, _, predictions = tf.while_loop(
+            lambda t, *_: tf.less_equal(t, n),
+            loop_body,
+            [tf.constant(1), spatiotemporal, tf.TensorArray(tf.float32, size=n)],
+            maximum_iterations=n
+        )
+
+        predictions = predictions.stack()
         predictions = tf.transpose(predictions, perm=[1, 0, 2, 3, 4])
         predictions = tf.squeeze(predictions, axis=-1)
-        # Drop channels dimension.
         return predictions
     
 
