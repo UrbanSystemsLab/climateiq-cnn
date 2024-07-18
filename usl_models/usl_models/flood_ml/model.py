@@ -395,6 +395,7 @@ class FloodConvLSTM(tf.keras.Model):
             )
             prediction = self.call_v1(input)
             predictions = predictions.write(t - 1, prediction)
+            
 
             # Append new predictions along time axis, drop the first.
             spatiotemporal = tf.concat(
@@ -402,9 +403,12 @@ class FloodConvLSTM(tf.keras.Model):
             )[:, 1:]
 
         # Gather dense tensor out of TensorArray along the time axis.
-        predictions = tf.stack(tf.unstack(predictions.stack()), axis=1)
+        #predictions = tf.stack(tf.unstack(predictions.stack(), num=int(n.numpy())), axis=1)
+        predictions = predictions.gather(tf.range(1, n + 1))
+        predictions = tf.transpose(predictions, perm=[1, 0, 2, 3, 4])
+        predictions = tf.squeeze(predictions, axis=-1)
         # Drop channels dimension.
-        return tf.squeeze(predictions, axis=-1)
+        return predictions
     
 
     @staticmethod
