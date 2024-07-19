@@ -1482,7 +1482,7 @@ def test_collapse_city_cat_output_chunks(mock_firestore_client):
                     ),
                     "x_index": 0,
                     "y_index": 1,
-                    "in_test_set": False,
+                    "dataset": metastore.DatasetSplit.TRAIN,
                 }
             ),
         ]

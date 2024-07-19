@@ -544,6 +544,12 @@ class SimulationLabelChunk:
             yield cls(**chunk_ref.get().to_dict())
 
 
+class DatasetSplit(enum.StrEnum):
+    TRAIN = "train"
+    VAL = "val"
+    TEST = "test"
+
+
 @dataclasses.dataclass(slots=True)
 class SimulationLabelSpatialChunk(SimulationLabelChunk):
     """A sub-area chunk of a larger study area.
@@ -551,13 +557,12 @@ class SimulationLabelSpatialChunk(SimulationLabelChunk):
     Attributes:
         x_index: The x index of the chunk relative to other chunks in the simulation.
         y_index: The y index of the chunk relative to other chunks in the simulation.
-        in_test_set: Whether the label should be held out from model training as
-                     part of the test set.
+        dataset: Which data set the label belongs to: train, val, test.
     """
 
     x_index: int
     y_index: int
-    in_test_set: bool
+    dataset: DatasetSplit
 
     def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
         """Adds the label chunk to the given simulation."""
@@ -567,17 +572,17 @@ class SimulationLabelSpatialChunk(SimulationLabelChunk):
         ).document(id_).set(dataclasses.asdict(self))
 
     @staticmethod
-    def is_in_test_set(
+    def dataset_split(
         study_area: "StudyArea", config_name: str, x_index: int, y_index: int
-    ) -> bool:
-        """Determines if the chunk for the given indices is in the test set.
+    ) -> DatasetSplit:
+        """Determines whether the chunk is used for training, validation, or testing.
 
         Given x and y indices which uniquely identify a label chunk with a given study
         area for a given simulation configuation, determines if the label chunk should
-        be considered as part of the test or training set.
+        be considered as part of the training, validation, or test set.
         Returns a consistent set membership for the same study area, config and index
-        pairs while also guaranteeing the split for all chunks within the study area is
-        a 20% / 80% test / training split.
+        pairs while also guaranteeing a 60 train / 20 val / 20 test split for all chunks
+        within the study area.
 
         Args:
           study_area: The study area of the label chunk being considered.
@@ -586,7 +591,7 @@ class SimulationLabelSpatialChunk(SimulationLabelChunk):
           y_index: The y index of the chunk relative to other chunks in the simulation.
 
         Returns:
-          A boolean indicating if the chunk is part of the test set.
+          A DatasetSplit indicating which set the chunk belongs to: train, val, or test.
         """
         if study_area.chunk_x_count is None or study_area.chunk_y_count is None:
             raise ValueError(
@@ -604,14 +609,14 @@ class SimulationLabelSpatialChunk(SimulationLabelChunk):
         ]
 
         # Determine if the given x & y index should represent a member
-        # of the test or training set.  The test set should be 20% of
-        # the chunks.  We do this by building a random state, using
+        # of the train, val, or test set. This should be a 60/20/20 split
+        # on the chunks. We do this by building a random state, using
         # the study area name and simulation config name as a seed.
         # This means we will consistently generate the same set of
         # chunks as test and training set members for a given study
-        # area and simulation config.  This allows us to generate a
-        # consistent test and training set no matter how many times
-        # any individual processing function may run.
+        # area and simulation config.  This allows us to generate
+        # consistent sets no matter how many times any individual
+        # processing function may run.
         hasher = hashlib.new("sha1", usedforsecurity=False)
         hasher.update(study_area.name.encode())
         hasher.update(config_name.encode())
@@ -619,8 +624,13 @@ class SimulationLabelSpatialChunk(SimulationLabelChunk):
         rand_state = random.Random(seed)
         rand_state.shuffle(chunk_indices)
 
-        split = int(0.2 * len(chunk_indices))
-        return (x_index, y_index) in set(chunk_indices[:split])
+        train_split = int(0.6 * len(chunk_indices))
+        val_split = int(0.8 * len(chunk_indices))
+        if (x_index, y_index) in set(chunk_indices[:train_split]):
+            return DatasetSplit.TRAIN
+        if (x_index, y_index) in set(chunk_indices[train_split:val_split]):
+            return DatasetSplit.VAL
+        return DatasetSplit.TEST
 
 
 @dataclasses.dataclass(slots=True)

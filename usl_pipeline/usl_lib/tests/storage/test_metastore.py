@@ -242,8 +242,8 @@ def test_flood_scenario_config_delete():
     )
 
 
-def test_simulation_label_chunk_is_in_test_set_produce_right_split() -> None:
-    """Ensure is_in_test_set produces a 20-80 split."""
+def test_simulation_label_chunk_dataset_split_produce_right_split() -> None:
+    """Ensure dataset_split produces a 60/20/20 split."""
     study_area = metastore.StudyArea(
         name="name",
         col_count=2,
@@ -257,45 +257,27 @@ def test_simulation_label_chunk_is_in_test_set_produce_right_split() -> None:
         chunk_y_count=5,
     )
 
-    # Calculate whether all chunks are in the test set.
-    chunks_in_test_set = [
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(
-            study_area, "config", 0, 0
-        ),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(
-            study_area, "config", 0, 1
-        ),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(
-            study_area, "config", 0, 2
-        ),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(
-            study_area, "config", 0, 3
-        ),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(
-            study_area, "config", 0, 4
-        ),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(
-            study_area, "config", 1, 0
-        ),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(
-            study_area, "config", 1, 1
-        ),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(
-            study_area, "config", 1, 2
-        ),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(
-            study_area, "config", 1, 3
-        ),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(
-            study_area, "config", 1, 4
-        ),
+    # Calculate the number of chunks in each set.
+    chunks_dataset_split = [
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 0, 0),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 0, 1),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 0, 2),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 0, 3),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 0, 4),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 1, 0),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 1, 1),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 1, 2),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 1, 3),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 1, 4),
     ]
-    # 2 / 10 of the chunks should be in the test set.
-    assert sum(chunks_in_test_set) == 2
+    # Chunks should be split 6 / 2 / 2 in train / val / test.
+    assert chunks_dataset_split.count(metastore.DatasetSplit.TRAIN) == 6
+    assert chunks_dataset_split.count(metastore.DatasetSplit.VAL) == 2
+    assert chunks_dataset_split.count(metastore.DatasetSplit.TEST) == 2
 
 
-def test_simulation_label_chunk_is_in_test_set_is_deterministic() -> None:
-    """Ensure is_in_test_set produces deterministic outputs."""
+def test_simulation_label_chunk_dataset_split_is_deterministic() -> None:
+    """Ensure dataset_split produces deterministic outputs."""
     study_area = metastore.StudyArea(
         name="name",
         col_count=2,
@@ -311,15 +293,15 @@ def test_simulation_label_chunk_is_in_test_set_is_deterministic() -> None:
 
     # Call the function with the same inputs several times.
     results = [
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "config", 0, 0)
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "config", 0, 0)
         for _ in range(10)
     ]
     # Ensure they're all the same.
     assert all(res == results[0] for res in results)
 
 
-def test_simulation_label_chunk_is_in_test_produces_different_splits() -> None:
-    """Ensure is_in_test_set produces distinct splits for distinct simulations."""
+def test_simulation_label_chunk_dataset_split_produces_different_splits() -> None:
+    """Ensure dataset_split produces distinct splits for distinct simulations."""
     study_area = metastore.StudyArea(
         name="name",
         col_count=2,
@@ -333,26 +315,26 @@ def test_simulation_label_chunk_is_in_test_produces_different_splits() -> None:
         chunk_y_count=5,
     )
 
-    chunks_in_test_set_for_config_1 = [
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c1", 0, 0),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c1", 0, 1),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c1", 0, 2),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c1", 1, 0),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c1", 1, 1),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c1", 1, 2),
+    chunks_dataset_split_for_config_1 = [
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c1", 0, 0),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c1", 0, 1),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c1", 0, 2),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c1", 1, 0),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c1", 1, 1),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c1", 1, 2),
     ]
 
-    chunks_in_test_set_for_config_2 = [
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c2", 0, 0),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c2", 0, 1),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c2", 0, 2),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c2", 1, 0),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c2", 1, 1),
-        metastore.SimulationLabelSpatialChunk.is_in_test_set(study_area, "c2", 1, 2),
+    chunks_dataset_split_for_config_2 = [
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c2", 0, 0),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c2", 0, 1),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c2", 0, 2),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c2", 1, 0),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c2", 1, 1),
+        metastore.SimulationLabelSpatialChunk.dataset_split(study_area, "c2", 1, 2),
     ]
 
     # Different simulation config names could potentially result in
     # the same set of chunks in the test set, but our use of
     # seeds ensures we will get the same sets for the same
     # configuration names, making this test reproducible.
-    assert chunks_in_test_set_for_config_1 != chunks_in_test_set_for_config_2
+    assert chunks_dataset_split_for_config_1 != chunks_dataset_split_for_config_2
