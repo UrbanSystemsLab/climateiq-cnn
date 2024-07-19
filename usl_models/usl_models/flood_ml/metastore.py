@@ -1,7 +1,47 @@
+import datetime
 from typing import Any, Sequence, TypeVar
 import urllib.parse
 
 from google.cloud import firestore  # type:ignore[attr-defined]
+
+import usl_models.flood_ml.model_params
+
+
+def write_model_metadata(
+    db: firestore.Client,
+    gcs_model_dir: str,
+    sim_names: Sequence[str],
+    model_params: usl_models.flood_ml.model_params.FloodModelParams,
+    epochs: int,
+    model_name: str,
+) -> str:
+    """Writes information on a trained model to the metastore.
+
+    Args:
+      db: The firestore client to use when retrieving metadata.
+      gcs_model_dir: The location of the saved model in GCS.
+      sim_names: The simulations on which the model was trained.
+      model_params: The parameters used to train the model.
+      epochs: The number of epochs the model was trained for.
+      model_name: A name to associate with the model.
+
+    Returns:
+      The document ID of the written model metadata document.
+    """
+    # Use the GCS location of the model as a unique value for the ID.
+    # URL-escape the ID, as characters such as / are not allowed in document IDs.
+    model_id = urllib.parse.quote(gcs_model_dir, safe=())
+    db.collection("models").document(model_id).set(
+        {
+            "trained_on": [_get_simulation_doc(db, sim_name) for sim_name in sim_names],
+            "trained_at_utc": datetime.datetime.utcnow(),
+            "gcs_model_dir": gcs_model_dir,
+            "epochs": epochs,
+            "model_params": model_params,
+            "model_name": model_name,
+        }
+    )
+    return model_id
 
 
 def get_temporal_feature_metadata(

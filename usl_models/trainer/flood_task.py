@@ -9,6 +9,7 @@ from tensorflow.python.client import device_lib
 
 import usl_models.flood_ml.dataset
 import usl_models.flood_ml.model
+from usl_models.flood_ml import metastore
 import usl_models.flood_ml.model_params
 
 
@@ -16,6 +17,9 @@ logging.basicConfig(level=logging.INFO)
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--model-name", dest="model_name", type=str, help="A name for the model."
+)
 parser.add_argument("--epochs", dest="epochs", type=int, help="Number of epochs.")
 parser.add_argument(
     "--batch-size", dest="batch_size", type=int, help="Size of a batch."
@@ -78,7 +82,12 @@ def _is_chief(task_type, task_id):
     )
 
 
-def train(model, train_dataset, val_dataset=None):
+def train(
+    model: usl_models.flood_ml.model.FloodModel,
+    train_dataset: tf.data.Dataset,
+    val_dataset: tf.data.Dataset,
+    firestore_client: firestore.Client,
+) -> None:
     """Trains a model with the given dataset and saves the model to GCS."""
     kwargs = {}
     if args.epochs is not None:
@@ -99,28 +108,43 @@ def train(model, train_dataset, val_dataset=None):
             experimental_io_device="/job:localhost"
         )
         logging.info("Saving model to %s", args.model_dir)
-        model.save_model(args.model_dir, options=save_locally)
+        model_dir = args.model_dir
+        model.save_model(model_dir, options=save_locally)
     # single, mirrored or primary for multiworker
     elif _is_chief(task_type, task_id):
         logging.info("Saving model to %s", args.model_dir)
-        model.save_model(args.model_dir)
+        model_dir = args.model_dir
+        model.save_model(model_dir)
     # non-primary workers for multi-workers
     else:
         # each worker saves their model instance to a unique temp location
-        worker_dir = args.model_dir + "/workertemp_" + str(task_id)
-        logging.info("Saving model to %s", worker_dir)
-        tf.io.gfile.makedirs(worker_dir)
-        model.save_model(worker_dir)
+        model_dir = args.model_dir + "/workertemp_" + str(task_id)
+        logging.info("Saving model to %s", model_dir)
+        tf.io.gfile.makedirs(model_dir)
+        model.save_model(model_dir)
+
+    metastore.write_model_metadata(
+        firestore_client,
+        gcs_model_dir=model_dir,
+        sim_names=args.sim_names,
+        model_params=model._model_params,
+        epochs=args.epochs,
+        model_name=args.model_name,
+    )
 
 
 with strategy.scope():
     # Creation of dataset, and model building/compiling need to be within
     # `strategy.scope()`.
+    firestore_client = firestore.Client(project="climateiq")
 
     model_params = usl_models.flood_ml.model_params.default_params()
     if args.batch_size is not None:
         model_params["batch_size"] = args.batch_size
     model = usl_models.flood_ml.model.FloodModel(model_params=model_params)
+    logging.info(
+        "Training model for %s epochs with params %s", args.epochs, model_params
+    )
 
     kwargs = {}
     if args.batch_size is not None:
@@ -128,17 +152,17 @@ with strategy.scope():
     train_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
         sim_names=args.sim_names,
         dataset_split="train",
-        firestore_client=firestore.Client(project="climateiq"),
+        firestore_client=firestore_client,
         storage_client=storage.Client(project="climateiq"),
         **kwargs,
     )
     val_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
         sim_names=args.sim_names,
         dataset_split="val",
-        firestore_client=firestore.Client(project="climateiq"),
+        firestore_client=firestore_client,
         storage_client=storage.Client(project="climateiq"),
         **kwargs,
     )
 
 
-train(model, train_dataset, val_dataset=val_dataset)
+train(model, train_dataset, val_dataset, firestore_client)

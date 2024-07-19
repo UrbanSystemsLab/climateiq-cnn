@@ -26,7 +26,7 @@ def main():
 
     # Run the training script trainer/flood_task.py in VertexAI.
     job = aiplatform.CustomPythonPackageTrainingJob(
-        display_name="flood_model",
+        display_name=cli_args.model_name,
         python_package_gcs_uri="gs://climateiq-vertexai/usl_models-0.0.0.tar.gz",
         python_module_name="trainer.flood_task",
         container_uri=IMAGE,
@@ -39,6 +39,8 @@ def main():
         job_args.extend(("--epochs", str(cli_args.epochs)))
     if cli_args.batch_size:
         job_args.extend(("--batch-size", str(cli_args.batch_size)))
+    if cli_args.model_name:
+        job_args.extend(("--model-name", cli_args.model_name))
 
     print(f"Creating training job with arguments {job_args}")
     job.run(
@@ -54,6 +56,13 @@ def main():
 
 def _parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model-name",
+        dest="model_name",
+        type=str,
+        help="A name for the model.",
+        default="flood_model",
+    )
     parser.add_argument("--epochs", dest="epochs", type=int, help="Number of epochs.")
     parser.add_argument(
         "--batch-size", dest="batch_size", type=int, help="Size of a batch."
