@@ -165,6 +165,7 @@ def build_and_upload_study_area_chunk(
         storage_client = storage.Client()
         db = firestore.Client()
 
+        print("xyz")
         bucket = storage_client.bucket(bucket_name)
         file_blob = bucket.blob(str(file_name))
 
