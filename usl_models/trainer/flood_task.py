@@ -78,13 +78,13 @@ def _is_chief(task_type, task_id):
     )
 
 
-def train(model, dataset):
+def train(model, train_dataset, val_dataset=None):
     """Trains a model with the given dataset and saves the model to GCS."""
     kwargs = {}
     if args.epochs is not None:
         kwargs["epochs"] = args.epochs
 
-    model.fit(dataset, **kwargs)
+    model.fit(train_dataset, val_dataset=val_dataset, **kwargs)
 
     if args.distribute == "multiworker":
         task_type, task_id = (
@@ -125,12 +125,20 @@ with strategy.scope():
     kwargs = {}
     if args.batch_size is not None:
         kwargs["batch_size"] = args.batch_size
-    dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
+    train_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
         sim_names=args.sim_names,
+        dataset_split="train",
+        firestore_client=firestore.Client(project="climateiq"),
+        storage_client=storage.Client(project="climateiq"),
+        **kwargs,
+    )
+    val_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
+        sim_names=args.sim_names,
+        dataset_split="val",
         firestore_client=firestore.Client(project="climateiq"),
         storage_client=storage.Client(project="climateiq"),
         **kwargs,
     )
 
 
-train(model, dataset)
+train(model, train_dataset, val_dataset=val_dataset)

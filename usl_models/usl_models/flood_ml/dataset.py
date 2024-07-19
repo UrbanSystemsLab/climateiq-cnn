@@ -18,6 +18,7 @@ from usl_models.flood_ml import model
 
 def load_dataset(
     sim_names: list[str],
+    dataset_split: str,
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
@@ -25,7 +26,7 @@ def load_dataset(
     firestore_client: Optional[firestore.Client] = None,
     storage_client: Optional[storage.Client] = None,
 ) -> tf.data.Dataset:
-    """Creates a dataset which generates chunks for flood model inference.
+    """Creates a dataset which generates chunks for the flood model.
 
     This dataset produces the input for `model.call_n`.
     For training with teacher-forcing, `load_dataset_windowed` should be used instead.
@@ -34,8 +35,8 @@ def load_dataset(
     pulling all examples into memory at once.
 
     Args:
-      sim_names: The simulation labels to use for training,
-                 e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
+      sim_names: The simulation names, e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
+      dataset_split: Which dataset split to load: train, val, and/or test.
       batch_size: Size of batches yielded by the dataset. Approximate memory
                   usage is 10GB * batch_size during training.
       n_flood_maps: The number of flood maps in each example.
@@ -58,6 +59,7 @@ def load_dataset(
                 n_flood_maps,
                 m_rainfall,
                 max_chunks,
+                dataset_split,
             ):
                 yield model_input, labels
 
@@ -103,6 +105,7 @@ def load_dataset(
 
 def load_dataset_windowed(
     sim_names: list[str],
+    dataset_split: str,
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
@@ -112,16 +115,17 @@ def load_dataset_windowed(
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for flood model training.
 
-    This dataset produces the input for `model.call`.
-    For getting data to input into `model.call_n`, use `load_dataset` instead.
+    This dataset produces the input for `model.call` and should only be used
+    for training, since it uses labels.
+    For getting dat to input into `model.call_n`, use `load_dataset` instead.
     The examples are generated from multiple simulations.
     They are windowed for training on next-map prediction.
     The dataset iteratively yields examples read from Google Cloud Storage to avoid
     pulling all examples into memory at once.
 
     Args:
-      sim_names: The simulation labels to use for training,
-                 e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
+      sim_names: The simulation names, e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
+      dataset_split: Which dataset split to load: train, val, and/or test.
       batch_size: Size of batches yielded by the dataset. Approximate memory
                   usage is 10GB * batch_size during training.
       n_flood_maps: The number of flood maps in each example.
@@ -144,13 +148,13 @@ def load_dataset_windowed(
                 n_flood_maps,
                 m_rainfall,
                 max_chunks,
+                dataset_split,
             ):
                 for window_input, window_label in _generate_windows(
                     model_input, labels, n_flood_maps
                 ):
                     yield (window_input, window_label)
 
-    # Create the dataset for this simulation
     dataset = tf.data.Dataset.from_generator(
         generator=generator,
         output_signature=(
@@ -231,13 +235,14 @@ def _iter_model_inputs(
     n_flood_maps: int,
     m_rainfall: int,
     max_chunks: Optional[int],
+    dataset_split: str,
 ) -> Iterator[Tuple[model.Input, tf.Tensor]]:
     """Yields model inputs for each spatial chunk in the simulation."""
     temporal = _generate_temporal_tensor(
         firestore_client, storage_client, sim_name, m_rainfall
     )
     feature_label_gen = _iter_geo_feature_label_tensors(
-        firestore_client, storage_client, sim_name
+        firestore_client, storage_client, sim_name, dataset_split
     )
 
     for i, (geospatial, labels) in enumerate(feature_label_gen):
@@ -280,12 +285,16 @@ def _generate_temporal_tensor(
 
 
 def _iter_geo_feature_label_tensors(
-    firestore_client: firestore.Client, storage_client: storage.Client, sim_name: str
+    firestore_client: firestore.Client,
+    storage_client: storage.Client,
+    sim_name: str,
+    dataset_split: str,
 ) -> Iterator[tuple[tf.Tensor, tf.Tensor]]:
     """Yields feature and label tensors from chunks stored in GCS."""
     feature_label_metadata = metastore.get_spatial_feature_and_label_chunk_metadata(
-        firestore_client, sim_name
+        firestore_client, sim_name, dataset_split
     )
+
     random.shuffle(feature_label_metadata)
 
     for feature_metadata, label_metadata in feature_label_metadata:

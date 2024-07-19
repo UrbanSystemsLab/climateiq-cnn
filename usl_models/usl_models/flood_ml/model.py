@@ -130,7 +130,8 @@ class FloodModel:
 
     def fit(
         self,
-        dataset: tf.data.Dataset,
+        train_dataset: tf.data.Dataset,
+        val_dataset: tf.data.Dataset | None = None,
         epochs: int = 1,
         steps_per_epoch: int | None = None,
         early_stopping: int | None = None,
@@ -148,7 +149,11 @@ class FloodModel:
 
         # Fit the model for this sample
         return self._model.fit(
-            dataset, epochs=epochs, steps_per_epoch=steps_per_epoch, callbacks=callbacks
+            train_dataset,
+            validation_data=val_dataset,
+            epochs=epochs,
+            steps_per_epoch=steps_per_epoch,
+            callbacks=callbacks,
         )
 
     def load_model(self, filepath: str) -> None:
