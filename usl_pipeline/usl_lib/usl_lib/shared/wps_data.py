@@ -21,8 +21,8 @@ class Unit(Enum):
     KELVIN = 5
     FRACTION = 6
     METERSPERSEC = 7
-    #Remove if data has degrees. WDIR is sin-cos func now
-    #DEGREES = 8
+    # Remove if data has degrees. WDIR is sin-cos func now
+    # EGREES = 8
 
 
 ML_REQUIRED_VARS_REPO = dict(
