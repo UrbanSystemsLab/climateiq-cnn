@@ -106,6 +106,8 @@ def test_train():
         train_dataset, val_dataset=val_dataset, epochs=epochs, steps_per_epoch=1
     )
     assert len(history.history["loss"]) == epochs
+    # Also check that the model is calculating validation metrics
+    assert "val_loss" in history.history
 
 
 def test_early_stopping():
