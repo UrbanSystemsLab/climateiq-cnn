@@ -165,4 +165,4 @@ with strategy.scope():
     )
 
 
-train(model, train_dataset, val_dataset=val_dataset, firestore_client=firestore_client)
+train(model, train_dataset, val_dataset, firestore_client)
