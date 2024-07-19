@@ -96,11 +96,18 @@ def test_train():
 
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
     epochs = 2
-    dataset = mock_dataset(
+    train_dataset = mock_dataset(
         params, height=height, width=width, batch_size=batch_size, batch_count=epochs
     )
-    history = model.fit(dataset, epochs=epochs, steps_per_epoch=1)
+    val_dataset = mock_dataset(
+        params, height=height, width=width, batch_size=batch_size, batch_count=epochs
+    )
+    history = model.fit(
+        train_dataset, val_dataset=val_dataset, epochs=epochs, steps_per_epoch=1
+    )
     assert len(history.history["loss"]) == epochs
+    # Also check that the model is calculating validation metrics
+    assert "val_loss" in history.history
 
 
 def test_early_stopping():
@@ -122,14 +129,27 @@ def test_early_stopping():
     epochs = 20
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
 
-    dataset = mock_dataset(
+    train_dataset = mock_dataset(
         params,
         height=height,
         width=width,
         batch_size=batch_size,
         batch_count=epochs,
     )
-    history = model.fit(dataset, early_stopping=1, epochs=epochs, steps_per_epoch=1)
+    val_dataset = mock_dataset(
+        params,
+        height=height,
+        width=width,
+        batch_size=batch_size,
+        batch_count=epochs,
+    )
+    history = model.fit(
+        train_dataset,
+        val_dataset=val_dataset,
+        early_stopping=1,
+        epochs=epochs,
+        steps_per_epoch=1,
+    )
     # Check whether the model history indicates early stopping.
     assert len(history.history["loss"]) < epochs
 
@@ -142,14 +162,21 @@ def test_model_checkpoint():
 
     model = flood_model.FloodModel(params, spatial_dims=(height, width))
 
-    dataset = mock_dataset(
+    train_dataset = mock_dataset(
         params,
         height=height,
         width=width,
         batch_size=batch_size,
         batch_count=1,
     )
-    model.fit(dataset, steps_per_epoch=1)
+    val_dataset = mock_dataset(
+        params,
+        height=height,
+        width=width,
+        batch_size=batch_size,
+        batch_count=1,
+    )
+    model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
 
     with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
         model.save_model(tmp.name, overwrite=True)

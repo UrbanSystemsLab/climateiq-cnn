@@ -58,6 +58,7 @@ def test_load_dataset_full(mock_metastore) -> None:
     m_rainfall = 6
     ds = dataset.load_dataset(
         sim_names=["sim_name"],
+        dataset_split="train",
         batch_size=batch_size,
         n_flood_maps=5,
         m_rainfall=m_rainfall,
@@ -172,6 +173,7 @@ def test_load_dataset_windowed(mock_metastore) -> None:
     mock_storage_client.reset_mock()
     ds = dataset.load_dataset_windowed(
         sim_names=["sim_name"],
+        dataset_split="train",
         batch_size=batch_size,
         n_flood_maps=5,
         m_rainfall=m_rainfall,
