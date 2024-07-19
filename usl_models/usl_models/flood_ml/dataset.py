@@ -56,8 +56,7 @@ def load_dataset(
         sim_metadata = _get_sims_metadata(
             firestore_client, sim_names, max_examples=max_examples
         )
-        while sim_metadata:
-            _sim_name, temporal_meta, geo_feature_meta, label_meta = sim_metadata.pop()
+        for _sim_name, temporal_meta, geo_feature_meta, label_meta in sim_metadata:
             yield _load_example(
                 storage_client,
                 temporal_meta,
@@ -112,7 +111,7 @@ def load_dataset_windowed(
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
     max_examples: Optional[int] = None,
-    shuffle: bool = False,
+    shuffle: bool = True,
     firestore_client: Optional[firestore.Client] = None,
     storage_client: Optional[storage.Client] = None,
 ) -> tf.data.Dataset:
@@ -146,10 +145,7 @@ def load_dataset_windowed(
         sim_metadata = _get_sims_metadata_windowed(
             firestore_client, sim_names, shuffle=shuffle, max_examples=max_examples
         )
-        while sim_metadata:
-            _sim_name, temporal_meta, geo_feature_meta, label_meta, t = (
-                sim_metadata.pop()
-            )
+        for _sim_name, temporal_meta, geo_feature_meta, label_meta, t in sim_metadata:
             yield _load_example_window(
                 storage_client,
                 temporal_meta,
@@ -294,15 +290,13 @@ def _load_label_tensor(
 ) -> tf.Tensor:
     """Loads a label tensor from GCloud Storage."""
     label_tensor = _download_as_tensor(storage_client, label_meta["gcs_uri"])
-    max_label = tf.math.reduce_max(label_tensor)
-    print("max_label:", max_label)
     return tf.transpose(label_tensor, perm=[2, 0, 1])
 
 
 def _get_sims_metadata(
     firestore_client: firestore.Client,
     sim_names: list[str],
-    shuffle: bool = False,
+    shuffle: bool = True,
     max_examples: Optional[int] = None,
 ) -> list[
     tuple[
@@ -346,7 +340,7 @@ def _get_sims_metadata(
 def _get_sims_metadata_windowed(
     firestore_client: firestore.Client,
     sim_names: list[str],
-    shuffle: bool = False,
+    shuffle: bool = True,
     max_examples: Optional[int] = None,
 ) -> list[
     tuple[
