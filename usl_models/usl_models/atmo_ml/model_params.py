@@ -24,7 +24,7 @@ class AtmoModelParams(TypedDict):
 def default_params() -> AtmoModelParams:
     """Creates default model parameter values."""
     return {
-        "batch_size": 64,
+        "batch_size": 4,
         "lstm_units": 512,
         "lstm_kernel_size": 5,
         "lstm_dropout": 0.2,
