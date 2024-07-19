@@ -13,6 +13,7 @@ def write_model_metadata(
     sim_names: Sequence[str],
     model_params: usl_models.flood_ml.model_params.FloodModelParams,
     epochs: int,
+    model_name: str,
 ) -> str:
     """Writes information on a trained model to the metastore.
 
@@ -22,6 +23,7 @@ def write_model_metadata(
       sim_names: The simulations on which the model was trained.
       model_params: The parameters used to train the model.
       epochs: The number of epochs the model was trained for.
+      model_name: A name to associate with the model.
 
     Returns:
       The document ID of the written model metadata document.
@@ -36,6 +38,7 @@ def write_model_metadata(
             "gcs_model_dir": gcs_model_dir,
             "epochs": epochs,
             "model_params": model_params,
+            "model_name": model_name,
         }
     )
     return model_id

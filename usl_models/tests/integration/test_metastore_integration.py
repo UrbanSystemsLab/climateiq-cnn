@@ -330,6 +330,7 @@ def test_write_model_metadata(firestore_db) -> None:
         ["sim-1", "sim-2"],
         model_params.default_params(),
         5,
+        "a_model",
     )
     result = firestore_db.collection("models").document(id_).get().to_dict()
     # We won't know what time it is, just make sure it's present.
@@ -337,6 +338,7 @@ def test_write_model_metadata(firestore_db) -> None:
     assert result["gcs_model_dir"] == "gs://the/model"
     assert result["model_params"] == model_params.default_params()
     assert result["epochs"] == 5
+    assert result["model_name"] == "a_model"
     assert result["trained_on"] == [
         firestore_db.collection("simulations").document("sim-1"),
         firestore_db.collection("simulations").document("sim-2"),

@@ -17,6 +17,9 @@ logging.basicConfig(level=logging.INFO)
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--model-name", dest="model_name", type=str, help="A name for the model."
+)
 parser.add_argument("--epochs", dest="epochs", type=int, help="Number of epochs.")
 parser.add_argument(
     "--batch-size", dest="batch_size", type=int, help="Size of a batch."
@@ -126,6 +129,7 @@ def train(
         sim_names=args.sim_names,
         model_params=model._model_params,
         epochs=args.epochs,
+        model_name=args.model_name,
     )
 
 
