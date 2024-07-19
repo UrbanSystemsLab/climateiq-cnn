@@ -674,16 +674,13 @@ def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
 
     Returns:
       A new xarray dataset with newly derived variables.
-    """
-    # Derive wind components from UU & VV + Solar time components from XLAT_M & XLONG_M
-   
+    """   
     # WSPD (wind speed) at FNL level 0 (~10m)
     # WDIR_SIN (wind direction_sine component) at FNL level 0 (~10m)
     # WDIR_COS (wind direction_cosine component) at FNL level 0 (~10m)
-    if all(var in dataset.keys() for var in ["UU", "VV", "XLAT_M", "XLONG_M"]):
-        
-        ######## Compute WIND ##########
-
+    
+    if all(var in dataset.keys() for var in ["UU", "VV"]):
+        # Derive wind components from UU and VV: WSPD, WDIR
         uu = dataset.data_vars["UU"]
         vv = dataset.data_vars["VV"]
 
@@ -713,7 +710,8 @@ def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
         wind_direction_sin = direction_to_sine(wind_direction)
         wind_direction_cos = direction_to_cosine(wind_direction)
 
-        # Convert sine and cosine components back to xarray DataArray, retaining original coordinates and dimensions
+        # Convert sine and cosine components back to xarray DataArray
+        # retaining original coordinates and dimensions
         wind_direction_sin = xarray.DataArray(
             wind_direction_sin,
             coords=vv_centered.coords,
@@ -731,16 +729,20 @@ def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
         dataset = dataset.assign(WDIR_SIN=(new_dims, wind_direction_sin))
         dataset = dataset.assign(WDIR_COS=(new_dims, wind_direction_cos))
         
-        ####### Compute Solar Time ##########
-
+    # Derive solar time from XLAT_M and XLONG_M
+    if all(var in dataset.keys() for var in ["XLAT_M", "XLONG_M"]):
         # Extract longitude and time data
         longitude = dataset.data_vars['XLONG_M']
         times = dataset.data_vars['Times']
 
         # Convert time variable to datetime objects
-        times = numpy.array([numpy.datetime64(''.join(t.astype(str)).replace('_', 'T')) for t in times.values])
+        times = numpy.array(
+            [numpy.datetime64(''.join(t.astype(str)).replace('_', 'T')) for t in times.values])
+        
         # Extract hours and minutes from the datetime objects
-        utc_hours_minutes = numpy.array([t.astype('datetime64[h]').astype(int) % 24 + t.astype('datetime64[m]').astype(int) % 60 / 60 for t in times])
+        utc_hours_minutes = numpy.array(
+            [t.astype('datetime64[h]').astype(int) % 24 + 
+             t.astype('datetime64[m]').astype(int) % 60 / 60 for t in times])
 
         # Define the function to calculate solar time
         def calculate_solar_time(utc_time, longitude):
@@ -797,13 +799,14 @@ def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
 
         # Convert solar times to sine and cosine values
         for utc_time in utc_hours_minutes:
-            sin_solar_time.loc[utc_time, :, :] = time_to_sine(solar_times.sel(utc_time=utc_time))
-            cos_solar_time.loc[utc_time, :, :] = time_to_cosine(solar_times.sel(utc_time=utc_time))
+            sin_solar_time.loc[utc_time, :, :] = time_to_sine(
+                solar_times.sel(utc_time=utc_time))
+            cos_solar_time.loc[utc_time, :, :] = time_to_cosine(
+                solar_times.sel(utc_time=utc_time))
             
         new_dims = ["Time", "south_north", "west_east"]
         dataset = dataset.assign(SOLAR_TIME_SIN=(new_dims, sin_solar_time))
         dataset = dataset.assign(SOLAR_TIME_COS=(new_dims, cos_solar_time))
-
         
     return dataset
 

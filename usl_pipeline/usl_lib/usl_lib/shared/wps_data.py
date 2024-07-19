@@ -21,8 +21,8 @@ class Unit(Enum):
     KELVIN = 5
     FRACTION = 6
     METERSPERSEC = 7
-    # Measured clockwise from true north, range:0->359. Degrees will be removed after sine cosine transfmtn
-    DEGREES = 8
+    #Remove if data has degrees. WDIR is sin-cos func now
+    #DEGREES = 8
 
 
 ML_REQUIRED_VARS_REPO = dict(
@@ -64,6 +64,13 @@ ML_REQUIRED_VARS_REPO = dict(
         # LANDUSEF is a percentage of each LU_INDEX category (61)
         "LANDUSEF": {
             "unit": Unit.FRACTION,
+            "scaling": {
+                "type": ScalingType.NONE,
+            },
+        },
+        # LU_INDEX
+        "LU_INDEX": {
+            "unit": Unit.NONE,
             "scaling": {
                 "type": ScalingType.NONE,
             },
@@ -322,7 +329,7 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.NONE,
             },
         },
-        # [Derived] Solar Time from UTC (Cyclic feature) in Minutes of Day (MIN).
+        # [Derived] Solar Time from UTC (Cyclic feature) in Minutes of Day (MIN)
         # Sine Component of Solar Time
         "SOLAR_TIME_SIN": {
             "unit": Unit.NONE,
@@ -332,7 +339,7 @@ ML_REQUIRED_VARS_REPO = dict(
                 "max": 1,
             },
         },
-        # [Derived] Solar Time from UTC (Cyclic feature) in Minutes of Day (MIN).
+        # [Derived] Solar Time from UTC (Cyclic feature) in Minutes of Day (MIN)
         # Cosine Component of Solar Time
         "SOLAR_TIME_COS": {
             "unit": Unit.NONE,
@@ -340,13 +347,6 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.GLOBAL,
                 "min": -1,
                 "max": 1,
-            },
-        },
-        # LU_INDEX
-        "LU_INDEX": {
-            "unit": Unit.NONE,
-            "scaling": {
-                "type": ScalingType.NONE,
             },
         },
     }
