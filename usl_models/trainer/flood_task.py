@@ -125,6 +125,7 @@ def train(
         gcs_model_dir=model_dir,
         sim_names=args.sim_names,
         model_params=model._model_params,
+        epochs=args.epochs,
     )
 
 
@@ -137,6 +138,9 @@ with strategy.scope():
     if args.batch_size is not None:
         model_params["batch_size"] = args.batch_size
     model = usl_models.flood_ml.model.FloodModel(model_params=model_params)
+    logging.info(
+        "Training model for %s epochs with params %s", args.epochs, model_params
+    )
 
     kwargs = {}
     if args.batch_size is not None:
@@ -144,7 +148,7 @@ with strategy.scope():
     train_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
         sim_names=args.sim_names,
         dataset_split="train",
-        firestore_client=firestore.Client(project="climateiq"),
+        firestore_client=firestore_client,
         storage_client=storage.Client(project="climateiq"),
         **kwargs,
     )
