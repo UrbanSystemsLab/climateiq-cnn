@@ -3,7 +3,7 @@
 import functools
 import logging
 import random
-from typing import Any, Iterator, List, Optional, Tuple
+from typing import Optional
 import urllib.parse
 
 from google.cloud import firestore
@@ -15,7 +15,7 @@ import tensorflow as tf
 
 from usl_models.flood_ml import constants
 from usl_models.flood_ml import metastore
-from usl_models.flood_ml.model import FloodModel
+from usl_models.flood_ml import model as flood_model
 
 
 def load_dataset(
@@ -42,8 +42,8 @@ def load_dataset(
                   usage is 10GB * batch_size during training.
       n_flood_maps: The number of flood maps in each example.
       m_rainfall: The width of the temporal rainfall tensor.
-      max_chunks: The maximum number of examples to yield from the dataset.
-                  If `None` (default) yields all examples from the simulations.
+      max_examples: The maximum number of examples to yield from the dataset.
+                    If `None` (default) yields all examples from the simulations.
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
     """
@@ -107,7 +107,7 @@ def load_dataset(
 
 
 def load_dataset_windowed(
-    sim_names: List[str],
+    sim_names: list[str],
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
@@ -132,8 +132,8 @@ def load_dataset_windowed(
                   usage is 10GB * batch_size during training.
       n_flood_maps: The number of flood maps in each example.
       m_rainfall: The width of the temporal rainfall tensor.
-      max_chunks: The maximum number of examples to yield from the datam_rainfallset.
-                  If `None` (default) yields all examples from the simulations.
+      max_examples: The maximum number of examples to yield from the datam_rainfallset.
+                    If `None` (default) yields all examples from the simulations.
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
     """
@@ -227,14 +227,14 @@ def _load_example(
     label_meta: metastore.LabelMetadata,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
-) -> Tuple[FloodModel.Input, tf.Tensor]:
+) -> tuple[flood_model.FloodModel.Input, tf.Tensor]:
     """Downloads the example described by the given metadata."""
     logging.info(
         "Retrieving features from %s and labels from %s",
         geo_feature_meta["feature_matrix_path"],
         label_meta["gcs_uri"],
     )
-    return FloodModel.Input(
+    return flood_model.FloodModel.Input(
         temporal=_load_temporal_tensor(storage_client, m_rainfall, temporal_meta),
         geospatial=_download_as_tensor(
             storage_client, geo_feature_meta["feature_matrix_path"]
@@ -258,7 +258,7 @@ def _load_example_window(
     t: int,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
-) -> Tuple[FloodModel.Input, tf.Tensor]:
+) -> tuple[flood_model.FloodModel.Input, tf.Tensor]:
     """Loads a windowed example described by the given metadata at timestep t."""
     input, labels = _load_example(
         storage_client,
@@ -268,7 +268,7 @@ def _load_example_window(
         n_flood_maps,
         m_rainfall,
     )
-    window_input = FloodModel.Input(
+    window_input = flood_model.FloodModel.Input(
         geospatial=input["geospatial"],
         temporal=_extract_temporal(t, n_flood_maps, input["temporal"]),
         spatiotemporal=_extract_spatiotemporal(t, n_flood_maps, labels),
@@ -303,9 +303,9 @@ def _get_sims_metadata(
     firestore_client: firestore.Client,
     sim_names: list[str],
     shuffle: bool = False,
-    max_examples: int | None = None,
-) -> List[
-    Tuple[
+    max_examples: Optional[int] = None,
+) -> list[
+    tuple[
         str,
         metastore.TemporalMetadata,
         metastore.GeoFeatureMetadata,
@@ -313,7 +313,14 @@ def _get_sims_metadata(
     ]
 ]:
     """Returns a flat list of metadata for all (sim_names, chunk) pairs."""
-    flat_metadata = []
+    flat_metadata: list[
+        tuple[
+            str,
+            metastore.TemporalMetadata,
+            metastore.GeoFeatureMetadata,
+            metastore.LabelMetadata,
+        ]
+    ] = []
     for sim_name in sim_names:
         temporal_meta = metastore.get_temporal_feature_metadata(
             firestore_client, sim_name
@@ -324,7 +331,7 @@ def _get_sims_metadata(
         ) in metastore.get_spatial_feature_and_label_chunk_metadata(
             firestore_client, sim_name
         ):
-            if len(flat_metadata) >= max_examples:
+            if max_examples is not None and len(flat_metadata) >= max_examples:
                 break
             flat_metadata.append(
                 (sim_name, temporal_meta, geo_feature_meta, label_meta)
@@ -340,9 +347,9 @@ def _get_sims_metadata_windowed(
     firestore_client: firestore.Client,
     sim_names: list[str],
     shuffle: bool = False,
-    max_examples: int | None = None,
-) -> List[
-    Tuple[
+    max_examples: Optional[int] = None,
+) -> list[
+    tuple[
         str,
         metastore.TemporalMetadata,
         metastore.GeoFeatureMetadata,
@@ -351,7 +358,15 @@ def _get_sims_metadata_windowed(
     ]
 ]:
     """Returns a flat list of metadata for all (sim_names, chunk) pairs."""
-    flat_metadata = []
+    flat_metadata: list[
+        tuple[
+            str,
+            metastore.TemporalMetadata,
+            metastore.GeoFeatureMetadata,
+            metastore.LabelMetadata,
+            int,
+        ]
+    ] = []
     for sim_name in sim_names:
         temporal_meta = metastore.get_temporal_feature_metadata(
             firestore_client, sim_name
@@ -362,7 +377,7 @@ def _get_sims_metadata_windowed(
         ) in metastore.get_spatial_feature_and_label_chunk_metadata(
             firestore_client, sim_name
         ):
-            if len(flat_metadata) >= max_examples:
+            if max_examples is not None and len(flat_metadata) >= max_examples:
                 break
             for t in range(temporal_meta["rainfall_duration"]):
                 flat_metadata.append(

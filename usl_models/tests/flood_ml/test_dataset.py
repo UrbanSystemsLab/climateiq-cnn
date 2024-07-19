@@ -18,7 +18,8 @@ def test_load_dataset_full(mock_metastore) -> None:
 
     # Set some URLs to return from our metastore functions.
     mock_metastore.get_temporal_feature_metadata.return_value = {
-        "as_vector_gcs_uri": "gs://temporal-features/temporal-feature.npy"
+        "as_vector_gcs_uri": "gs://temporal-features/temporal-feature.npy",
+        "rainfall_duration": 4,
     }
     mock_metastore.get_spatial_feature_and_label_chunk_metadata.return_value = [
         (
@@ -73,8 +74,16 @@ def test_load_dataset_full(mock_metastore) -> None:
         [
             mock.call.bucket("temporal-features"),
             mock.call.bucket().blob("temporal-feature.npy"),
+        ]
+    )
+    mock_storage_client.assert_has_calls(
+        [
             mock.call.bucket("spatial-features"),
             mock.call.bucket().blob("spatial-feature.npy"),
+        ]
+    )
+    mock_storage_client.assert_has_calls(
+        [
             mock.call.bucket("labels"),
             mock.call.bucket().blob("labels.npy"),
         ]
@@ -131,7 +140,8 @@ def test_load_dataset_windowed(mock_metastore) -> None:
 
     # Set some URLs to return from our metastore functions.
     mock_metastore.get_temporal_feature_metadata.return_value = {
-        "as_vector_gcs_uri": "gs://temporal-features/temporal-feature.npy"
+        "as_vector_gcs_uri": "gs://temporal-features/temporal-feature.npy",
+        "rainfall_duration": 4,
     }
     mock_metastore.get_spatial_feature_and_label_chunk_metadata.return_value = [
         (
@@ -186,8 +196,16 @@ def test_load_dataset_windowed(mock_metastore) -> None:
         [
             mock.call.bucket("temporal-features"),
             mock.call.bucket().blob("temporal-feature.npy"),
+        ]
+    )
+    mock_storage_client.assert_has_calls(
+        [
             mock.call.bucket("spatial-features"),
             mock.call.bucket().blob("spatial-feature.npy"),
+        ]
+    )
+    mock_storage_client.assert_has_calls(
+        [
             mock.call.bucket("labels"),
             mock.call.bucket().blob("labels.npy"),
         ]
