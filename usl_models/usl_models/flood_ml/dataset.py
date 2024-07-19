@@ -117,7 +117,7 @@ def load_dataset_windowed(
 
     This dataset produces the input for `model.call` and should only be used
     for training, since it uses labels.
-    For getting dat to input into `model.call_n`, use `load_dataset` instead.
+    For getting data to input into `model.call_n`, use `load_dataset` instead.
     The examples are generated from multiple simulations.
     They are windowed for training on next-map prediction.
     The dataset iteratively yields examples read from Google Cloud Storage to avoid
