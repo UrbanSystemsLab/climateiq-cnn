@@ -26,7 +26,7 @@ def main():
 
     # Run the training script trainer/flood_task.py in VertexAI.
     job = aiplatform.CustomPythonPackageTrainingJob(
-        display_name="walt-test",
+        display_name="flood_model",
         python_package_gcs_uri="gs://climateiq-vertexai/usl_models-0.0.0.tar.gz",
         python_module_name="trainer.flood_task",
         container_uri=IMAGE,
