@@ -26,7 +26,7 @@ class FloodModelParams(TypedDict):
 def default_params() -> FloodModelParams:
     """Creates default model parameter values."""
     return {
-        "batch_size": 64,
+        "batch_size": 4,
         "m_rainfall": constants.M_RAINFALL,
         "n_flood_maps": constants.N_FLOOD_MAPS,
         "lstm_units": 128,
