@@ -162,7 +162,7 @@ def test_get_spatial_feature_and_label_chunk_metadata(firestore_db) -> None:
             "gcs_uri": "gs://bucket/0_0.npy",
             "x_index": 0,
             "y_index": 0,
-            "dataset_split": "train",
+            "dataset": "train",
         }
     )
 
@@ -173,7 +173,7 @@ def test_get_spatial_feature_and_label_chunk_metadata(firestore_db) -> None:
             "gcs_uri": "gs://bucket/0_1.npy",
             "x_index": 0,
             "y_index": 1,
-            "dataset_split": "train",
+            "dataset": "train",
         }
     )
 
@@ -190,7 +190,7 @@ def test_get_spatial_feature_and_label_chunk_metadata(firestore_db) -> None:
                 "gcs_uri": "gs://bucket/0_0.npy",
                 "x_index": 0,
                 "y_index": 0,
-                "dataset_split": "train",
+                "dataset": "train",
             },
         ),
         (
@@ -203,7 +203,7 @@ def test_get_spatial_feature_and_label_chunk_metadata(firestore_db) -> None:
                 "gcs_uri": "gs://bucket/0_1.npy",
                 "x_index": 0,
                 "y_index": 1,
-                "dataset_split": "train",
+                "dataset": "train",
             },
         ),
     ]
@@ -229,7 +229,7 @@ def test_get_spatial_feature_and_label_chunk_metadata_unquoted_name(
             "feature_matrix_path": "gs://bucket/chunk_0_0.npy",
             "x_index": 0,
             "y_index": 0,
-            "dataset_split": "train",
+            "dataset": "train",
         }
     )
 
@@ -241,7 +241,7 @@ def test_get_spatial_feature_and_label_chunk_metadata_unquoted_name(
             "gcs_uri": "gs://bucket/0_0.npy",
             "x_index": 0,
             "y_index": 0,
-            "dataset_split": "train",
+            "dataset": "train",
         }
     )
 
@@ -253,13 +253,13 @@ def test_get_spatial_feature_and_label_chunk_metadata_unquoted_name(
                 "feature_matrix_path": "gs://bucket/chunk_0_0.npy",
                 "x_index": 0,
                 "y_index": 0,
-                "dataset_split": "train",
+                "dataset": "train",
             },
             {
                 "gcs_uri": "gs://bucket/0_0.npy",
                 "x_index": 0,
                 "y_index": 0,
-                "dataset_split": "train",
+                "dataset": "train",
             },
         ),
     ]
@@ -300,7 +300,7 @@ def test_get_label_chunk_metadata_missing_features(firestore_db) -> None:
             "gcs_uri": "gs://bucket/0_0.npy",
             "x_index": 0,
             "y_index": 0,
-            "dataset_split": "train",
+            "dataset": "train",
         }
     )
 
@@ -311,7 +311,7 @@ def test_get_label_chunk_metadata_missing_features(firestore_db) -> None:
             "gcs_uri": "gs://bucket/0_1.npy",
             "x_index": 0,
             "y_index": 1,
-            "dataset_split": "train",
+            "dataset": "train",
         }
     )
 
