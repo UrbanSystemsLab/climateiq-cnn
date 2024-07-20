@@ -39,7 +39,7 @@ def test_happy_path(
             f"--green-areas-file={green_areas_file_path}",
             f"--soil-type-file={soil_classes_file_path}",
             "--export-to-citycat",
-            "--override",
+            "--overwrite",
         ]
     )
 

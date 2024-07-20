@@ -29,10 +29,10 @@ def main() -> None:
 
     # Let's check and cleanup old files before uploading new ones.
     study_area_file_prefix = f"{args.name}/"
-    override = args.override
+    overwrite = args.overwrite
     study_area_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_BUCKET)
     if not _check_and_delete_storage_files_with_prefix(
-        study_area_bucket, study_area_file_prefix, override
+        study_area_bucket, study_area_file_prefix, overwrite
     ):
         sys.exit(1)
 
@@ -42,20 +42,20 @@ def main() -> None:
             cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET
         )
         if not _check_and_delete_storage_files_with_prefix(
-            citycat_bucket, study_area_file_prefix, override
+            citycat_bucket, study_area_file_prefix, overwrite
         ):
             sys.exit(1)
 
     chunk_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_CHUNKS_BUCKET)
     if not _check_and_delete_storage_files_with_prefix(
-        chunk_bucket, study_area_file_prefix, override
+        chunk_bucket, study_area_file_prefix, overwrite
     ):
         sys.exit(1)
 
     if not _check_and_delete_storage_files_with_prefix(
         storage_client.bucket(cloud_storage.FEATURE_CHUNKS_BUCKET),
         study_area_file_prefix,
-        override,
+        overwrite,
     ):
         sys.exit(1)
 
@@ -108,28 +108,29 @@ def main() -> None:
             prepared_inputs,
             work_dir,
             chunk_bucket,
-            args.chunk_length,
+            1000,
             input_elevation_band=args.elevation_geotiff_band,
         )
 
 
 def _check_and_delete_storage_files_with_prefix(
-    bucket: storage.Bucket, prefix: str, override: bool
+    bucket: storage.Bucket, prefix: str, overwrite: bool
 ) -> bool:
     """Checks if storage bucket folder has files, deletes them and returns True.
 
-    The function returns False if files are found but override is False (deletion is not
-    allowed).
+    The function returns False if files are found but overwrite is False (deletion is
+    not allowed).
     """
     blobs = [blob for blob in bucket.list_blobs(prefix=f"{prefix}")]
     if len(blobs) == 0:
         # No files, nothing to check or delete
         return True
-    if not override:
+    if not overwrite:
         # Deletion is not allowed, stop the execution
         logging.error(
             f"{len(blobs)} file(s) found in gs://{bucket.name}/{prefix}, "
-            + "please set --override in order to clean them up before upload"
+            "If you want to delete existing files, set --overwrite in order to clean "
+            "them up before upload. Otherwise, use a different study area name."
         )
         return False
     logging.info("Deleting all files in gs://%s/%s*...", bucket.name, prefix)
@@ -156,66 +157,85 @@ def _get_args_parser() -> argparse.ArgumentParser:
         "--elevation-file", help="Tiff file containing elevation data.", required=True
     )
     parser.add_argument(
-        "--boundaries-file",
-        help="Shape file defining sub-area to crop around it and clear all the data"
-        + " outside it",
-    )
-    parser.add_argument(
-        "--green-areas-file", help="Shape file containing green area locations."
-    )
-    parser.add_argument(
-        "--building-footprint-file", help="Shape file containing building footprints."
-    )
-    parser.add_argument(
-        "--soil-type-file", help="Shape file containing soil texture data."
-    )
-    parser.add_argument(
-        "--soil-type-mask-feature-property",
-        default="soil_class",
-        help="Feature property name in the soil type shape file providing soil classes",
-    )
-    parser.add_argument(
-        "--chunk-length",
-        type=int,
-        default=1000,
-        help="Length of the sub-area chunk squares to upload.",
-    )
-    parser.add_argument(
-        "--export-to-citycat",
-        type=bool,
-        default=False,
-        help="Indicator of the execution mode where input files should be exported"
-        + " to CityCat storage bucket.",
-        action=argparse.BooleanOptionalAction,
-    )
-    parser.add_argument(
         "--elevation-geotiff-band",
         type=int,
         default=1,
-        help="Band index in GeoTIFF file containing elevation data (default value is"
-        + " 1)",
+        help=(
+            "Optional band index of the layer for elevation in GeoTIFF file passed via "
+            "the --elevation-file argument. Defaults to 1."
+        ),
     )
     parser.add_argument(
-        "--verbose",
-        type=bool,
-        default=False,
-        help="Indicates that more details of processing steps should be printed to the"
-        + "console (INFO logging level instead of default ERROR one)",
-        action=argparse.BooleanOptionalAction,
+        "--boundaries-file",
+        help=(
+            "Optional shape file defining a sub-area to crop to, "
+            "removing data outside it."
+        ),
+    )
+    parser.add_argument(
+        "--green-areas-file",
+        help="Shape file containing green area locations.",
+        required=True,
     )
     parser.add_argument(
         "--non-green-area-soil-classes",
         type=int,
         default=[],
-        help="Optional list of soil classes that cannot be treated as green areas",
+        help=(
+            "Optional list of soil classes in the given green areas file that should "
+            "not be treated as green areas. Areas with these soil classes will be "
+            "treated as impermeable areas."
+        ),
         nargs="*",
     )
     parser.add_argument(
-        "--override",
+        "--building-footprint-file",
+        help="Shape file containing building footprints.",
+        required=True,
+    )
+    parser.add_argument(
+        "--soil-type-file",
+        help="Shape file containing soil texture data.",
+        required=True,
+    )
+    parser.add_argument(
+        "--soil-type-mask-feature-property",
+        default="soil_class",
+        help=(
+            "Optional name of the property in the soil type shape which provides "
+            "soil classes."
+        ),
+    )
+    parser.add_argument(
+        "--export-to-citycat",
         type=bool,
         default=False,
-        help="Indicates that old files will be cleaned up in storage buckets before"
-        + " new files can be uploaded (execution will be stopped otherwise)",
+        help=(
+            "If set, additionally generates CityCAT configuration files and uploads "
+            "them to the CityCAT inputs bucket. This is intended for geographies meant "
+            "for training rather than prediction, as we won't be running simulations "
+            "for the latter."
+        ),
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
+        "--verbose",
+        type=bool,
+        default=False,
+        help=(
+            "If set, logs additional details for processing steps as the script runs. "
+            "(Logs at the INFO level rather than ERROR.)"
+        ),
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
+        "--overwrite",
+        type=bool,
+        default=False,
+        help=(
+            "If set, existing files for a study area of the same name will be deleted. "
+            "If not set, the upload will halt to prevent deletion of data."
+        ),
         action=argparse.BooleanOptionalAction,
     )
     return parser
@@ -233,3 +253,7 @@ def _parse_args() -> argparse.Namespace:
         )
 
     return args
+
+
+if __name__ == "__main__":
+    main()
