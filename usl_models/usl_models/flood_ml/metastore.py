@@ -120,7 +120,7 @@ def get_spatial_feature_and_label_chunk_metadata(
     label_chunks_collection = (
         _get_simulation_doc(db, sim_name)
         .collection("label_chunks")
-        .where(filter=firestore.FieldFilter("dataset_split", "==", dataset_split))
+        .where(filter=firestore.FieldFilter("dataset", "==", dataset_split))
     )
     label_metadata = [doc.to_dict() for doc in label_chunks_collection.stream()]
 
