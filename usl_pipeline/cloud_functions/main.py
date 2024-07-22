@@ -486,7 +486,9 @@ def _build_feature_matrix(
                 id_=chunk_name,
                 error=firestore.DELETE_FIELD,
             ).merge(firestore.Client(), study_area_name)
-            feature_matrix, metadata = _build_flood_feature_matrix_from_archive(chunk)
+            feature_matrix, metadata, header = _build_flood_feature_matrix_from_archive(
+                chunk
+            )
 
             if feature_matrix is None:
                 raise ValueError(f"Empty archive found in {chunk_blob}")
@@ -500,7 +502,7 @@ def _build_feature_matrix(
                 chunk_path,
                 time.time() - start_time,
             )
-            _write_flood_chunk_metastore_entry(chunk_blob)
+            _write_flood_chunk_metastore_entry(chunk_blob, header)
 
         # Heat (WRF) - treat one WPS outout file as one chunk
         elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_path):
@@ -721,15 +723,15 @@ def _read_polygons_from_byte_stream(
 
 def _build_flood_feature_matrix_from_archive(
     archive: BinaryIO,
-) -> Tuple[Optional[NDArray], FeatureMetadata]:
+) -> Tuple[Optional[NDArray], FeatureMetadata, Optional[geo_data.ElevationHeader]]:
     """Builds a feature matrix for the given archive.
 
     Args:
       archive: The file containing the archive.
 
     Returns:
-      A tuple of (array, metadata) for the feature matrix and
-      metadata describing the feature matrix.
+      A tuple of (array, metadata, elevation-header) for the feature matrix, metadata
+      describing the feature matrix and elevation header describing coordinate grid.
     """
     metadata: FeatureMetadata = FeatureMetadata()
     elevation: Optional[geo_data.Elevation] = None
@@ -779,9 +781,9 @@ def _build_flood_feature_matrix_from_archive(
             soil_classes,  # type: ignore
             geo_data.DEFAULT_INFILTRATION_CONFIGURATION,
         )
-        return feature_matrix, metadata
+        return feature_matrix, metadata, elevation.header  # type: ignore
 
-    return None, FeatureMetadata()
+    return None, FeatureMetadata(), None
 
 
 def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
@@ -992,13 +994,17 @@ def _update_study_area_metastore_entry(
                 )
 
 
-def _write_flood_chunk_metastore_entry(chunk_blob: storage.Blob) -> None:
+def _write_flood_chunk_metastore_entry(
+    chunk_blob: storage.Blob,
+    header: geo_data.ElevationHeader,
+) -> None:
     """Updates the metastore with new information for the given flood chunks.
 
     Writes a Firestore entry for the new feature matrix chunk.
 
     Args:
         chunk_blob: The GCS blob containing the raw chunk archive.
+        header: The elevation header describing coordinate grid of the chunk area.
     """
     db = firestore.Client()
     study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
@@ -1011,6 +1017,10 @@ def _write_flood_chunk_metastore_entry(chunk_blob: storage.Blob) -> None:
         needs_scaling=True,
         x_index=x_index,
         y_index=y_index,
+        col_count=header.col_count,
+        row_count=header.row_count,
+        x_ll_corner=header.x_ll_corner,
+        y_ll_corner=header.y_ll_corner,
         # Remove any errors from previous failed retries which have now succeeded.
         error=firestore.DELETE_FIELD,
     ).merge(db, study_area_name)

@@ -354,10 +354,18 @@ class StudyAreaSpatialChunk(StudyAreaChunk):
     Attributes:
         x_index: The x index of the chunk relative to other chunks in the study area.
         y_index: The y index of the chunk relative to other chunks in the study area.
+        col_count: Optional number of columns in the raster of the chunk area.
+        row_count: Optional number of rows in the raster of the chunk area.
+        x_ll_corner: Optional X-coordinate of the raster's origin.
+        y_ll_corner: Optional Y-coordinate of the raster's origin.
     """
 
     x_index: Optional[int] = None
     y_index: Optional[int] = None
+    col_count: Optional[int] = None
+    row_count: Optional[int] = None
+    x_ll_corner: Optional[float] = None
+    y_ll_corner: Optional[float] = None
 
 
 @dataclasses.dataclass(slots=True)

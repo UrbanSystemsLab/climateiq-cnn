@@ -170,6 +170,10 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
                     "error": firestore.DELETE_FIELD,
                     "x_index": 1,
                     "y_index": 2,
+                    "col_count": 2,
+                    "row_count": 2,
+                    "x_ll_corner": 0.0,
+                    "y_ll_corner": 2.0,
                 },
                 merge=True,
             ),
@@ -262,7 +266,9 @@ def test_build_feature_matrix_from_archive_empty_polygons():
     # Seek to the beginning so the file can be read.
     archive.seek(0)
 
-    feature_matrix, metadata = main._build_flood_feature_matrix_from_archive(archive)
+    feature_matrix, metadata, header = main._build_flood_feature_matrix_from_archive(
+        archive
+    )
 
     numpy.testing.assert_array_equal(
         feature_matrix,
@@ -289,6 +295,16 @@ def test_build_feature_matrix_from_archive_empty_polygons():
     # Ensure we set the elevation min & max
     assert metadata == main.FeatureMetadata(
         elevation_min=2, elevation_max=6, chunk_size=2
+    )
+
+    assert header == geo_data.ElevationHeader(
+        col_count=3,
+        row_count=2,
+        x_ll_corner=0.0,
+        y_ll_corner=2.0,
+        cell_size=1.0,
+        nodata_value=1.0,
+        crs=None,
     )
 
 
