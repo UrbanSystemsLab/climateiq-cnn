@@ -61,7 +61,7 @@ def _parse_args():
         dest="model_name",
         type=str,
         help="A name for the model.",
-        default="flood_model",
+        required=True,
     )
     parser.add_argument("--epochs", dest="epochs", type=int, help="Number of epochs.")
     parser.add_argument(
