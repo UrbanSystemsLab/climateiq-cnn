@@ -490,7 +490,7 @@ def _build_feature_matrix(
                 chunk
             )
 
-            if feature_matrix is None:
+            if feature_matrix is None or header is None:
                 raise ValueError(f"Empty archive found in {chunk_blob}")
 
             # Updating min/max elevation in the study area metadata first before storing
@@ -502,8 +502,6 @@ def _build_feature_matrix(
                 chunk_path,
                 time.time() - start_time,
             )
-            if header is None:
-                raise ValueError("Unexpected state of the flood processing pipeline")
             _write_flood_chunk_metastore_entry(chunk_blob, header)
 
         # Heat (WRF) - treat one WPS outout file as one chunk
@@ -733,7 +731,9 @@ def _build_flood_feature_matrix_from_archive(
 
     Returns:
       A tuple of (array, metadata, elevation-header) for the feature matrix, metadata
-      describing the feature matrix and elevation header describing coordinate grid.
+      describing the feature matrix and elevation header describing coordinate grid. In
+      case there are no files related to study area in the archive optional items in the
+      returning tuple will be None.
     """
     metadata: FeatureMetadata = FeatureMetadata()
     elevation: Optional[geo_data.Elevation] = None
@@ -769,21 +769,24 @@ def _build_flood_feature_matrix_from_archive(
         file is not None for file in (elevation, buildings, green_areas, soil_classes)
     ]
     if any(flood_files_present):
-        if not all(flood_files_present):
+        if (
+            elevation is None
+            or buildings is None
+            or green_areas is None
+            or soil_classes is None
+        ):
             raise ValueError(
                 f"Some flood simulation data missing (see tar list: {files_in_tar})"
             )
-        # MyPy can't figure out that the all() call above prevents arguments in the
-        # following call from being None.
         feature_matrix = feature_raster_transformers.transform_to_feature_raster_layers(
-            elevation,  # type: ignore
+            elevation,
             boundaries,
-            buildings,  # type: ignore
-            green_areas,  # type: ignore
-            soil_classes,  # type: ignore
+            buildings,
+            green_areas,
+            soil_classes,
             geo_data.DEFAULT_INFILTRATION_CONFIGURATION,
         )
-        return feature_matrix, metadata, elevation.header  # type: ignore
+        return feature_matrix, metadata, elevation.header
 
     return None, FeatureMetadata(), None
 
