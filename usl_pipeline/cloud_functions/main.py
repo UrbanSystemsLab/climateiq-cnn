@@ -502,6 +502,8 @@ def _build_feature_matrix(
                 chunk_path,
                 time.time() - start_time,
             )
+            if header is None:
+                raise ValueError("Unexpected state of the flood processing pipeline")
             _write_flood_chunk_metastore_entry(chunk_blob, header)
 
         # Heat (WRF) - treat one WPS outout file as one chunk
