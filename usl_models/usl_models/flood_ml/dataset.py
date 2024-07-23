@@ -68,27 +68,9 @@ def load_dataset(
         generator=generator,
         output_signature=(
             dict(
-                geospatial=tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.GEO_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                temporal=tf.TensorSpec(
-                    shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
-                    dtype=tf.float32,
-                ),
-                spatiotemporal=tf.TensorSpec(
-                    shape=(
-                        n_flood_maps,
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        1,
-                    ),
-                    dtype=tf.float32,
-                ),
+                geospatial=geospatial_generator_signature(),
+                temporal=temporal_generator_signature(m_rainfall),
+                spatiotemporal=spatiotemporal_generator_signature(n_flood_maps),
             ),
             tf.TensorSpec(
                 shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
@@ -101,6 +83,36 @@ def load_dataset(
     if batch_size:
         dataset = dataset.batch(batch_size)
     return dataset
+
+
+def geospatial_generator_signature() -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            constants.GEO_FEATURES,
+        ),
+        dtype=tf.float32,
+    )
+
+
+def temporal_generator_signature(m_rainfall: int) -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
+        dtype=tf.float32,
+    )
+
+
+def spatiotemporal_generator_signature(n_flood_maps: int) -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(
+            n_flood_maps,
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            1,
+        ),
+        dtype=tf.float32,
+    )
 
 
 def load_dataset_windowed(
@@ -252,16 +264,14 @@ def _iter_model_inputs(
         model_input = model.Input(
             temporal=temporal,
             geospatial=geospatial,
-            spatiotemporal=tf.zeros(
-                shape=(
-                    n_flood_maps,
-                    constants.MAP_HEIGHT,
-                    constants.MAP_WIDTH,
-                    1,
-                )
-            ),
+            spatiotemporal=spatiotemporal_zeros(n_flood_maps),
         )
         yield model_input, labels
+
+
+def spatiotemporal_zeros(n_flood_maps: int):
+    """Tensor with zeros needed for spatiotemporal parameter."""
+    return tf.zeros(shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1))
 
 
 def _generate_temporal_tensor(
@@ -274,11 +284,19 @@ def _generate_temporal_tensor(
     temporal_metadata = metastore.get_temporal_feature_metadata(
         firestore_client, sim_name
     )
-    gcs_url = temporal_metadata["as_vector_gcs_uri"]
+    return generate_temporal_tensor_from_gcs_uri(
+        storage_client, temporal_metadata["as_vector_gcs_uri"], m_rainfall
+    )
 
-    logging.info("Retrieving temporal features from %s.", gcs_url)
 
-    temporal_vector = _download_as_tensor(storage_client, gcs_url)
+def generate_temporal_tensor_from_gcs_uri(
+    storage_client: storage.Client,
+    gcs_uri: str,
+    m_rainfall: int,
+) -> tf.Tensor:
+    """Creates a temporal tensor from the numpy array stored in GCS."""
+    logging.info("Retrieving temporal features from %s.", gcs_uri)
+    temporal_vector = download_as_tensor(storage_client, gcs_uri)
     return tf.transpose(
         tf.tile(tf.reshape(temporal_vector, (1, len(temporal_vector))), [m_rainfall, 1])
     )
@@ -304,14 +322,14 @@ def _iter_geo_feature_label_tensors(
         logging.info(
             "Retrieving features from %s and labels from %s", feature_url, label_url
         )
-        feature_tensor = _download_as_tensor(storage_client, feature_url)
-        label_tensor = _download_as_tensor(storage_client, label_url)
+        feature_tensor = download_as_tensor(storage_client, feature_url)
+        label_tensor = download_as_tensor(storage_client, label_url)
 
         reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
         yield feature_tensor, reshaped_label_tensor
 
 
-def _download_as_array(client: storage.Client, gcs_url: str) -> NDArray:
+def download_as_array(client: storage.Client, gcs_url: str) -> NDArray:
     """Retrieves the contents at `gcs_url` from GCS as a numpy array."""
     parsed = urllib.parse.urlparse(gcs_url)
     bucket = client.bucket(parsed.netloc)
@@ -321,9 +339,9 @@ def _download_as_array(client: storage.Client, gcs_url: str) -> NDArray:
         return numpy.load(fd)
 
 
-def _download_as_tensor(client: storage.Client, gcs_url: str) -> tf.Tensor:
+def download_as_tensor(client: storage.Client, gcs_url: str) -> tf.Tensor:
     """Retrieves the contents at `gcs_url` from GCS as a tf tensor."""
     return tf.convert_to_tensor(
-        _download_as_array(client, gcs_url),
+        download_as_array(client, gcs_url),
         dtype=tf.float32,
     )
