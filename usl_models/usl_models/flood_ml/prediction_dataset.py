@@ -3,7 +3,7 @@
 import logging
 from typing import Dict, Iterator, Optional, TypedDict
 
-from google.cloud import storage  # type:ignore[attr-defined]
+from google.cloud import firestore, storage  # type:ignore[attr-defined]
 import numpy
 import tensorflow as tf
 
@@ -21,27 +21,28 @@ class PredictionInput(TypedDict):
 
 def load_prediction_dataset(
     rainfall_config_gcs_uri: str,
-    chunk_id_to_gcs_uri_map: Dict[str, str],
+    study_area_name: str,
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
+    firestore_client: Optional[firestore.Client] = None,
     storage_client: Optional[storage.Client] = None,
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunk inputs for the flood model prediction.
 
     This dataset produces the input for `model.call_n`.
-    The dataset iteratively yields examples read from Google Cloud Storage to avoid
-    pulling all examples into memory at once.
+    The dataset iteratively yields chunk examples read from Google Cloud Storage to
+    avoid pulling all examples into memory at once.
 
     Args:
         rainfall_config_gcs_uri: The GCS path for rainfall config numpy matrix.
-        chunk_id_to_gcs_uri_map: Map with chunk IDs as keys and GCS paths to chunk
-            feature matrices as values.
+        study_area_name: Name of study area used to load chunks for.
         batch_size: Size of batches yielded by the dataset.
         n_flood_maps: The number of flood maps in each example.
         m_rainfall: The width of the temporal rainfall tensor.
         storage_client: The client to use when interacting with Cloud Storage.
     """
+    firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 
     def generator():
@@ -49,7 +50,7 @@ def load_prediction_dataset(
         for prediction_input in _iter_prediction_inputs(
             storage_client,
             rainfall_config_gcs_uri,
-            chunk_id_to_gcs_uri_map,
+            _load_chunk_id_to_uri_map(firestore_client, study_area_name),
             n_flood_maps,
             m_rainfall,
         ):
@@ -68,6 +69,21 @@ def load_prediction_dataset(
             ),
         ),
     ).batch(batch_size)
+
+
+def _load_chunk_id_to_uri_map(
+    db: firestore.Client, study_area_name: str
+) -> Dict[str, str]:
+    """Lists chunk IDs from metadata with associated GCS-paths to feature matrices."""
+    return {
+        ref.id: ref.get().to_dict()["feature_matrix_path"]
+        for ref in (
+            db.collection("study_areas")
+            .document(study_area_name)
+            .collection("chunks")
+            .list_documents()
+        )
+    }
 
 
 def _iter_prediction_inputs(
