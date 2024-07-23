@@ -242,6 +242,47 @@ def test_flood_scenario_config_delete():
     )
 
 
+def test_heat_scenario_config_set():
+    mock_db = mock.MagicMock()
+    metastore.HeatScenarioConfig(
+        name="b/c",
+        parent_config_name="parent",
+        gcs_uri="a/b/c",
+        simulation_year=2012,
+        simulation_months="JJA",
+        percentile=99,
+    ).set(mock_db)
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("wrf_heat_configs"),
+            mock.call.collection().document("b%2Fc"),
+            mock.call.collection()
+            .document()
+            .set(
+                {
+                    "parent_config_name": "parent",
+                    "gcs_uri": "a/b/c",
+                    "simulation_year": 2012,
+                    "simulation_months": "JJA",
+                    "percentile": 99,
+                },
+            ),
+        ]
+    )
+
+
+def test_heat_scenario_config_delete():
+    mock_db = mock.MagicMock()
+    metastore.HeatScenarioConfig.delete(mock_db, "a/b/c")
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("wrf_heat_configs"),
+            mock.call.collection().document("a%2Fb%2Fc"),
+            mock.call.collection().document().delete(),
+        ]
+    )
+
+
 def test_simulation_label_chunk_dataset_split_produce_right_split() -> None:
     """Ensure dataset_split produces a 60/20/20 split."""
     study_area = metastore.StudyArea(

@@ -107,6 +107,44 @@ def test_flood_scenario_config_get_set_delete(firestore_db):
         metastore.FloodScenarioConfig.get(firestore_db, "config/name.txt")
 
 
+def test_heat_scenario_config_get_set_delete(firestore_db):
+    """Ensures we can create, retrieve and delete heat configs."""
+    heat = metastore.HeatScenarioConfig(
+        name="config-group/Heat_Data_2012.txt",
+        parent_config_name="config-group",
+        gcs_uri="gs://config-bucket/config-group/Heat_Data_2012.txt",
+        simulation_year=2012,
+        simulation_months="JJA",
+        percentile=99,
+    )
+    heat.set(firestore_db)
+
+    assert heat == metastore.HeatScenarioConfig.get(
+        firestore_db, "config-group/Heat_Data_2012.txt"
+    )
+    assert (
+        metastore.HeatScenarioConfig.get_ref(
+            firestore_db, "config-group/Heat_Data_2012.txt"
+        )
+        .get()
+        .exists
+    )
+
+    metastore.HeatScenarioConfig.delete(firestore_db, "config-group/Heat_Data_2012.txt")
+
+    assert not (
+        metastore.HeatScenarioConfig.get_ref(
+            firestore_db, "config-group/Heat_Data_2012.txt"
+        )
+        .get()
+        .exists
+    )
+    with pytest.raises(ValueError):
+        metastore.HeatScenarioConfig.get(
+            firestore_db, "config-group/Heat_Data_2012.txt"
+        )
+
+
 def test_simulation_get_set_label_chunks(firestore_db):
     """Ensures we can save and retrieve simulations and their label chunks."""
     metastore.StudyArea(

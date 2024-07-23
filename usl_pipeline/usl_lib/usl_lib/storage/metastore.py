@@ -18,6 +18,7 @@ STUDY_AREAS = "study_areas"
 STUDY_AREA_CHUNKS = "chunks"
 
 CITY_CAT_RAINFALL_CONFIG = "city_cat_rainfall_configs"
+WRF_HEAT_CONFIG = "wrf_heat_configs"
 
 SIMULATIONS = "simulations"
 SIMULATION_LABEL_CHUNKS = "label_chunks"
@@ -458,6 +459,65 @@ class FloodScenarioConfig:
         """Retrieve a Firestore reference to the flood config with the given name."""
         # Escape the name to avoid characters not allowed in IDs such as slashes.
         return db.collection(CITY_CAT_RAINFALL_CONFIG).document(
+            urllib.parse.quote(name, safe=())
+        )
+
+
+@dataclasses.dataclass(slots=True)
+class HeatScenarioConfig:
+    """A configuration file describing heat scenario for a WRF simulation.
+
+    Attributes:
+        name: A human-readable name of the study area. Must be unique. Must be
+                in the form: <study_area>_Heat (ex: NYC_Heat, NYC_PHX, etc)
+        parent_config_name: The grouping containing this and other configurations which
+                    are run together in batches of simulations.
+        gcs_uri: The GCS location of the configuration file.
+        simulation_year: (int) The year of the source data that WRF ingested
+        simulation_months: The months of the source data (must be in acronym format)
+                Ex: "JJA" - denotes: June July August
+        percentile: (int) The percentile of the year's heat (determined by WRF team
+            when selecting yearly source data) - ex: 99
+    """
+
+    name: str
+    parent_config_name: str
+    gcs_uri: str
+    simulation_year: int
+    simulation_months: str
+    percentile: int
+
+    def set(self, db: firestore.Client) -> None:
+        """Creates or updates an existing entry for a WRF configuration file."""
+        self.get_ref(db, self.name).set(
+            {
+                "parent_config_name": self.parent_config_name,
+                "gcs_uri": self.gcs_uri,
+                "simulation_year": self.simulation_year,
+                "simulation_months": self.simulation_months,
+                "percentile": self.percentile,
+            }
+        )
+
+    @classmethod
+    def delete(cls, db: firestore.Client, name: str) -> None:
+        """Deletes the WRF configuration entry for the given file."""
+        cls.get_ref(db, name).delete()
+
+    @classmethod
+    def get(cls, db: firestore.Client, name: str) -> "HeatScenarioConfig":
+        """Retrieve the heat config with the given name."""
+        ref = cls.get_ref(db, name).get()
+        if not ref.exists:
+            raise ValueError(f'No such heat config "{name}"')
+
+        return cls(name=name, **ref.to_dict())
+
+    @staticmethod
+    def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
+        """Retrieve a Firestore reference to the heat config with the given name."""
+        # Escape the name to avoid characters not allowed in IDs such as slashes.
+        return db.collection(WRF_HEAT_CONFIG).document(
             urllib.parse.quote(name, safe=())
         )
 
