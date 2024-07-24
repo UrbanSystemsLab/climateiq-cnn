@@ -2043,3 +2043,23 @@ def test_rescale_feature_matrices_for_wrong_file(mock_firestore_client):
     )
 
     feature_bucket.assert_not_called()
+
+
+@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(main.firestore, "Client", autospec=True)
+def test_rescale_feature_matrices_skips_wps_files(
+    mock_firestore_client, mock_storage_client
+):
+    main.rescale_feature_matrices(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "bucket",
+                "name": "e2e_test_717_1/met_em.d03.2010-06-08_18:00:00.npy",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    mock_firestore_client.assert_not_called()
+    mock_storage_client.assert_not_called()
