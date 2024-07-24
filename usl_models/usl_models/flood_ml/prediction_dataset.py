@@ -40,6 +40,7 @@ def load_prediction_dataset(
         batch_size: Size of batches yielded by the dataset.
         n_flood_maps: The number of flood maps in each example.
         m_rainfall: The width of the temporal rainfall tensor.
+        firestore_client: The client to use when interacting with Firestore.
         storage_client: The client to use when interacting with Cloud Storage.
     """
     firestore_client = firestore_client or firestore.Client()
