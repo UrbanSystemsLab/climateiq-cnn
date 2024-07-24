@@ -603,14 +603,14 @@ def test_process_wps_feature_apply_minmax_scaler():
     )
 
 
-def test_compute_custom_wps_variables_wind():
+def test_compute_wind_components():
     ncfile = netCDF4.Dataset("met_em_test.nc", mode="w", format="NETCDF4", memory=1)
     ncfile.createDimension("Time", 1)
-    ncfile.createDimension("west_east", 3)
-    ncfile.createDimension("south_north", 3)
-    ncfile.createDimension("west_east_stag", 4)
-    ncfile.createDimension("south_north_stag", 4)
-    ncfile.createDimension("num_metgrid_levels", 3)
+    ncfile.createDimension("west_east", 2)
+    ncfile.createDimension("south_north", 2)
+    ncfile.createDimension("west_east_stag", 3)
+    ncfile.createDimension("south_north_stag", 3)
+    ncfile.createDimension("num_metgrid_levels", 2)
 
     # In WPS/WRF files, 'Times'->dimension and 'Time'->variable
     ncfile.createVariable("Times", "f8", ("Time",))
@@ -621,11 +621,9 @@ def test_compute_custom_wps_variables_wind():
         "VV", "float32", ("Time", "num_metgrid_levels", "south_north_stag", "west_east")
     )
 
-    uu[:] = numpy.array(
-        [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]], dtype=numpy.float32
-    )
+    uu[:] = numpy.array([[1, 0, 0], [1, 0, 0]], dtype=numpy.float32)
     vv[:] = numpy.array(
-        [[22, 33, 44], [55, 66, 77], [88, 99, 111], [222, 333, 444]],
+        [[0, 1], [0, 1], [0, 1]],
         dtype=numpy.float32,
     )
 
@@ -633,12 +631,24 @@ def test_compute_custom_wps_variables_wind():
     ncfile_bytes = memfile.tobytes()
     ds = xarray.open_dataset(io.BytesIO(ncfile_bytes))
 
-    processed_ds = main._compute_custom_wps_variables(ds)
+    processed_ds = main._compute_wind_components(ds)
 
-    # Check that processed dataset contains newly computed variables
-    assert all(var in processed_ds.keys() for var in ["WSPD10", "WDIR10"])
-    # Check expected shape of computed variable
-    assert processed_ds.data_vars["WSPD10"].values.shape == (1, 3, 3, 3)
+    # Check computations of new variables
+    wspd = processed_ds.data_vars["WSPD"]
+    wpsd_expected = [[[[0.5, 1], [0.5, 1]], [[0.5, 1], [0.5, 1]]]]
+    numpy.testing.assert_array_almost_equal(wpsd_expected, wspd.values)
+
+    wdir_sin = processed_ds.data_vars["WDIR_SIN"]
+    wdir_sin_expected = [[[[-1, 0], [-1, 0]], [[-1, 0], [-1, 0]]]]
+    numpy.testing.assert_array_almost_equal(wdir_sin_expected, wdir_sin.values)
+
+    wdir_cos = processed_ds.data_vars["WDIR_COS"]
+    wdir_cos_expected = [[[[0, -1], [0, -1]], [[0, -1], [0, -1]]]]
+    numpy.testing.assert_array_almost_equal(wdir_cos_expected, wdir_cos.values)
+
+    # Check shape of new variable - should take on the shape according to new dims:
+    # (time, num_metgrid_levels, south_north, west_east)
+    assert wspd.shape == (1, 2, 2, 2)
 
 
 @mock.patch.object(main.firestore, "Client", autospec=True)

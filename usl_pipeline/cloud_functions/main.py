@@ -826,8 +826,18 @@ def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
     Returns:
       A new xarray dataset with newly derived variables.
     """
-    # Derive wind components: WSPD10 (wind speed), WDIR10 (wind direction)
+    dataset = _compute_wind_components(dataset)
+    # TODO: compute solar time
+
+    return dataset
+
+
+def _compute_wind_components(dataset: xarray.Dataset) -> xarray.Dataset:
+    # WSPD (wind speed) at FNL level 0 (~10m)
+    # WDIR_SIN (wind direction_sine component) at FNL level 0 (~10m)
+    # WDIR_COS (wind direction_cosine component) at FNL level 0 (~10m)
     if all(var in dataset.keys() for var in ["UU", "VV"]):
+        # Derive wind components from UU and VV: WSPD, WDIR
         uu = dataset.data_vars["UU"]
         vv = dataset.data_vars["VV"]
 
@@ -835,14 +845,44 @@ def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
         uu_centered = (uu[:, :, :, :-1] + uu[:, :, :, 1:]) / 2
         vv_centered = (vv[:, :, :-1, :] + vv[:, :, 1:, :]) / 2
 
+        # Compute wind speed
         wind_speed = numpy.sqrt(uu_centered.values**2 + vv_centered.values**2)
+
+        # compute wind direction 0 deg is x-axis
+        # 270 is subtracted to align direction to true North
         wind_direction = (
             270 - numpy.degrees(numpy.arctan2(vv_centered.values, uu_centered.values))
         ) % 360
 
+        # Define functions to compute sine and cosine components of wind direction
+        def _direction_to_sine(degrees):
+            radians = (degrees / 360.0) * 2 * numpy.pi
+            return numpy.sin(radians)
+
+        def _direction_to_cosine(degrees):
+            radians = (degrees / 360.0) * 2 * numpy.pi
+            return numpy.cos(radians)
+
+        # Compute sine and cosine components of wind direction
+        wind_direction_sin = _direction_to_sine(wind_direction)
+        wind_direction_cos = _direction_to_cosine(wind_direction)
+
         new_dims = ["Time", "num_metgrid_levels", "south_north", "west_east"]
-        dataset = dataset.assign(WSPD10=(new_dims, wind_speed))
-        dataset = dataset.assign(WDIR10=(new_dims, wind_direction))
+
+        # Assign new variables to dataset
+        dataset = dataset.assign(
+            WSPD=xarray.DataArray(wind_speed, coords=vv_centered.coords, dims=new_dims)
+        )
+        dataset = dataset.assign(
+            WDIR_SIN=xarray.DataArray(
+                wind_direction_sin, coords=vv_centered.coords, dims=new_dims
+            )
+        )
+        dataset = dataset.assign(
+            WDIR_COS=xarray.DataArray(
+                wind_direction_cos, coords=vv_centered.coords, dims=new_dims
+            )
+        )
 
     return dataset
 
