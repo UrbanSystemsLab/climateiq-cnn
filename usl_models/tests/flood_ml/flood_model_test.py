@@ -180,9 +180,8 @@ def test_model_checkpoint():
 
     with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
         model.save_model(tmp.name, overwrite=True)
-
         new_model = flood_model.FloodModel(params, spatial_dims=(height, width))
-        new_model.load_model(tmp.name)
+        new_model.load_weights(tmp.name)
 
     old_weights = model._model.get_weights()
     new_weights = new_model._model.get_weights()
