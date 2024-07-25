@@ -1,21 +1,16 @@
 """Flood model definition."""
 
-import dataclasses
 import logging
 from typing import TypeAlias, TypedDict, List, Callable
 
-import tensorflow as tf
 import keras
 from keras import layers
+from google.cloud.aiplatform.utils import prediction_utils
+import tensorflow as tf
 
 from usl_models.flood_ml import constants
-from usl_models.flood_ml import data_utils
 from usl_models.flood_ml import model_params
 
-st_tensor: TypeAlias = tf.Tensor
-geo_tensor: TypeAlias = tf.Tensor
-temp_tensor: TypeAlias = tf.Tensor
-FloodModelData: TypeAlias = data_utils.FloodModelData
 FloodModelParams: TypeAlias = model_params.FloodModelParams
 
 
@@ -39,6 +34,7 @@ class FloodModel:
         self,
         model_params: FloodModelParams,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
+        artifact_uri: str | None = None,
     ):
         """Creates the flood model.
 
@@ -47,10 +43,13 @@ class FloodModel:
             spatial_dims: Tuple of spatial height and width input dimensions.
                 Needed for defining input shapes. This is an optional arg that
                 can be changed (primarily for testing/debugging).
+            artifact_uri: Optional artifact URI to load model weights from.
         """
         self._model_params = model_params
         self._spatial_dims = spatial_dims
         self._model = self._build_model()
+        if artifact_uri is not None:
+            self._load_weights_from_artifact(artifact_uri)
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
@@ -68,57 +67,11 @@ class FloodModel:
         )
         return model
 
-    def _validate_and_preprocess_data(
-        self,
-        data: FloodModelData,
-        training=True,
-    ) -> FloodModelData:
-        """Validates model data and does all necessary preprocessing.
-
-        Args:
-            data: A FloodModelData object. Labels are required for training.
-            training: Whether data is used for model training. If True, labels
-                will be validated.
-
-        Returns:
-            A processed FloodModelData object.
-        """
-        if training:
-            # Labels are required for training.
-            if data.labels is None:
-                raise ValueError("Labels must be provided during model training.")
-
-            # Labels must match the storm duration.
-            expected_label_shape = list(data.labels.shape)
-            expected_label_shape[1] = data.storm_duration
-            assert data.labels.shape[1] == data.storm_duration, (
-                "Provided labels are inconsistent with storm duration. "
-                f"Labels are expected to have shape {expected_label_shape}. "
-                f"Actual shape: {data.labels.shape}."
-            )
-
-        # Check whether the temporal data is already windowed. If it is, checks
-        # the expected shape. Otherwise, create the window view.
-        if tf.rank(data.temporal) == 3:  # windowed: (B, T_max, m)
-            assert data.temporal.shape[-1] == self._model_params["m_rainfall"], (
-                "Mismatch between the temporal data window size "
-                f"({data.temporal.shape[-1]}) and the expected window size "
-                f"(m = {self._model_params['m_rainfall']})."
-            )
-        else:
-            full_temp_input = data_utils.temporal_window_view(
-                data.temporal, self._model_params["m_rainfall"]
-            )
-            data = dataclasses.replace(data, temporal=full_temp_input)
-
-        # We assume that, if provided, this input is a *single* flood map.
-        st_input = data.spatiotemporal
-        if st_input is None:
-            st_shape = data.geospatial.shape[:3] + [1]
-            st_input = tf.zeros(st_shape)
-
-        data = dataclasses.replace(data, spatiotemporal=st_input)
-        return data
+    def _load_weights_from_artifact(self, artifact_uri: str):
+        """Loads model weights from a GCS artifact URI."""
+        prediction_utils.download_model_artifacts(artifact_uri)
+        loaded_model = keras.models.load_model("model")
+        self._model.set_weights(loaded_model.get_weights())
 
     def call(self, input: Input) -> tf.Tensor:
         """Predict the next timestep. See `FloodConvLSTM.call`."""
@@ -156,7 +109,7 @@ class FloodModel:
             callbacks=callbacks,
         )
 
-    def load_model(self, filepath: str) -> None:
+    def load_weights(self, filepath: str) -> None:
         """Loads weights from an existing file.
 
         Args:
