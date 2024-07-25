@@ -129,6 +129,14 @@ def _retry_and_report_errors(
                 )
                 return
 
+            logging.info(
+                "Received event id: %s, source: %s, bucket: %s, name: %s",
+                cloud_event["id"],
+                cloud_event["source"],
+                cloud_event.data.get("bucket"),
+                cloud_event.data.get("name"),
+            )
+
             # Catch exceptions and report them with GCP error reporting.
             try:
                 func(cloud_event)
@@ -1266,6 +1274,10 @@ def rescale_feature_matrices(cloud_event: functions_framework.CloudEvent) -> Non
         cloud_event: Cloud event pointing to one of unscaled feature matrix files with
             name following the "chunk_*" pattern. Other files are ignored.
     """
+    if re.search(file_names.WPS_DOMAIN3_NC_REGEX, cloud_event.data["name"]):
+        logging.info("Skipping WRF file  %s", cloud_event.data["name"])
+        return
+
     _start_feature_rescaling_if_ready(
         storage.Client().bucket(cloud_event.data["bucket"]), cloud_event.data["name"]
     )
