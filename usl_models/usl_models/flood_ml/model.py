@@ -145,7 +145,7 @@ class FloodModel:
         ```py
         strategy = tf.distribute.MirroredStrategy()
         with strategy.scope():
-          model = FloodModel(artifact_uri="gs://path/to/model")
+          model = FloodModel.from_checkpoint(artifact_uri="gs://path/to/model")
           for results in model.batch_predict_n(strategy, dataset, n=4):
             for result in results:
               print(result)
@@ -158,8 +158,8 @@ class FloodModel:
 
         Returns: an iterator containing batches of results.
         """
-        dataset = strategy.experimental_distribute_dataset(dataset)
         strategy = tf.distribute.get_strategy()
+        dataset = strategy.experimental_distribute_dataset(dataset)
 
         @tf.function(reduce_retracing=True)
         def predict(inputs: FloodModel.Input, n: int):
