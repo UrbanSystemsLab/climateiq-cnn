@@ -190,7 +190,7 @@ def load_dataset_windowed(
 
 def _generate_windows(
     model_input: model.FloodModel.Input, labels: tf.Tensor, n_flood_maps: int
-) -> Iterator[Tuple[model.Input, tf.Tensor]]:
+) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor]]:
     """Generate inputs for a sliding time window of length n_flood_maps timesteps."""
     (T_max, H, W, *_) = labels.shape
     for t in range(T_max):
@@ -236,7 +236,7 @@ def _iter_model_inputs(
     m_rainfall: int,
     max_chunks: int | None,
     dataset_split: str,
-) -> Iterator[Tuple[model.Input, tf.Tensor]]:
+) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor]]:
     """Yields model inputs for each spatial chunk in the simulation."""
     temporal = _generate_temporal_tensor(
         firestore_client, storage_client, sim_name, m_rainfall
