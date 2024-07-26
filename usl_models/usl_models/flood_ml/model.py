@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import TypeAlias, TypedDict, List, Callable
+from typing import Iterator, TypeAlias, TypedDict, List, Callable
 
 import keras
 from keras import layers
@@ -29,6 +29,12 @@ class FloodModel:
         geospatial: tf.Tensor
         temporal: tf.Tensor
         spatiotemporal: tf.Tensor
+
+    class Result(TypedDict):
+        """Prediction result dictionary."""
+
+        prediction: tf.Tensor
+        chunk_id: str
 
     def __init__(
         self,
@@ -90,6 +96,59 @@ class FloodModel:
     def call_n(self, full_input: Input, n: int = 1) -> tf.Tensor:
         """Predict the next n timesteps. See `FloodConvLSTM.call_n`."""
         return self._model.call_n(full_input, n=n)
+
+    def batch_predict_n(
+        self, dataset: tf.data.Dataset, n: int = 1
+    ) -> Iterator[list[Result]]:
+        """Runs batch prediction (call_n).
+
+        The strategy should be the same as the one used to initialize the model.
+
+        Example usage:
+        ```py
+        strategy = tf.distribute.MirroredStrategy()
+        with strategy.scope():
+          model = FloodModel.from_checkpoint(artifact_uri="gs://path/to/model")
+          for results in model.batch_predict_n(strategy, dataset, n=4):
+            for result in results:
+              print(result)
+        ```
+
+        Args:
+            strategy: multi-GPU distribute strategy.
+            dataset: Dataset generating (inputs, metadata) tuples.
+            n: number of timesteps to predict.
+
+        Returns: an iterator containing batches of results.
+        """
+        strategy = tf.distribute.get_strategy()
+        dataset = strategy.experimental_distribute_dataset(dataset)
+
+        @tf.function(reduce_retracing=True)
+        def predict(inputs: FloodModel.Input, n: int):
+            prediction = self.call_n(inputs, n=n)
+            return tf.reduce_max(prediction, axis=1)
+
+        for inputs, metadata in dataset:
+            batch_predictions = strategy.run(predict, [inputs, n])
+
+            # For multi-gpu, flatten per-replica batches
+            if strategy.num_replicas_in_sync > 1:
+                replica_batches = batch_predictions.values
+                batch_predictions = []
+                for batches in replica_batches:
+                    for batch in batches:
+                        batch_predictions.append(batch)
+
+            results = []
+            # Predictions are returned in the same order as the inputs,
+            # which is a parallel array w.r.t. metadata.
+            # https://www.tensorflow.org/api_docs/python/tf/distribute/Strategy
+            for prediction, chunk_id in zip(
+                batch_predictions, metadata["feature_chunk"]
+            ):
+                results.append(self.Result(prediction=prediction, chunk_id=chunk_id))
+            yield results
 
     def fit(
         self,

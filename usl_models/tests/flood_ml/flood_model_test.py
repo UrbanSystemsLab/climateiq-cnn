@@ -7,7 +7,7 @@ import tensorflow as tf
 
 from usl_models.flood_ml import model as flood_model
 from usl_models.flood_ml import model_params
-from tests.flood_ml.mock_dataset import mock_dataset
+from tests.flood_ml.mock_dataset import mock_dataset, mock_prediction_dataset
 
 
 def pytest_model_params() -> model_params.FloodModelParams:
@@ -78,6 +78,37 @@ def test_convlstm_call_n():
     model = flood_model.FloodConvLSTM(params, spatial_dims=(height, width))
     prediction = model.call_n(input, n=storm_duration)
     assert prediction.shape == (batch_size, storm_duration, height, width)
+
+
+def test_batch_predict_n():
+    """Tests the FloodConvLSTM model batch predict.
+
+    Expected input shapes:
+        spatiotemporal: [B, n, H, W, 1)
+        geospatial: [B, H, W, f]
+        temporal: [B, T_max, m]
+
+    Expected output shape: [B, T, H, W]
+    """
+    batch_size = 4
+    height, width = 100, 100
+    storm_duration = 3
+    params = pytest_model_params()
+
+    dataset = mock_prediction_dataset(
+        params,
+        height=height,
+        width=width,
+        batch_size=batch_size,
+        n=storm_duration,
+    )
+    strategy = tf.distribute.MirroredStrategy()
+    with strategy.scope():
+        model = flood_model.FloodModel(params, spatial_dims=(height, width))
+        for results in model.batch_predict_n(dataset, n=storm_duration):
+            assert len(results) == batch_size
+            for result in results:
+                assert result["prediction"].shape == (height, width)
 
 
 def test_train():
