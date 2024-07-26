@@ -1,7 +1,6 @@
 """Flood model definition."""
 
 import logging
-import os
 from typing import TypeAlias, TypedDict, List, Callable
 
 import keras
@@ -58,13 +57,18 @@ class FloodModel:
         Ideally, we would load the entire Keras model and use that directly to allow
         loading different architectures within the same wrapper class.
         Unfortunately, `call_n` is not trivially serializeable in its current state.
+
+        Args:
+            artifact_uri: The path to the SavedModel directory.
+                This should end in `/model` if using a GCloud artifact.
+
+        Returns:
+            The loaded FloodModel.
         """
         model = cls(**kwargs)
-        loaded_model = keras.models.load_model(os.path.join(artifact_uri, "model"))
-        if loaded_model is not None:
-            model._model.set_weights(loaded_model.get_weights())
-        else:
-            logging.error(f"Failed to load model from: {artifact_uri}")
+        loaded_model = keras.models.load_model(artifact_uri)
+        assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
+        model._model.set_weights(loaded_model.get_weights())
         return model
 
     def _build_model(self) -> keras.Model:
