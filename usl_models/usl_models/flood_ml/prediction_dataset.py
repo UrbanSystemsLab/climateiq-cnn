@@ -3,12 +3,9 @@
 import logging
 import random
 from typing import Iterator, Optional, Tuple
-import urllib.parse
 
 from google.cloud import firestore  # type:ignore[attr-defined]
 from google.cloud import storage  # type:ignore[attr-defined]
-import numpy
-from numpy.typing import NDArray
 import tensorflow as tf
 
 from usl_models.flood_ml import constants
@@ -64,31 +61,13 @@ def load_prediction_dataset(
             yield model_input, metadata
 
     # Create the dataset for this simulation
-    dataset = tf.data.Dataset.from_generator(
+    prediction_dataset = tf.data.Dataset.from_generator(
         generator=generator,
         output_signature=(
             dict(
-                geospatial=tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.GEO_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                temporal=tf.TensorSpec(
-                    shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
-                    dtype=tf.float32,
-                ),
-                spatiotemporal=tf.TensorSpec(
-                    shape=(
-                        n_flood_maps,
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        1,
-                    ),
-                    dtype=tf.float32,
-                ),
+                geospatial=dataset.geospatial_dataset_signature(),
+                temporal=dataset.temporal_dataset_signature(m_rainfall),
+                spatiotemporal=dataset.spatiotemporal_dataset_signature(n_flood_maps),
             ),
             dict(
                 feature_chunk=tf.TensorSpec(shape=(), dtype=tf.string),
@@ -99,8 +78,8 @@ def load_prediction_dataset(
     # If no batch specified, do not batch the dataset, which is required
     # for generating data for batch prediction in VertexAI.
     if batch_size:
-        dataset = dataset.batch(batch_size)
-    return dataset
+        prediction_dataset = prediction_dataset.batch(batch_size)
+    return prediction_dataset
 
 
 def _iter_model_inputs_for_prediction(

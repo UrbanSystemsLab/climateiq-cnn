@@ -16,6 +16,36 @@ from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
 
 
+def geospatial_dataset_signature() -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            constants.GEO_FEATURES,
+        ),
+        dtype=tf.float32,
+    )
+
+
+def temporal_dataset_signature(m_rainfall: int) -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
+        dtype=tf.float32,
+    )
+
+
+def spatiotemporal_dataset_signature(n_flood_maps: int) -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(
+            n_flood_maps,
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            1,
+        ),
+        dtype=tf.float32,
+    )
+
+
 def load_dataset(
     sim_names: list[str],
     dataset_split: str,
@@ -68,27 +98,9 @@ def load_dataset(
         generator=generator,
         output_signature=(
             dict(
-                geospatial=tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.GEO_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                temporal=tf.TensorSpec(
-                    shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
-                    dtype=tf.float32,
-                ),
-                spatiotemporal=tf.TensorSpec(
-                    shape=(
-                        n_flood_maps,
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        1,
-                    ),
-                    dtype=tf.float32,
-                ),
+                geospatial=geospatial_dataset_signature(),
+                temporal=temporal_dataset_signature(m_rainfall),
+                spatiotemporal=spatiotemporal_dataset_signature(n_flood_maps),
             ),
             tf.TensorSpec(
                 shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
