@@ -141,7 +141,7 @@ with strategy.scope():
     model_params = usl_models.flood_ml.model_params.default_params()
     if args.batch_size is not None:
         model_params["batch_size"] = args.batch_size
-    model = usl_models.flood_ml.model.FloodModel(model_params=model_params)
+    model = usl_models.flood_ml.model.FloodModel(params=model_params)
     logging.info(
         "Training model for %s epochs with params %s", args.epochs, model_params
     )

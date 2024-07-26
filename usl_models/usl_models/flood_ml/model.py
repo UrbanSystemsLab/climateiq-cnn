@@ -1,21 +1,15 @@
 """Flood model definition."""
 
-import dataclasses
 import logging
 from typing import Iterator, TypeAlias, TypedDict, List, Callable
 
-import tensorflow as tf
 import keras
 from keras import layers
+import tensorflow as tf
 
 from usl_models.flood_ml import constants
-from usl_models.flood_ml import data_utils
 from usl_models.flood_ml import model_params
 
-st_tensor: TypeAlias = tf.Tensor
-geo_tensor: TypeAlias = tf.Tensor
-temp_tensor: TypeAlias = tf.Tensor
-FloodModelData: TypeAlias = data_utils.FloodModelData
 FloodModelParams: TypeAlias = model_params.FloodModelParams
 
 
@@ -43,20 +37,45 @@ class FloodModel:
 
     def __init__(
         self,
-        model_params: FloodModelParams,
+        params: FloodModelParams | None = None,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
     ):
         """Creates the flood model.
 
         Args:
-            model_params: A dictionary of configurable model parameters.
+            params: A dictionary of configurable model parameters.
             spatial_dims: Tuple of spatial height and width input dimensions.
                 Needed for defining input shapes. This is an optional arg that
                 can be changed (primarily for testing/debugging).
+            artifact_uri: Optional artifact URI to load model weights from.
         """
-        self._model_params = model_params
+        self._model_params = params or model_params.default_params()
         self._spatial_dims = spatial_dims
         self._model = self._build_model()
+
+    @classmethod
+    def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "FloodModel":
+        """Loads the model from a checkpoint URI.
+
+        We load weights only to keep custom methods (e.g. `call_n`) intact.
+        This only works if the model architecture is identical to the architecure
+        used during export.
+        Ideally, we would load the entire Keras model and use that directly to allow
+        loading different architectures within the same wrapper class.
+        Unfortunately, `call_n` is not trivially serializeable in its current state.
+
+        Args:
+            artifact_uri: The path to the SavedModel directory.
+                This should end in `/model` if using a GCloud artifact.
+
+        Returns:
+            The loaded FloodModel.
+        """
+        model = cls(**kwargs)
+        loaded_model = keras.models.load_model(artifact_uri)
+        assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
+        model._model.set_weights(loaded_model.get_weights())
+        return model
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
@@ -73,58 +92,6 @@ class FloodModel:
             ],
         )
         return model
-
-    def _validate_and_preprocess_data(
-        self,
-        data: FloodModelData,
-        training=True,
-    ) -> FloodModelData:
-        """Validates model data and does all necessary preprocessing.
-
-        Args:
-            data: A FloodModelData object. Labels are required for training.
-            training: Whether data is used for model training. If True, labels
-                will be validated.
-
-        Returns:
-            A processed FloodModelData object.
-        """
-        if training:
-            # Labels are required for training.
-            if data.labels is None:
-                raise ValueError("Labels must be provided during model training.")
-
-            # Labels must match the storm duration.
-            expected_label_shape = list(data.labels.shape)
-            expected_label_shape[1] = data.storm_duration
-            assert data.labels.shape[1] == data.storm_duration, (
-                "Provided labels are inconsistent with storm duration. "
-                f"Labels are expected to have shape {expected_label_shape}. "
-                f"Actual shape: {data.labels.shape}."
-            )
-
-        # Check whether the temporal data is already windowed. If it is, checks
-        # the expected shape. Otherwise, create the window view.
-        if tf.rank(data.temporal) == 3:  # windowed: (B, T_max, m)
-            assert data.temporal.shape[-1] == self._model_params["m_rainfall"], (
-                "Mismatch between the temporal data window size "
-                f"({data.temporal.shape[-1]}) and the expected window size "
-                f"(m = {self._model_params['m_rainfall']})."
-            )
-        else:
-            full_temp_input = data_utils.temporal_window_view(
-                data.temporal, self._model_params["m_rainfall"]
-            )
-            data = dataclasses.replace(data, temporal=full_temp_input)
-
-        # We assume that, if provided, this input is a *single* flood map.
-        st_input = data.spatiotemporal
-        if st_input is None:
-            st_shape = data.geospatial.shape[:3] + [1]
-            st_input = tf.zeros(st_shape)
-
-        data = dataclasses.replace(data, spatiotemporal=st_input)
-        return data
 
     def call(self, input: Input) -> tf.Tensor:
         """Predict the next timestep. See `FloodConvLSTM.call`."""
@@ -215,7 +182,7 @@ class FloodModel:
             callbacks=callbacks,
         )
 
-    def load_model(self, filepath: str) -> None:
+    def load_weights(self, filepath: str) -> None:
         """Loads weights from an existing file.
 
         Args:
@@ -447,6 +414,7 @@ class FloodConvLSTM(tf.keras.Model):
 
         # We use 1-indexing for simplicity. Time step t represents the t-th flood
         # prediction.
+        # TODO: consider using tf.while_loop to support serializing this function.
         for t in range(1, n + 1):
             input = FloodModel.Input(
                 geospatial=geospatial,
