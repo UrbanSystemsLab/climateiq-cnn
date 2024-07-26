@@ -2,7 +2,7 @@
 
 import logging
 import random
-from typing import Iterator, Optional, Tuple
+from typing import Any, Iterator, Optional, Tuple
 import urllib.parse
 
 from google.cloud import firestore  # type:ignore[attr-defined]
@@ -238,8 +238,11 @@ def _iter_model_inputs(
     dataset_split: str,
 ) -> Iterator[Tuple[model.Input, tf.Tensor]]:
     """Yields model inputs for each spatial chunk in the simulation."""
-    temporal = _generate_temporal_tensor(
-        firestore_client, storage_client, sim_name, m_rainfall
+    temporal, _ = _generate_temporal_tensor(
+        metastore.get_temporal_feature_metadata(firestore_client, sim_name),
+        storage_client,
+        sim_name,
+        m_rainfall,
     )
     feature_label_gen = _iter_geo_feature_label_tensors(
         firestore_client, storage_client, sim_name, dataset_split
@@ -265,23 +268,20 @@ def _iter_model_inputs(
 
 
 def _generate_temporal_tensor(
-    firestore_client: firestore.Client,
+    temporal_metadata: dict[str, Any],
     storage_client: storage.Client,
     sim_name: str,
     m_rainfall: int,
-) -> tf.Tensor:
+) -> tuple[tf.Tensor, int]:
     """Creates a temporal tensor from the numpy array stored in GCS."""
-    temporal_metadata = metastore.get_temporal_feature_metadata(
-        firestore_client, sim_name
-    )
     gcs_url = temporal_metadata["as_vector_gcs_uri"]
-
     logging.info("Retrieving temporal features from %s.", gcs_url)
 
     temporal_vector = _download_as_tensor(storage_client, gcs_url)
-    return tf.transpose(
+    temporal_vector = tf.transpose(
         tf.tile(tf.reshape(temporal_vector, (1, len(temporal_vector))), [m_rainfall, 1])
     )
+    return temporal_vector, temporal_metadata["rainfall_duration"]
 
 
 def _iter_geo_feature_label_tensors(
