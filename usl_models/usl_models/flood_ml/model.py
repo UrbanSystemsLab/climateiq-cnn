@@ -124,7 +124,7 @@ class FloodModel:
             st_input = tf.zeros(st_shape)
 
         data = dataclasses.replace(data, spatiotemporal=st_input)
-        return data
+        return datahttps://www.tensorflow.org/api_docs/python/tf/distribute/Strategy#experimental_distribute_dataset
 
     def call(self, input: Input) -> tf.Tensor:
         """Predict the next timestep. See `FloodConvLSTM.call`."""
@@ -178,14 +178,13 @@ class FloodModel:
                         batch_predictions.append(batch)
 
             results = []
+            # Predictions are returned in the same order as the inputs,
+            # which is a parallel array w.r.t. metadata.
+            # https://www.tensorflow.org/api_docs/python/tf/distribute/Strategy
             for prediction, chunk_id in zip(
                 batch_predictions, metadata["feature_chunk"]
             ):
-                results.append(
-                    self.Result(
-                        prediction=prediction, chunk_id=metadata["feature_chunk"]
-                    )
-                )
+                results.append(self.Result(prediction=prediction, chunk_id=chunk_id))
             yield results
 
     def fit(
