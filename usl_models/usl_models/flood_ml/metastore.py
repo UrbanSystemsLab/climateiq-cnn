@@ -148,6 +148,71 @@ def get_spatial_feature_and_label_chunk_metadata(
     ]
 
 
+def get_temporal_feature_metadata_for_prediction(
+    db: firestore.Client, config_name: str
+) -> dict[str, Any]:
+    """Retrieves metadata stating the location of temporal features in GCS.
+
+    Args:
+      db: The firestore client to use when retrieving metadata.
+      config_name: The name of the city cat configuration for which to retrieve metadata.
+
+    Returns:
+      A dictionary with keys 'as_vector_gcs_uri' and 'rainfall_duration' which state the
+      GCS location of the temporal feature vector and the duration of the rainfall
+      represented by the vector.
+
+    Raises:
+      ValueError: If a configuration `config_name` cannot be found.
+    """
+    collection_name = "city_cat_rainfall_configs"
+    config_ref = db.collection(collection_name).document(config_name)
+    config = config_ref.get()
+
+    if not config.exists:
+        raise ValueError(f"No such config {config_name} found.")
+
+    config_data = config.to_dict()
+   
+    return config_data
+
+
+def get_spatial_feature_chunk_metadata_for_prediction(
+    db: firestore.Client, study_area: str
+) -> list[dict[str, Any]]:
+    """Retrieves metadata for chunks in the NYC study area.
+
+    Args:
+      db: The firestore client to use when retrieving metadata.
+      study_area: The name of the study_area, ex: NYC
+
+    Returns:
+      A list of dictionaries, each representing a chunk with its metadata.
+
+    Raises:
+      ValueError: If the NYC document or its chunks collection cannot be found.
+    """
+    # Get the reference to the NYC document in the study_area collection
+    doc_ref = db.collection("study_areas").document(study_area)
+    doc = doc_ref.get()
+
+    if not doc.exists:
+        raise ValueError("NYC document not found in study_area collection.")
+
+    # Get the chunks collection under the NYC document
+    chunks_collection = doc_ref.collection("chunks")
+    
+    # Retrieve all chunks
+    chunks = chunks_collection.stream()
+    
+    # Convert each chunk document to a dictionary and store in a list
+    chunk_metadata = [chunk.to_dict() for chunk in chunks]
+    
+    if not chunk_metadata:
+        raise ValueError(f"No chunks found in the {doc_ref} document.")
+
+    return chunk_metadata
+
 _T = TypeVar("_T")
 
 
