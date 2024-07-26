@@ -1,7 +1,7 @@
 """Flood model definition."""
 
 import logging
-from typing import TypeAlias, TypedDict, List, Callable, Iterator
+from typing import Iterator, TypeAlias, TypedDict, List, Callable
 
 import keras
 from keras import layers
