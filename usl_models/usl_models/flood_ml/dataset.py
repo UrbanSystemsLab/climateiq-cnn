@@ -2,7 +2,7 @@
 
 import logging
 import random
-from typing import Iterator, Optional, Tuple
+from typing import Iterator, Tuple
 import urllib.parse
 
 from google.cloud import firestore  # type:ignore[attr-defined]
@@ -22,9 +22,9 @@ def load_dataset(
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
-    max_chunks: Optional[int] = None,
-    firestore_client: Optional[firestore.Client] = None,
-    storage_client: Optional[storage.Client] = None,
+    max_chunks: int | None = None,
+    firestore_client: firestore.Client = None,
+    storage_client: storage.Client | None = None,
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for the flood model.
 
@@ -109,9 +109,9 @@ def load_dataset_windowed(
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
-    max_chunks: Optional[int] = None,
-    firestore_client: Optional[firestore.Client] = None,
-    storage_client: Optional[storage.Client] = None,
+    max_chunks: int | None = None,
+    firestore_client: firestore.Client | None = None,
+    storage_client: storage.Client | None = None,
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for flood model training.
 
@@ -234,7 +234,7 @@ def _iter_model_inputs(
     sim_name: str,
     n_flood_maps: int,
     m_rainfall: int,
-    max_chunks: Optional[int],
+    max_chunks: int | None,
     dataset_split: str,
 ) -> Iterator[Tuple[model.Input, tf.Tensor]]:
     """Yields model inputs for each spatial chunk in the simulation."""
