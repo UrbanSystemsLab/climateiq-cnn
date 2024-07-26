@@ -167,26 +167,25 @@ class FloodModel:
             return tf.reduce_max(prediction, axis=1)
 
         for inputs, metadata in dataset:
+            print("metadata", metadata)
             batch_predictions = strategy.run(predict, [inputs, n])
-            results = []
+
+            # For multi-gpu, flatten per-replica batches
             if strategy.num_replicas_in_sync > 1:
-                flat_batches = []
-                for batch_replicas in batch_predictions.values:
-                    for batch in batch_replicas:
-                        flat_batches.append(batch)
-                for prediction, metadata in zip(flat_batches, metadata):
-                    results.append(
-                        self.Result(
-                            prediction=prediction, chunk_id=metadata["chunk_id"]
-                        )
+                replica_batches = batch_predictions.values
+                batch_predictions = []
+                for batches in replica_batches:
+                    for batch in batches:
+                        batch_predictions.append(batch)
+
+            results = []
+            for prediction, chunk_id in zip(batch_predictions, metadata["feature_chunk"]):
+                # print("metadata:", metadata)
+                results.append(
+                    self.Result(
+                        prediction=prediction, chunk_id=metadata["feature_chunk"]
                     )
-            else:
-                for prediction, metadata in zip(batch_predictions, metadata):
-                    results.append(
-                        self.Result(
-                            prediction=prediction, chunk_id=metadata["chunk_id"]
-                        )
-                    )
+                )
             yield results
 
     def fit(
