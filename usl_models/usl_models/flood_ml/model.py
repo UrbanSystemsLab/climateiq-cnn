@@ -179,7 +179,9 @@ class FloodModel:
                         batch_predictions.append(batch)
 
             results = []
-            for prediction, chunk_id in zip(batch_predictions, metadata["feature_chunk"]):
+            for prediction, chunk_id in zip(
+                batch_predictions, metadata["feature_chunk"]
+            ):
                 # print("metadata:", metadata)
                 results.append(
                     self.Result(
