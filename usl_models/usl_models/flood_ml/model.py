@@ -1,11 +1,11 @@
 """Flood model definition."""
 
 import logging
+import os
 from typing import TypeAlias, TypedDict, List, Callable
 
 import keras
 from keras import layers
-from google.cloud.aiplatform.utils import prediction_utils
 import tensorflow as tf
 
 from usl_models.flood_ml import constants
@@ -32,24 +32,40 @@ class FloodModel:
 
     def __init__(
         self,
-        model_params: FloodModelParams,
+        params: FloodModelParams | None,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
-        artifact_uri: str | None = None,
     ):
         """Creates the flood model.
 
         Args:
-            model_params: A dictionary of configurable model parameters.
+            params: A dictionary of configurable model parameters.
             spatial_dims: Tuple of spatial height and width input dimensions.
                 Needed for defining input shapes. This is an optional arg that
                 can be changed (primarily for testing/debugging).
             artifact_uri: Optional artifact URI to load model weights from.
         """
-        self._model_params = model_params
+        self._model_params = params or model_params.default_params()
         self._spatial_dims = spatial_dims
         self._model = self._build_model()
-        if artifact_uri is not None:
-            self._load_weights_from_artifact(artifact_uri)
+
+    @classmethod
+    def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "FloodModel":
+        """Loads the model from a checkpoint URI.
+
+        We load weights only to keep custom methods (e.g. `call_n`) intact.
+        This only works if the model architecture is identical to the architecure
+        used during export.
+        Ideally, we would load the entire Keras model and use that directly to allow
+        loading different architectures within the same wrapper class.
+        Unfortunately, `call_n` is not trivially serializeable in its current state.
+        """
+        model = cls(**kwargs)
+        loaded_model = keras.models.load_model(os.path.join(artifact_uri, "model"))
+        if loaded_model is not None:
+            model._model.set_weights(loaded_model.get_weights())
+        else:
+            logging.error(f"Failed to load model from: {artifact_uri}")
+        return model
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
@@ -66,12 +82,6 @@ class FloodModel:
             ],
         )
         return model
-
-    def _load_weights_from_artifact(self, artifact_uri: str):
-        """Loads model weights from a GCS artifact URI."""
-        prediction_utils.download_model_artifacts(artifact_uri)
-        loaded_model = keras.models.load_model("model")
-        self._model.set_weights(loaded_model.get_weights())
 
     def call(self, input: Input) -> tf.Tensor:
         """Predict the next timestep. See `FloodConvLSTM.call`."""
@@ -341,6 +351,7 @@ class FloodConvLSTM(tf.keras.Model):
 
         # We use 1-indexing for simplicity. Time step t represents the t-th flood
         # prediction.
+        # TODO: consider using tf.while_loop to support serializing this function.
         for t in range(1, n + 1):
             input = FloodModel.Input(
                 geospatial=geospatial,
