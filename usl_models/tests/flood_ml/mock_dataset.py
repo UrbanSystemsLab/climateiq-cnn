@@ -11,11 +11,13 @@ def input_signature(
     params: model_params.FloodModelParams,
     height: int = 100,
     width: int = 100,
-    n: int = 0,
+    n: int | None = None,
 ) -> dict[str, tf.TensorSpec]:
     """Returns the input signature for a dataset with n timesteps."""
     # If the datset specifies a number of timesteps, temporal tensor is of max size.
-    temporal_duration = constants.MAX_RAINFALL_DURATION if n else params["n_flood_maps"]
+    temporal_duration = (
+        constants.MAX_RAINFALL_DURATION if n is not None else params["n_flood_maps"]
+    )
     return dict(
         geospatial=tf.TensorSpec(
             shape=(height, width, constants.GEO_FEATURES), dtype=tf.float32
@@ -29,9 +31,11 @@ def input_signature(
     )
 
 
-def label_signature(height: int = 100, width: int = 100, n: int = 0) -> tf.TensorSpec:
+def label_signature(
+    height: int = 100, width: int = 100, n: int | None = None
+) -> tf.TensorSpec:
     """Returns the label signature for a dataset with n timesteps."""
-    shape = (n, height, width) if n else (height, width)
+    shape = (n, height, width) if n is not None else (height, width)
     return tf.TensorSpec(shape=shape, dtype=tf.float32)
 
 
@@ -48,8 +52,8 @@ def mock_dataset(
     height: int = 100,
     width: int = 100,
     batch_count: int = 1,
-    batch_size: int = 1,
-    n: int = 0,
+    batch_size: int | None = 1,
+    n: int | None = None,
 ) -> tf.data.Dataset:
     """Constructs a dataset of random mock data.
 
@@ -70,7 +74,8 @@ def mock_dataset(
 
     def generator():
         """Generate random tensors."""
-        for i in range(batch_size * batch_count):
+        batch_size_int = 1 if batch_size is None else batch_size
+        for i in range(batch_size_int * batch_count):
             yield flood_model.FloodModel.Input(
                 geospatial=tf.random.normal(shape=input_sig["geospatial"].shape),
                 temporal=tf.random.normal(shape=input_sig["temporal"].shape),
@@ -92,8 +97,8 @@ def mock_prediction_dataset(
     height: int = 100,
     width: int = 100,
     batch_count: int = 1,
-    batch_size: int = 1,
-    n: int = 0,
+    batch_size: int | None = 1,
+    n: int | None = None,
 ) -> tf.data.Dataset:
     """Constructs a dataset of random mock prediction data.
 
@@ -114,7 +119,8 @@ def mock_prediction_dataset(
 
     def generator():
         """Generate random tensors."""
-        for i in range(batch_size * batch_count):
+        batch_size_int = 1 if batch_size is None else batch_size
+        for i in range(batch_size_int * batch_count):
             yield flood_model.FloodModel.Input(
                 geospatial=tf.random.normal(shape=input_sig["geospatial"].shape),
                 temporal=tf.random.normal(shape=input_sig["temporal"].shape),
@@ -126,6 +132,6 @@ def mock_prediction_dataset(
     dataset = tf.data.Dataset.from_generator(
         generator=generator, output_signature=(input_sig, metadata_sig)
     )
-    if batch_size:
+    if batch_size is not None:
         dataset = dataset.batch(batch_size)
     return dataset
