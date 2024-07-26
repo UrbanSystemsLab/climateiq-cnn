@@ -8,7 +8,6 @@ import dataclasses
 from google.cloud import firestore
 from google.cloud import storage
 import numpy as np
-import tensorflow as tf
 
 from usl_models.flood_ml import model
 from usl_models.flood_ml import prediction_dataset
@@ -34,7 +33,10 @@ class BatchPredictor:
         self, study_area_id: str, config_id: str, chunk_id: str
     ) -> str:
         """Returns the GCS filepath for a prediction npy file."""
-        return f"{self.run_id}/flood/{self.model_id}/{study_area_id}/{config_id}/{chunk_id}"
+        return (
+            f"{self.run_id}/flood/{self.model_id}/{study_area_id}"
+            + f"/{config_id}/{chunk_id}"
+        )
 
     def save_prediction_npy(
         self, study_area_id: str, config_id: str, chunk_id: str, prediction: np.ndarray

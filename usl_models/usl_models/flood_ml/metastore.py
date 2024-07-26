@@ -155,7 +155,8 @@ def get_temporal_feature_metadata_for_prediction(
 
     Args:
       db: The firestore client to use when retrieving metadata.
-      config_name: The name of the city cat configuration for which to retrieve metadata.
+      config_name: The name of the city cat configuration for which to retrieve
+          metadata.
 
     Returns:
       A dictionary with keys 'as_vector_gcs_uri' and 'rainfall_duration' which state the
@@ -173,7 +174,7 @@ def get_temporal_feature_metadata_for_prediction(
         raise ValueError(f"No such config {config_name} found.")
 
     config_data = config.to_dict()
-   
+
     return config_data
 
 
@@ -201,17 +202,18 @@ def get_spatial_feature_chunk_metadata_for_prediction(
 
     # Get the chunks collection under the NYC document
     chunks_collection = doc_ref.collection("chunks")
-    
+
     # Retrieve all chunks
     chunks = chunks_collection.stream()
-    
+
     # Convert each chunk document to a dictionary and store in a list
     chunk_metadata = [chunk.to_dict() for chunk in chunks]
-    
+
     if not chunk_metadata:
         raise ValueError(f"No chunks found in the {doc_ref} document.")
 
     return chunk_metadata
+
 
 _T = TypeVar("_T")
 
