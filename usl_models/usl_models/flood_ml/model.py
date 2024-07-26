@@ -31,7 +31,7 @@ class FloodModel:
 
     def __init__(
         self,
-        params: FloodModelParams | None,
+        params: FloodModelParams | None = None,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
     ):
         """Creates the flood model.
