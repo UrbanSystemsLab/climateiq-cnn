@@ -189,12 +189,12 @@ def load_dataset_windowed(
 
 
 def _generate_windows(
-    model_input: model.Input, labels: tf.Tensor, n_flood_maps: int
+    model_input: model.FloodModel.Input, labels: tf.Tensor, n_flood_maps: int
 ) -> Iterator[Tuple[model.Input, tf.Tensor]]:
     """Generate inputs for a sliding time window of length n_flood_maps timesteps."""
     (T_max, H, W, *_) = labels.shape
     for t in range(T_max):
-        window_input = model.Input(
+        window_input = model.FloodModel.Input(
             geospatial=model_input["geospatial"],
             temporal=_extract_temporal(t, n_flood_maps, model_input["temporal"]),
             spatiotemporal=_extract_spatiotemporal(t, n_flood_maps, labels),
@@ -249,7 +249,7 @@ def _iter_model_inputs(
         if max_chunks is not None and i >= max_chunks:
             return
 
-        model_input = model.Input(
+        model_input = model.FloodModel.Input(
             temporal=temporal,
             geospatial=geospatial,
             spatiotemporal=tf.zeros(
