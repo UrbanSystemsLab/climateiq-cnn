@@ -107,7 +107,8 @@ def mock_prediction_dataset(
         height: spatial map height
         width: spatial map width
         batch_count: number of batches to produce
-        batch_size: size of each batch. If None, the data is not batched (no batch dimension).
+        batch_size: size of each batch. If None, the data is not batched
+            (no batch dimension).
         n: optional number of timesteps.
             Required for producing data for use with `model.call_n`.
 
