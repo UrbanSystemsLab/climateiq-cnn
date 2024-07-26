@@ -21,8 +21,6 @@ class Unit(Enum):
     KELVIN = 5
     FRACTION = 6
     METERSPERSEC = 7
-    # Measured clockwise from true north, range:0->359
-    DEGREES = 8
 
 
 ML_REQUIRED_VARS_REPO = dict(
@@ -91,8 +89,8 @@ ML_REQUIRED_VARS_REPO = dict(
                 "max": 5100,
             },
         },
-        # [Derived] 10meter Wind Speed
-        "WSPD10": {
+        # [Derived] FNL level 0 (~10m) Wind Speed from UU and VV
+        "WSPD": {
             "unit": Unit.METERSPERSEC,
             "scaling": {
                 "type": ScalingType.GLOBAL,
@@ -100,13 +98,24 @@ ML_REQUIRED_VARS_REPO = dict(
                 "max": 100,
             },
         },
-        # [Derived] 10meter Wind Direction
-        "WDIR10": {
-            "unit": Unit.DEGREES,
+        # [Derived] FNL level 0 (~10m) Wind Direction (Cyclic feature) from UU and VV
+        #  Sine Component of WDIR10
+        "WDIR_SIN": {
+            "unit": Unit.NONE,
             "scaling": {
                 "type": ScalingType.GLOBAL,
-                "min": 0,
-                "max": 359,
+                "min": -1,
+                "max": 1,
+            },
+        },
+        # [Derived] FNL level 0 (~10m) Wind Direction (Cyclic feature) from UU and VV
+        # Cosine Component of WDIR10
+        "WDIR_COS": {
+            "unit": Unit.NONE,
+            "scaling": {
+                "type": ScalingType.GLOBAL,
+                "min": -1,
+                "max": 1,
             },
         },
         # Monthly Climatology MODIS Leaf Area Index
