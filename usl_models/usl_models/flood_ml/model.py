@@ -124,7 +124,7 @@ class FloodModel:
             st_input = tf.zeros(st_shape)
 
         data = dataclasses.replace(data, spatiotemporal=st_input)
-        return datahttps://www.tensorflow.org/api_docs/python/tf/distribute/Strategy#experimental_distribute_dataset
+        return data
 
     def call(self, input: Input) -> tf.Tensor:
         """Predict the next timestep. See `FloodConvLSTM.call`."""
