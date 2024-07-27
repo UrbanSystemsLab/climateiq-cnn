@@ -2,7 +2,7 @@
 
 import logging
 import random
-from typing import Iterator, Tuple
+from typing import Any, Iterator, Tuple
 import urllib.parse
 
 from google.cloud import firestore  # type:ignore[attr-defined]
@@ -14,6 +14,36 @@ import tensorflow as tf
 from usl_models.flood_ml import constants
 from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
+
+
+def geospatial_dataset_signature() -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            constants.GEO_FEATURES,
+        ),
+        dtype=tf.float32,
+    )
+
+
+def temporal_dataset_signature(m_rainfall: int) -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
+        dtype=tf.float32,
+    )
+
+
+def spatiotemporal_dataset_signature(n_flood_maps: int) -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(
+            n_flood_maps,
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            1,
+        ),
+        dtype=tf.float32,
+    )
 
 
 def load_dataset(
@@ -68,27 +98,9 @@ def load_dataset(
         generator=generator,
         output_signature=(
             dict(
-                geospatial=tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.GEO_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                temporal=tf.TensorSpec(
-                    shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
-                    dtype=tf.float32,
-                ),
-                spatiotemporal=tf.TensorSpec(
-                    shape=(
-                        n_flood_maps,
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        1,
-                    ),
-                    dtype=tf.float32,
-                ),
+                geospatial=geospatial_dataset_signature(),
+                temporal=temporal_dataset_signature(m_rainfall),
+                spatiotemporal=spatiotemporal_dataset_signature(n_flood_maps),
             ),
             tf.TensorSpec(
                 shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
@@ -206,7 +218,7 @@ def _extract_temporal(t: int, n: int, temporal: tf.Tensor) -> tf.Tensor:
     """Generate inputs for a sliding time window of length `n`."""
     (_, D) = temporal.shape
     zeros = tf.zeros(shape=(max(n - t, 0), D))
-    data = temporal[max(t - n, 0) : t]
+    data = temporal[max(t - n, 0): t]
     return tf.concat([zeros, data], axis=0)
 
 
@@ -224,7 +236,7 @@ def _extract_spatiotemporal(t: int, n: int, labels: tf.Tensor) -> tf.Tensor:
     """
     (_, H, W, *_) = labels.shape
     zeros = tf.zeros(shape=(max(n - t, 0), H, W), dtype=tf.float32)
-    data = labels[max(t - n, 0) : t]
+    data = labels[max(t - n, 0): t]
     return tf.expand_dims(tf.concat([zeros, data], axis=0), axis=-1)
 
 
@@ -238,8 +250,11 @@ def _iter_model_inputs(
     dataset_split: str,
 ) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor]]:
     """Yields model inputs for each spatial chunk in the simulation."""
-    temporal = _generate_temporal_tensor(
-        firestore_client, storage_client, sim_name, m_rainfall
+    temporal, _ = _generate_temporal_tensor(
+        metastore.get_temporal_feature_metadata(firestore_client, sim_name),
+        storage_client,
+        sim_name,
+        m_rainfall,
     )
     feature_label_gen = _iter_geo_feature_label_tensors(
         firestore_client, storage_client, sim_name, dataset_split
@@ -265,23 +280,20 @@ def _iter_model_inputs(
 
 
 def _generate_temporal_tensor(
-    firestore_client: firestore.Client,
+    temporal_metadata: dict[str, Any],
     storage_client: storage.Client,
     sim_name: str,
     m_rainfall: int,
-) -> tf.Tensor:
+) -> tuple[tf.Tensor, int]:
     """Creates a temporal tensor from the numpy array stored in GCS."""
-    temporal_metadata = metastore.get_temporal_feature_metadata(
-        firestore_client, sim_name
-    )
     gcs_url = temporal_metadata["as_vector_gcs_uri"]
-
     logging.info("Retrieving temporal features from %s.", gcs_url)
 
     temporal_vector = _download_as_tensor(storage_client, gcs_url)
-    return tf.transpose(
+    temporal_vector = tf.transpose(
         tf.tile(tf.reshape(temporal_vector, (1, len(temporal_vector))), [m_rainfall, 1])
     )
+    return temporal_vector, temporal_metadata["rainfall_duration"]
 
 
 def _iter_geo_feature_label_tensors(
