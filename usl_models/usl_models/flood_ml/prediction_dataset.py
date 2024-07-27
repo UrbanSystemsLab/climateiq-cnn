@@ -90,7 +90,7 @@ def _iter_model_inputs_for_prediction(
     n_flood_maps: int,
     m_rainfall: int,
     max_chunks: int | None,
-) -> Iterator[Tuple[model.Input, dict]]:
+) -> Iterator[Tuple[model.FloodModel.Input, dict]]:
     """Yields model inputs for each spatial chunk in the simulation."""
     temporal, rainfall = dataset._generate_temporal_tensor(
         metastore.get_temporal_feature_metadata_for_prediction(
@@ -106,7 +106,7 @@ def _iter_model_inputs_for_prediction(
     ):
         metadata = {"feature_chunk": chunk_name, "rainfall": rainfall}
 
-        model_input = model.Input(
+        model_input = model.FloodModel.Input(
             temporal=temporal,
             geospatial=feature_tensor,
             spatiotemporal=tf.zeros(
