@@ -731,7 +731,7 @@ def _read_polygons_from_byte_stream(
 
 def _build_flood_feature_matrix_from_archive(
     archive: BinaryIO,
-) -> Tuple[NDArray], FeatureMetadata, geo_data.ElevationHeader | None | None:
+) -> Tuple[NDArray | None, FeatureMetadata, geo_data.ElevationHeader | None]:
     """Builds a feature matrix for the given archive.
 
     Args:
