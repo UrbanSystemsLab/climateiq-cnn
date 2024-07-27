@@ -100,7 +100,7 @@ class BatchPredictor:
         self.set_model_run_prediction_metadata(
             study_area_id=study_area_id,
             scenario_id=scenario_id,
-            chunks=chunk_metadata,
+            chunk_metadata=chunk_metadata,
         )
 
         self.bundle_predictions_to_jsonl(
