@@ -16,36 +16,6 @@ from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
 
 
-def geospatial_dataset_signature() -> tf.TensorSpec:
-    return tf.TensorSpec(
-        shape=(
-            constants.MAP_HEIGHT,
-            constants.MAP_WIDTH,
-            constants.GEO_FEATURES,
-        ),
-        dtype=tf.float32,
-    )
-
-
-def temporal_dataset_signature(m_rainfall: int) -> tf.TensorSpec:
-    return tf.TensorSpec(
-        shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
-        dtype=tf.float32,
-    )
-
-
-def spatiotemporal_dataset_signature(n_flood_maps: int) -> tf.TensorSpec:
-    return tf.TensorSpec(
-        shape=(
-            n_flood_maps,
-            constants.MAP_HEIGHT,
-            constants.MAP_WIDTH,
-            1,
-        ),
-        dtype=tf.float32,
-    )
-
-
 def load_dataset(
     sim_names: list[str],
     dataset_split: str,
@@ -98,9 +68,9 @@ def load_dataset(
         generator=generator,
         output_signature=(
             dict(
-                geospatial=geospatial_dataset_signature(),
-                temporal=temporal_dataset_signature(m_rainfall),
-                spatiotemporal=spatiotemporal_dataset_signature(n_flood_maps),
+                geospatial=_geospatial_dataset_signature(),
+                temporal=_temporal_dataset_signature(m_rainfall),
+                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
             ),
             tf.TensorSpec(
                 shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
@@ -198,6 +168,74 @@ def load_dataset_windowed(
     if batch_size:
         dataset = dataset.batch(batch_size)
     return dataset
+
+
+def load_prediction_dataset(
+    study_area: str,
+    city_cat_config: str,
+    batch_size: int = 4,
+    n_flood_maps: int = constants.N_FLOOD_MAPS,
+    m_rainfall: int = constants.M_RAINFALL,
+    max_chunks: int | None = None,
+    firestore_client: firestore.Client | None = None,
+    storage_client: storage.Client | None = None,
+) -> tf.data.Dataset:
+    """Creates a prediction dataset which generates chunks for flood model prediction.
+
+    This dataset produces the input for `model.call_n`.
+    For training with teacher-forcing, `load_dataset_windowed` should be used instead.
+    The examples are generated from multiple simulations.
+    The dataset iteratively yields examples read from Google Cloud Storage to avoid
+    pulling all examples into memory at once.
+
+    Args:
+      study_area: The study area to build geospatial tensors for.
+      city_cat_config: The config to build a temporal tensors for.
+      batch_size: Size of batches yielded by the dataset. Approximate memory
+                  usage is 10GB * batch_size during training.
+      n_flood_maps: The number of flood maps in each example.
+      m_rainfall: The width of the temporal rainfall tensor.
+      max_chunks: The maximum number of examples to yield from the dataset.
+                  If `None` (default) yields all examples from the simulations.
+      firestore_client: The client to use when interacting with Firestore.
+      storage_client: The client to use when interacting with Cloud Storage.
+    """
+    firestore_client = firestore_client or firestore.Client()
+    storage_client = storage_client or storage.Client()
+
+    def generator():
+        """Generator for producing full inputs from study area."""
+        for model_input, metadata in _iter_model_inputs_for_prediction(
+            firestore_client,
+            storage_client,
+            city_cat_config,
+            study_area,
+            n_flood_maps,
+            m_rainfall,
+            max_chunks,
+        ):
+            yield model_input, metadata
+
+    # Create the dataset for this simulation
+    prediction_dataset = tf.data.Dataset.from_generator(
+        generator=generator,
+        output_signature=(
+            dict(
+                geospatial=_geospatial_dataset_signature(),
+                temporal=_temporal_dataset_signature(m_rainfall),
+                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
+            ),
+            dict(
+                feature_chunk=tf.TensorSpec(shape=(), dtype=tf.string),
+                rainfall=tf.TensorSpec(shape=(), dtype=tf.int32),
+            ),
+        ),
+    )
+    # If no batch specified, do not batch the dataset, which is required
+    # for generating data for batch prediction in VertexAI.
+    if batch_size:
+        prediction_dataset = prediction_dataset.batch(batch_size)
+    return prediction_dataset
 
 
 def _generate_windows(
@@ -337,5 +375,95 @@ def _download_as_tensor(client: storage.Client, gcs_url: str) -> tf.Tensor:
     """Retrieves the contents at `gcs_url` from GCS as a tf tensor."""
     return tf.convert_to_tensor(
         _download_as_array(client, gcs_url),
+        dtype=tf.float32,
+    )
+
+
+def _iter_model_inputs_for_prediction(
+    firestore_client: firestore.Client,
+    storage_client: storage.Client,
+    city_cat_config: str,
+    study_area_name: str,
+    n_flood_maps: int,
+    m_rainfall: int,
+    max_chunks: int | None,
+) -> Iterator[Tuple[model.FloodModel.Input, dict]]:
+    """Yields model inputs for each spatial chunk in the simulation."""
+    temporal, rainfall = _generate_temporal_tensor(
+        metastore.get_temporal_feature_metadata_for_prediction(
+            firestore_client, city_cat_config
+        ),
+        storage_client,
+        city_cat_config,
+        m_rainfall,
+    )
+
+    for feature_tensor, chunk_name in _iter_study_area_tensors(
+        firestore_client, storage_client, study_area_name
+    ):
+        metadata = {"feature_chunk": chunk_name, "rainfall": rainfall}
+
+        model_input = model.FloodModel.Input(
+            temporal=temporal,
+            geospatial=feature_tensor,
+            spatiotemporal=tf.zeros(
+                shape=(
+                    n_flood_maps,
+                    constants.MAP_HEIGHT,
+                    constants.MAP_WIDTH,
+                    1,
+                )
+            ),
+        )
+        yield model_input, metadata
+
+
+def _iter_study_area_tensors(
+    firestore_client: firestore.Client,
+    storage_client: storage.Client,
+    study_area_name: str,
+) -> Iterator[Tuple[tf.Tensor, str]]:
+    """Yields feature tensors from chunks stored in GCS."""
+    all_feature_metadata = metastore.get_spatial_feature_chunk_metadata_for_prediction(
+        firestore_client, study_area_name
+    )
+
+    random.shuffle(all_feature_metadata)
+
+    for feature_metadata in all_feature_metadata:
+        feature_url = feature_metadata["feature_matrix_path"]
+        chunk_name = feature_url.split("/")[-1]
+
+        logging.info("Retrieving features from %s ", feature_url)
+        feature_tensor = _download_as_tensor(storage_client, feature_url)
+        yield feature_tensor, chunk_name
+
+
+def _geospatial_dataset_signature() -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            constants.GEO_FEATURES,
+        ),
+        dtype=tf.float32,
+    )
+
+
+def _temporal_dataset_signature(m_rainfall: int) -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
+        dtype=tf.float32,
+    )
+
+
+def _spatiotemporal_dataset_signature(n_flood_maps: int) -> tf.TensorSpec:
+    return tf.TensorSpec(
+        shape=(
+            n_flood_maps,
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            1,
+        ),
         dtype=tf.float32,
     )
