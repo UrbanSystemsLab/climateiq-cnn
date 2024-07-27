@@ -306,7 +306,7 @@ class StudyAreaChunk:
     @classmethod
     def get_if_exists(
         cls, db: firestore.Client, study_area_name: str, chunk_name: str
-    ) -> "StudyAreaChunk" | None:
+    ) -> "StudyAreaChunk | None":
         """Retrieve the study area chunk with the given study area name and chunk name.
 
         Args:
