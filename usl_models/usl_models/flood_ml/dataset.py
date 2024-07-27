@@ -218,7 +218,7 @@ def _extract_temporal(t: int, n: int, temporal: tf.Tensor) -> tf.Tensor:
     """Generate inputs for a sliding time window of length `n`."""
     (_, D) = temporal.shape
     zeros = tf.zeros(shape=(max(n - t, 0), D))
-    data = temporal[max(t - n, 0): t]
+    data = temporal[max(t - n, 0) : t]
     return tf.concat([zeros, data], axis=0)
 
 
@@ -236,7 +236,7 @@ def _extract_spatiotemporal(t: int, n: int, labels: tf.Tensor) -> tf.Tensor:
     """
     (_, H, W, *_) = labels.shape
     zeros = tf.zeros(shape=(max(n - t, 0), H, W), dtype=tf.float32)
-    data = labels[max(t - n, 0): t]
+    data = labels[max(t - n, 0) : t]
     return tf.expand_dims(tf.concat([zeros, data], axis=0), axis=-1)
 
 
