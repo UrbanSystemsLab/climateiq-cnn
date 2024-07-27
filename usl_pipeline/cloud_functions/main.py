@@ -63,9 +63,9 @@ class FeatureMetadata:
 
 
 def _retry_and_report_errors(
-    error_reporter_func: Optional[
+    error_reporter_func:
         Callable[[functions_framework.CloudEvent, Exception], None]
-    ] = None
+    | None = None
 ) -> Callable[
     [Callable[[functions_framework.CloudEvent], None]],
     Callable[[functions_framework.CloudEvent], None],
