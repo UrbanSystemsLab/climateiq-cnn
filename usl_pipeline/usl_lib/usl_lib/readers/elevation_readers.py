@@ -1,6 +1,5 @@
 import json
 import typing
-from typing import Optional
 
 import numpy
 import rasterio.features

@@ -2,7 +2,7 @@
 
 import logging
 import random
-from typing import Iterator, Optional, Tuple
+from typing import Iterator, Tuple
 
 from google.cloud import firestore  # type:ignore[attr-defined]
 from google.cloud import storage  # type:ignore[attr-defined]
@@ -20,9 +20,9 @@ def load_prediction_dataset(
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
-    max_chunks: Optional[int] = None,
-    firestore_client: Optional[firestore.Client] = None,
-    storage_client: Optional[storage.Client] = None,
+    max_chunks: int | None = None,
+    firestore_client: firestore.Client | None = None,
+    storage_client: storage.Client | None = None,
 ) -> tf.data.Dataset:
     """Creates a prediction dataset which generates chunks for flood model prediction.
 
@@ -89,7 +89,7 @@ def _iter_model_inputs_for_prediction(
     study_area_name: str,
     n_flood_maps: int,
     m_rainfall: int,
-    max_chunks: Optional[int],
+    max_chunks: int | None,
 ) -> Iterator[Tuple[model.Input, dict]]:
     """Yields model inputs for each spatial chunk in the simulation."""
     temporal, rainfall = dataset._generate_temporal_tensor(

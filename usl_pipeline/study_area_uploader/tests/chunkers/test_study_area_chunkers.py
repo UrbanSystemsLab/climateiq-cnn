@@ -2,7 +2,7 @@ import pathlib
 import shutil
 import tarfile
 import tempfile
-from typing import Optional, Tuple
+from typing import Tuple
 import typing.io
 from unittest import mock
 

@@ -5,7 +5,7 @@ import hashlib
 import itertools
 import math
 import random
-from typing import Iterable, Optional
+from typing import Iterable
 import urllib.parse
 
 from google.cloud import firestore

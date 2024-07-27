@@ -1,7 +1,7 @@
 import math
 import pathlib
 import typing
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy
 from osgeo import gdal

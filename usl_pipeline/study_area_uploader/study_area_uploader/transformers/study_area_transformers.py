@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import logging
 import pathlib
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Tuple
 
 from google.cloud import storage
 from shapely import geometry

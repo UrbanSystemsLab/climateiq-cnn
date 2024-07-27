@@ -2,7 +2,7 @@ import io
 import logging
 import pathlib
 import tarfile
-from typing import Optional, Tuple
+from typing import Tuple
 
 from google.cloud import storage
 import numpy

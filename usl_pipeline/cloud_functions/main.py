@@ -7,7 +7,7 @@ import logging
 import re
 import tarfile
 import time
-from typing import BinaryIO, Callable, IO, Optional, TextIO, Tuple
+from typing import BinaryIO, Callable, IO, TextIO, Tuple
 
 from google.api_core import exceptions
 from google.cloud import error_reporting
@@ -731,7 +731,7 @@ def _read_polygons_from_byte_stream(
 
 def _build_flood_feature_matrix_from_archive(
     archive: BinaryIO,
-) -> Tuple[NDArray], FeatureMetadata, Optional[geo_data.ElevationHeader] | None:
+) -> Tuple[NDArray], FeatureMetadata, geo_data.ElevationHeader | None | None:
     """Builds a feature matrix for the given archive.
 
     Args:
