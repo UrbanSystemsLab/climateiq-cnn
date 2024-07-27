@@ -1,4 +1,5 @@
 import os
+import unittest
 
 from google.cloud import firestore  # type:ignore[attr-defined]
 import pytest
@@ -343,3 +344,70 @@ def test_write_model_metadata(firestore_db) -> None:
         firestore_db.collection("simulations").document("sim-1"),
         firestore_db.collection("simulations").document("sim-2"),
     ]
+
+
+def test_get_temporal_feature_metadata_for_prediction(firestore_db) -> None:
+    firestore_db.collection("city_cat_rainfall_configs").document("config_name").set(
+        {"as_vector_gcs_uri": "gs://bucket/path.npy"}
+    )
+
+    assert metastore.get_temporal_feature_metadata_for_prediction(
+        firestore_db, "config_name"
+    ) == {"as_vector_gcs_uri": "gs://bucket/path.npy"}
+
+
+def test_get_temporal_feature_metadata_for_prediction_raises_error_for_config(
+    firestore_db,
+) -> None:
+    with pytest.raises(ValueError):
+        metastore.get_temporal_feature_metadata_for_prediction(
+            firestore_db, "config_name"
+        )
+
+
+def test_get_spatial_feature_chunk_metadata_for_prediction(firestore_db) -> None:
+    firestore_db.collection("study_areas").document("study_area_name").set({})
+
+    firestore_db.collection("study_areas").document("study_area_name").collection(
+        "chunks"
+    ).document("chunk_0_0").set({"feature_matrix_path": "gs://bucket/chunk_0_0.npy"})
+
+    firestore_db.collection("study_areas").document("study_area_name").collection(
+        "chunks"
+    ).document("chunk_0_1").set({"feature_matrix_path": "gs://bucket/chunk_0_1.npy"})
+
+    firestore_db.collection("study_areas").document(
+        "another_study_area_name"
+    ).collection("chunks").document("chunk_0_3").set(
+        {"feature_matrix_path": "gs://bucket/chunk_0_3.npy"}
+    )
+
+    unittest.TestCase().assertCountEqual(
+        metastore.get_spatial_feature_chunk_metadata_for_prediction(
+            firestore_db, "study_area_name"
+        ),
+        [
+            {"feature_matrix_path": "gs://bucket/chunk_0_0.npy"},
+            {"feature_matrix_path": "gs://bucket/chunk_0_1.npy"},
+        ],
+    )
+
+
+def test_get_spatial_feature_chunk_metadata_for_prediction_raises_for_missing(
+    firestore_db,
+) -> None:
+    with pytest.raises(ValueError):
+        metastore.get_spatial_feature_chunk_metadata_for_prediction(
+            firestore_db, "study_area_name"
+        )
+
+
+def test_get_spatial_feature_chunk_metadata_for_prediction_raises_for_empty(
+    firestore_db,
+) -> None:
+    firestore_db.collection("study_areas").document("study_area_name").set({})
+
+    with pytest.raises(ValueError):
+        metastore.get_spatial_feature_chunk_metadata_for_prediction(
+            firestore_db, "study_area_name"
+        )
