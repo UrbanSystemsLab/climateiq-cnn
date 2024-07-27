@@ -20,12 +20,12 @@ from usl_lib.writers import elevation_writers
 def _chunk_polygons_if_present(
     elevation_header: geo_data.ElevationHeader,
     chunk_size: int,
-    polygon_masks: Optional[list[Tuple[geometry.Polygon, int]]],
+    polygon_masks: list[Tuple[geometry.Polygon, int]] | None,
     work_dir: pathlib.Path,
     object_type_name: str,
     support_mask_values: bool = False,
     chunk_additional_border_cells: int = 0,
-) -> Optional[pathlib.Path]:
+) -> pathlib.Path | None:
     """Splits optional list of polygons with masks (if present) into chunk files."""
     logging.info("Preparing %s chunks...", object_type_name)
     chunks_dir = None
@@ -44,7 +44,7 @@ def _chunk_polygons_if_present(
 
 
 def _add_chunk_to_tar_if_present(
-    chunks_dir: Optional[pathlib.Path],
+    chunks_dir: pathlib.Path | None,
     chunk_file_name: str,
     tar_entry_file_name: str,
     tar: tarfile.TarFile,

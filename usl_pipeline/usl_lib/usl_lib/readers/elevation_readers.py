@@ -21,7 +21,7 @@ _ESRI_HEADER_KEYWORDS = {
 
 def read_header_from_rasterio_dataset_reader(
     dataset_reader: rasterio.io.DatasetReader,
-    no_data_value: Optional[float] = None,
+    no_data_value: float | None = None,
 ) -> geo_data.ElevationHeader:
     """Loading elevation header from GeoTIFF file/stream.
 
@@ -52,7 +52,7 @@ def read_from_geotiff(
     file: typing.BinaryIO,
     header_only: bool = False,
     band: int = 1,
-    no_data_value: Optional[float] = None,
+    no_data_value: float | None = None,
 ) -> geo_data.Elevation:
     """Loading elevation raster data from GeoTIFF file/stream.
 
@@ -84,7 +84,7 @@ def read_from_geotiff(
 def read_from_esri_ascii(
     file: typing.TextIO,
     header_only: bool = False,
-    no_data_value: Optional[float] = None,
+    no_data_value: float | None = None,
 ) -> geo_data.Elevation:
     """Loading elevation raster data from Esri ASCII file/stream.
 
