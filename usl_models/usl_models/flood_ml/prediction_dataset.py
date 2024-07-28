@@ -3,15 +3,13 @@
 import logging
 import random
 from typing import Iterator, Optional, Tuple
-import urllib.parse
 
 from google.cloud import firestore  # type:ignore[attr-defined]
 from google.cloud import storage  # type:ignore[attr-defined]
-import numpy
-from numpy.typing import NDArray
 import tensorflow as tf
 
 from usl_models.flood_ml import constants
+from usl_models.flood_ml import dataset
 from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
 
@@ -35,7 +33,8 @@ def load_prediction_dataset(
     pulling all examples into memory at once.
 
     Args:
-
+      study_area: The study area to build geospatial tensors for.
+      city_cat_config: The config to build a temporal tensors for.
       batch_size: Size of batches yielded by the dataset. Approximate memory
                   usage is 10GB * batch_size during training.
       n_flood_maps: The number of flood maps in each example.
@@ -49,7 +48,7 @@ def load_prediction_dataset(
     storage_client = storage_client or storage.Client()
 
     def generator():
-        """Generator for producing full inputs from study area"""
+        """Generator for producing full inputs from study area."""
         for model_input, metadata in _iter_model_inputs_for_prediction(
             firestore_client,
             storage_client,
@@ -62,31 +61,13 @@ def load_prediction_dataset(
             yield model_input, metadata
 
     # Create the dataset for this simulation
-    dataset = tf.data.Dataset.from_generator(
+    prediction_dataset = tf.data.Dataset.from_generator(
         generator=generator,
         output_signature=(
             dict(
-                geospatial=tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.GEO_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                temporal=tf.TensorSpec(
-                    shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
-                    dtype=tf.float32,
-                ),
-                spatiotemporal=tf.TensorSpec(
-                    shape=(
-                        n_flood_maps,
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        1,
-                    ),
-                    dtype=tf.float32,
-                ),
+                geospatial=dataset.geospatial_dataset_signature(),
+                temporal=dataset.temporal_dataset_signature(m_rainfall),
+                spatiotemporal=dataset.spatiotemporal_dataset_signature(n_flood_maps),
             ),
             dict(
                 feature_chunk=tf.TensorSpec(shape=(), dtype=tf.string),
@@ -97,35 +78,8 @@ def load_prediction_dataset(
     # If no batch specified, do not batch the dataset, which is required
     # for generating data for batch prediction in VertexAI.
     if batch_size:
-        print("batch: ", batch_size)
-        dataset = dataset.batch(batch_size)
-    return dataset
-
-
-def _generate_temporal_tensor(
-    firestore_client: firestore.Client,
-    storage_client: storage.Client,
-    config_name: str,
-    m_rainfall: int,
-) -> tuple[tf.Tensor, str]:
-    """Creates a temporal tensor from the numpy array stored in GCS."""
-    temporal_metadata = metastore.get_temporal_feature_metadata_for_prediction(
-        firestore_client, config_name
-    )
-    gcs_url = temporal_metadata["as_vector_gcs_uri"]
-    rainfall = temporal_metadata["rainfall_duration"]
-
-    logging.info("Retrieving temporal features from %s.", gcs_url)
-
-    temporal_vector = _download_as_tensor(storage_client, gcs_url)
-    return (
-        tf.transpose(
-            tf.tile(
-                tf.reshape(temporal_vector, (1, len(temporal_vector))), [m_rainfall, 1]
-            )
-        ),
-        rainfall,
-    )
+        prediction_dataset = prediction_dataset.batch(batch_size)
+    return prediction_dataset
 
 
 def _iter_model_inputs_for_prediction(
@@ -138,8 +92,13 @@ def _iter_model_inputs_for_prediction(
     max_chunks: Optional[int],
 ) -> Iterator[Tuple[model.Input, dict]]:
     """Yields model inputs for each spatial chunk in the simulation."""
-    temporal, rainfall = _generate_temporal_tensor(
-        firestore_client, storage_client, city_cat_config, m_rainfall
+    temporal, rainfall = dataset._generate_temporal_tensor(
+        metastore.get_temporal_feature_metadata_for_prediction(
+            firestore_client, city_cat_config
+        ),
+        storage_client,
+        city_cat_config,
+        m_rainfall,
     )
 
     for feature_tensor, chunk_name in _iter_study_area_tensors(
@@ -168,34 +127,16 @@ def _iter_study_area_tensors(
     study_area_name: str,
 ) -> Iterator[Tuple[tf.Tensor, str]]:
     """Yields feature tensors from chunks stored in GCS."""
-    feature_metadata = metastore.get_spatial_feature_chunk_metadata_for_prediction(
+    all_feature_metadata = metastore.get_spatial_feature_chunk_metadata_for_prediction(
         firestore_client, study_area_name
     )
 
-    random.shuffle(feature_metadata)
+    random.shuffle(all_feature_metadata)
 
-    for feature_metadata in feature_metadata:
+    for feature_metadata in all_feature_metadata:
         feature_url = feature_metadata["feature_matrix_path"]
         chunk_name = feature_url.split("/")[-1]
 
         logging.info("Retrieving features from %s ", feature_url)
-        feature_tensor = _download_as_tensor(storage_client, feature_url)
+        feature_tensor = dataset._download_as_tensor(storage_client, feature_url)
         yield feature_tensor, chunk_name
-
-
-def _download_as_array(client: storage.Client, gcs_url: str) -> NDArray:
-    """Retrieves the contents at `gcs_url` from GCS as a numpy array."""
-    parsed = urllib.parse.urlparse(gcs_url)
-    bucket = client.bucket(parsed.netloc)
-    blob = bucket.blob(parsed.path.lstrip("/"))
-
-    with blob.open("rb") as fd:
-        return numpy.load(fd)
-
-
-def _download_as_tensor(client: storage.Client, gcs_url: str) -> tf.Tensor:
-    """Retrieves the contents at `gcs_url` from GCS as a tf tensor."""
-    return tf.convert_to_tensor(
-        _download_as_array(client, gcs_url),
-        dtype=tf.float32,
-    )

@@ -18,7 +18,8 @@ def test_load_dataset_full(mock_metastore) -> None:
 
     # Set some URLs to return from our metastore functions.
     mock_metastore.get_temporal_feature_metadata.return_value = {
-        "as_vector_gcs_uri": "gs://temporal-features/temporal-feature.npy"
+        "as_vector_gcs_uri": "gs://temporal-features/temporal-feature.npy",
+        "rainfall_duration": 5,
     }
     mock_metastore.get_spatial_feature_and_label_chunk_metadata.return_value = [
         (
@@ -132,7 +133,8 @@ def test_load_dataset_windowed(mock_metastore) -> None:
 
     # Set some URLs to return from our metastore functions.
     mock_metastore.get_temporal_feature_metadata.return_value = {
-        "as_vector_gcs_uri": "gs://temporal-features/temporal-feature.npy"
+        "as_vector_gcs_uri": "gs://temporal-features/temporal-feature.npy",
+        "rainfall_duration": 5,
     }
     mock_metastore.get_spatial_feature_and_label_chunk_metadata.return_value = [
         (
