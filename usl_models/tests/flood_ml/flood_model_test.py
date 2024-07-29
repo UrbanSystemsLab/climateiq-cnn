@@ -115,7 +115,7 @@ def test_train():
     """Tests the model training.
 
     Expected training inputs:
-        spatiotemporal: Optional[tf.Tensor[shape=(B, H, W, 1)]]
+        spatiotemporal: tf.Tensor[shape=(B, H, W, 1)] | None
         geospatial: tf.Tensor[shape=(B, H, W, f)]
         temporal: tf.Tensor[shape=(B, T_max)]
 

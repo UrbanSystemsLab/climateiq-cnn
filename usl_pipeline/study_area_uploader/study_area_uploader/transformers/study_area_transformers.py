@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import logging
 import pathlib
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Tuple
 
 from google.cloud import storage
 from shapely import geometry
@@ -30,17 +30,17 @@ class PreparedInputData:
     """Input data needed to run pipeline for flood scenarios."""
 
     elevation_file_path: pathlib.Path
-    boundaries_polygons: Optional[list[Tuple[geometry.Polygon, int]]]
-    buildings_polygons: Optional[list[Tuple[geometry.Polygon, int]]]
-    green_areas_polygons: Optional[list[Tuple[geometry.Polygon, int]]]
-    soil_classes_polygons: Optional[list[Tuple[geometry.Polygon, int]]]
+    boundaries_polygons: list[Tuple[geometry.Polygon, int]] | None
+    buildings_polygons: list[Tuple[geometry.Polygon, int]] | None
+    green_areas_polygons: list[Tuple[geometry.Polygon, int]] | None
+    soil_classes_polygons: list[Tuple[geometry.Polygon, int]] | None
 
 
 def transform_shape_file(
     input_shape_file_path: pathlib.Path | str,
-    sub_area_bounding_box: Optional[geo_data.BoundingBox],
+    sub_area_bounding_box: geo_data.BoundingBox | None,
     target_crs: str,
-    mask_value_feature_property: Optional[str] = None,
+    mask_value_feature_property: str | None = None,
     skip_zero_masks: bool = True,
 ) -> Iterable[Tuple[geometry.Polygon, int]]:
     """Reads, filters and transforms polygons from shape-file with optional cropping.
@@ -92,11 +92,11 @@ def _update_mask_if_needed(
 def prepare_and_upload_study_area_files(
     study_area_name: str,
     elevation_file_path: str | pathlib.Path,
-    boundaries_shape_file_path: Optional[str | pathlib.Path],
-    buildings_shape_file_path: Optional[str | pathlib.Path],
-    green_areas_shape_file_path: Optional[str | pathlib.Path],
-    soil_classes_shape_file_path: Optional[str | pathlib.Path],
-    soil_class_mask_feature_property: Optional[str],
+    boundaries_shape_file_path: str | pathlib.Path | None,
+    buildings_shape_file_path: str | pathlib.Path | None,
+    green_areas_shape_file_path: str | pathlib.Path | None,
+    soil_classes_shape_file_path: str | pathlib.Path | None,
+    soil_class_mask_feature_property: str | None,
     work_dir: pathlib.Path,
     study_area_bucket: storage.Bucket,
     input_non_green_area_soil_classes: set[int] = set(),
@@ -130,11 +130,11 @@ def prepare_and_upload_study_area_files(
         ).header
     crs = elevation_header.crs.to_string()
 
-    boundaries_polygons: Optional[list[Tuple[geometry.Polygon, int]]] = None
-    sub_area_bounding_box: Optional[geo_data.BoundingBox] = None
-    buildings_polygons: Optional[list[Tuple[geometry.Polygon, int]]] = None
-    green_areas_polygons: Optional[list[Tuple[geometry.Polygon, int]]] = None
-    soil_classes_polygons: Optional[list[Tuple[geometry.Polygon, int]]] = None
+    boundaries_polygons: list[Tuple[geometry.Polygon, int]] | None = None
+    sub_area_bounding_box: geo_data.BoundingBox | None = None
+    buildings_polygons: list[Tuple[geometry.Polygon, int]] | None = None
+    green_areas_polygons: list[Tuple[geometry.Polygon, int]] | None = None
+    soil_classes_polygons: list[Tuple[geometry.Polygon, int]] | None = None
     if boundaries_shape_file_path is None:
         output_elevation_file_path = pathlib.Path(elevation_file_path)
     else:
@@ -302,7 +302,7 @@ def prepare_and_upload_citycat_input_files(
             boundaries_polygons=input_data.boundaries_polygons,
         )
 
-    boundaries_multipolygon: Optional[geometry.MultiPolygon] = None
+    boundaries_multipolygon: geometry.MultiPolygon | None = None
     if input_data.boundaries_polygons is not None:
         boundaries_multipolygon = geometry.MultiPolygon(
             [p[0] for p in input_data.boundaries_polygons]

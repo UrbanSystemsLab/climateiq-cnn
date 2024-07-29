@@ -5,7 +5,7 @@ import hashlib
 import itertools
 import math
 import random
-from typing import Iterable, Optional
+from typing import Iterable
 import urllib.parse
 
 from google.cloud import firestore
@@ -53,13 +53,13 @@ class StudyArea:
     x_ll_corner: float
     y_ll_corner: float
     cell_size: float
-    crs: Optional[str] = None
-    state: Optional[StudyAreaState] = None
-    elevation_min: Optional[float] = None
-    elevation_max: Optional[float] = None
-    chunk_size: Optional[int] = None
-    chunk_x_count: Optional[int] = None
-    chunk_y_count: Optional[int] = None
+    crs: str | None = None
+    state: StudyAreaState | None = None
+    elevation_min: float | None = None
+    elevation_max: float | None = None
+    chunk_size: int | None = None
+    chunk_x_count: int | None = None
+    chunk_y_count: int | None = None
 
     def as_header(self) -> geo_data.ElevationHeader:
         """Represents the study area as a header describing a raster space."""
@@ -172,7 +172,7 @@ class StudyArea:
     def delete_all_chunks(
         db: firestore.Client,
         study_area_name: str,
-        page_size: Optional[int] = None,
+        page_size: int | None = None,
     ) -> None:
         """Deletes all the chunks from chunk sub-collection for a given study area.
 
@@ -254,11 +254,11 @@ class StudyAreaChunk:
     """
 
     id_: str
-    state: Optional[StudyAreaChunkState] = None
-    raw_path: Optional[str] = None
-    feature_matrix_path: Optional[str] = None
-    needs_scaling: Optional[bool] = None
-    error: Optional[str] = None
+    state: StudyAreaChunkState | None = None
+    raw_path: str | None = None
+    feature_matrix_path: str | None = None
+    needs_scaling: bool | None = None
+    error: str | None = None
 
     def merge(self, db: firestore.Client, study_area_name: str) -> None:
         """Creates or updates an existing chunk within the given study area.
@@ -307,7 +307,7 @@ class StudyAreaChunk:
     @classmethod
     def get_if_exists(
         cls, db: firestore.Client, study_area_name: str, chunk_name: str
-    ) -> Optional["StudyAreaChunk"]:
+    ) -> "StudyAreaChunk | None":
         """Retrieve the study area chunk with the given study area name and chunk name.
 
         Args:
@@ -361,12 +361,12 @@ class StudyAreaSpatialChunk(StudyAreaChunk):
         y_ll_corner: Optional Y-coordinate of the raster's origin.
     """
 
-    x_index: Optional[int] = None
-    y_index: Optional[int] = None
-    col_count: Optional[int] = None
-    row_count: Optional[int] = None
-    x_ll_corner: Optional[float] = None
-    y_ll_corner: Optional[float] = None
+    x_index: int | None = None
+    y_index: int | None = None
+    col_count: int | None = None
+    row_count: int | None = None
+    x_ll_corner: float | None = None
+    y_ll_corner: float | None = None
 
 
 @dataclasses.dataclass(slots=True)
@@ -377,7 +377,7 @@ class StudyAreaTemporalChunk(StudyAreaChunk):
         time: The timestep represented by the data in this chunk.
     """
 
-    time: Optional[datetime.datetime] = None
+    time: datetime.datetime | None = None
 
 
 @firestore.transactional
@@ -709,7 +709,7 @@ class SimulationLabelTemporalChunk(SimulationLabelChunk):
         time: The timestep represented by the data in this chunk.
     """
 
-    time: Optional[datetime.datetime] = None
+    time: datetime.datetime | None = None
 
     def set(self, db: firestore.Client, study_area_name: str, config_path: str) -> None:
         """Adds the label chunk to the given simulation."""
