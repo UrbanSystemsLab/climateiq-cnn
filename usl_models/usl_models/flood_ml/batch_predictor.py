@@ -4,9 +4,10 @@ import json
 import urllib.parse
 import logging
 import dataclasses
+import tensorflow as tf
 
-from google.cloud import firestore
-from google.cloud import storage
+from google.cloud import firestore  # type:ignore[attr-defined]
+from google.cloud import storage  # type:ignore[attr-defined]
 import numpy as np
 
 from usl_models.flood_ml import model
@@ -52,7 +53,7 @@ class BatchPredictor:
         self, study_area_id: str, config_id: str, chunk_id: str
     ) -> np.ndarray:
         """Loads a prediction npy file from GCS."""
-        blob = self.client.get_bucket(self.output_bucket.bucket).blob(
+        blob = self.client.get_bucket(self.output_bucket).blob(
             self.get_prediction_npy_path(study_area_id, config_id, chunk_id)
         )
         with blob.open("rb") as fd:
@@ -63,7 +64,7 @@ class BatchPredictor:
         study_area_id: str,
         config_id: str,
         scenario_id: str,
-    ) -> list[str]:
+    ):
         """Runs predictions for a rainfall scenario and saves outputs to GCS."""
         parsed_config_id = urllib.parse.quote_plus(config_id)
         config_dict = (
@@ -82,7 +83,10 @@ class BatchPredictor:
         chunk_ids = []
         for results in self.model.batch_predict_n(dataset, n=rainfall_duration):
             for result in results:
-                chunk_id = result["chunk_id"].numpy().decode("utf-8")
+                chunk_id = result["chunk_id"]
+                if isinstance(chunk_id, tf.Tensor):
+                    chunk_id = chunk_id.numpy().decode("utf-8")
+
                 chunk_ids.append(chunk_id)
                 self.save_prediction_npy(
                     study_area_id=study_area_id,
