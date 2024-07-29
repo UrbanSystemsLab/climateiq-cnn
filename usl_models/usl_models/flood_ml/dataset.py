@@ -1,5 +1,6 @@
 """tf.data.Datasets for training FloodML model on CityCAT data."""
 
+import dataclasses
 import logging
 import random
 from typing import Any, Iterator, Tuple
@@ -14,6 +15,22 @@ import tensorflow as tf
 from usl_models.flood_ml import constants
 from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
+
+
+@dataclasses.dataclass
+class Filters:
+    """Dataset filter settings."""
+
+    # Minimum mean value of a label to apply for filtering out sparse data.
+    min_mean_value: float = 0.0
+    # Ratio of samples to skip below the min_mean_value threshold [0.0, 1.0].
+    min_mean_value_dropout_rate: float = 0.0
+
+    def filter(self, label: tf.Tensor) -> bool:
+        """Returns true if the sample should be filtered."""
+        return (tf.reduce_mean(label) < self.min_mean_value) and (
+            random.random() < self.min_mean_value_dropout_rate
+        )
 
 
 def geospatial_dataset_signature() -> tf.TensorSpec:
@@ -55,6 +72,7 @@ def load_dataset(
     max_chunks: int | None = None,
     firestore_client: firestore.Client = None,
     storage_client: storage.Client | None = None,
+    filters: Filters | None = None,
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for the flood model.
 
@@ -76,6 +94,7 @@ def load_dataset(
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
     """
+    filters = filters or Filters()
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 
@@ -91,6 +110,8 @@ def load_dataset(
                 max_chunks,
                 dataset_split,
             ):
+                if filters.filter(label):
+                    continue
                 yield model_input, labels
 
     # Create the dataset for this simulation
@@ -124,6 +145,7 @@ def load_dataset_windowed(
     max_chunks: int | None = None,
     firestore_client: firestore.Client | None = None,
     storage_client: storage.Client | None = None,
+    filters: Filters | None = None,
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for flood model training.
 
@@ -147,6 +169,7 @@ def load_dataset_windowed(
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
     """
+    filters = filters or Filters()
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 
@@ -165,6 +188,8 @@ def load_dataset_windowed(
                 for window_input, window_label in _generate_windows(
                     model_input, labels, n_flood_maps
                 ):
+                    if filters.filter(window_label):
+                        continue
                     yield (window_input, window_label)
 
     dataset = tf.data.Dataset.from_generator(
