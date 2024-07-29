@@ -110,7 +110,7 @@ def load_dataset(
                 max_chunks,
                 dataset_split,
             ):
-                if filters.filter(label):
+                if filters.filter(labels):
                     continue
                 yield model_input, labels
 
