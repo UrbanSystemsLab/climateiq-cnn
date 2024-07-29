@@ -93,6 +93,7 @@ def load_dataset(
                   If `None` (default) yields all examples from the simulations.
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
+      filters: Filters to be applied to the training data.
     """
     filters = filters or Filters()
     firestore_client = firestore_client or firestore.Client()
@@ -168,6 +169,7 @@ def load_dataset_windowed(
                   If `None` (default) yields all examples from the simulations.
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
+      filters: Filters to be applied to the training data.
     """
     filters = filters or Filters()
     firestore_client = firestore_client or firestore.Client()
