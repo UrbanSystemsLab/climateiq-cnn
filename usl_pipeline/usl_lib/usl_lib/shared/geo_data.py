@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -30,7 +30,7 @@ class ElevationHeader:
     y_ll_corner: float
     cell_size: float
     nodata_value: float
-    crs: Optional[rasterio.CRS] = None
+    crs: rasterio.CRS | None = None
 
     def back_transform(self) -> rasterio.Affine:
         """Creates an affine converting raster indices to X/Y coordinates."""
@@ -51,7 +51,7 @@ class ElevationHeader:
 @dataclass(slots=True)
 class Elevation:
     header: ElevationHeader
-    data: Optional[npt.NDArray[np.float64]] = None
+    data: npt.NDArray[np.float64] | None = None
 
 
 @dataclass

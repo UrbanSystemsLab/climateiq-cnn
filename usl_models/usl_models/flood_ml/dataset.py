@@ -2,7 +2,7 @@
 
 import logging
 import random
-from typing import Any, Iterator, Optional, Tuple
+from typing import Any, Iterator, Tuple
 import urllib.parse
 
 from google.cloud import firestore  # type:ignore[attr-defined]
@@ -52,9 +52,9 @@ def load_dataset(
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
-    max_chunks: Optional[int] = None,
-    firestore_client: Optional[firestore.Client] = None,
-    storage_client: Optional[storage.Client] = None,
+    max_chunks: int | None = None,
+    firestore_client: firestore.Client = None,
+    storage_client: storage.Client | None = None,
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for the flood model.
 
@@ -121,9 +121,9 @@ def load_dataset_windowed(
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
-    max_chunks: Optional[int] = None,
-    firestore_client: Optional[firestore.Client] = None,
-    storage_client: Optional[storage.Client] = None,
+    max_chunks: int | None = None,
+    firestore_client: firestore.Client | None = None,
+    storage_client: storage.Client | None = None,
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for flood model training.
 
@@ -201,12 +201,12 @@ def load_dataset_windowed(
 
 
 def _generate_windows(
-    model_input: model.Input, labels: tf.Tensor, n_flood_maps: int
-) -> Iterator[Tuple[model.Input, tf.Tensor]]:
+    model_input: model.FloodModel.Input, labels: tf.Tensor, n_flood_maps: int
+) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor]]:
     """Generate inputs for a sliding time window of length n_flood_maps timesteps."""
     (T_max, H, W, *_) = labels.shape
     for t in range(T_max):
-        window_input = model.Input(
+        window_input = model.FloodModel.Input(
             geospatial=model_input["geospatial"],
             temporal=_extract_temporal(t, n_flood_maps, model_input["temporal"]),
             spatiotemporal=_extract_spatiotemporal(t, n_flood_maps, labels),
@@ -246,9 +246,9 @@ def _iter_model_inputs(
     sim_name: str,
     n_flood_maps: int,
     m_rainfall: int,
-    max_chunks: Optional[int],
+    max_chunks: int | None,
     dataset_split: str,
-) -> Iterator[Tuple[model.Input, tf.Tensor]]:
+) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor]]:
     """Yields model inputs for each spatial chunk in the simulation."""
     temporal, _ = _generate_temporal_tensor(
         metastore.get_temporal_feature_metadata(firestore_client, sim_name),
@@ -264,7 +264,7 @@ def _iter_model_inputs(
         if max_chunks is not None and i >= max_chunks:
             return
 
-        model_input = model.Input(
+        model_input = model.FloodModel.Input(
             temporal=temporal,
             geospatial=geospatial,
             spatiotemporal=tf.zeros(

@@ -865,6 +865,82 @@ def test_build_and_upload_study_area_chunk(
     )
 
 
+@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(main.storage, "Client", autospec=True)
+def test_write_heat_scenario_config_metadata(
+    mock_storage_client, mock_firestore_client, _
+):
+    """Ensure we sync config uploads to the metastore."""
+    config_blob = mock.Mock(spec=storage.Blob)
+    config_blob.name = "NYC_Heat/Summer_Config_Group/Heat_Data_2012.txt"
+    config_blob.bucket.name = "test-climateiq-atmospheric-simulation-config"
+    config_blob.open.return_value = io.StringIO(
+        textwrap.dedent(
+            """\
+            somekey=somevalue
+            simulation_year=2012
+            simulation_months=JJA
+            percentile=99
+            # Future key/value pair
+            somekey1=somevalue1
+            """
+        )
+    )
+
+    mock_storage_client().bucket("").blob.side_effect = [config_blob]
+    mock_storage_client.reset_mock()
+
+    main.write_heat_scenario_config_metadata(
+        functions_framework.CloudEvent(
+            {"source": "test", "type": "event"},
+            data={
+                "bucket": "test-climateiq-atmospheric-simulation-config",
+                "name": "NYC_Heat/Summer_Config_Group/Heat_Data_2012.txt",
+                "timeCreated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+        )
+    )
+
+    # Ensure we worked with the right GCP paths.
+    mock_storage_client.assert_has_calls(
+        [
+            mock.call().bucket("test-climateiq-atmospheric-simulation-config"),
+            mock.call()
+            .bucket()
+            .blob("NYC_Heat/Summer_Config_Group/Heat_Data_2012.txt"),
+        ]
+    )
+
+    config_blob.open.assert_called_once_with("rt")
+
+    # Ensure we wrote the firestore entry for the config.
+    mock_firestore_client.assert_has_calls(
+        [
+            mock.call(),
+            mock.call().collection("wrf_heat_configs"),
+            mock.call()
+            .collection()
+            .document("NYC_Heat%2FSummer_Config_Group%2FHeat_Data_2012.txt"),
+            mock.call()
+            .collection()
+            .document()
+            .set(
+                {
+                    "parent_config_name": "Summer_Config_Group",
+                    "gcs_uri": (
+                        "gs://test-climateiq-atmospheric-simulation-config/"
+                        "NYC_Heat/Summer_Config_Group/Heat_Data_2012.txt"
+                    ),
+                    "simulation_year": 2012,
+                    "simulation_months": "JJA",
+                    "percentile": 99,
+                }
+            ),
+        ]
+    )
+
+
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 @mock.patch.object(main, "_get_crs_from_wps", autospec=True)

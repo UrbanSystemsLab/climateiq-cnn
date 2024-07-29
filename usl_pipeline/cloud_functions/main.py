@@ -7,7 +7,7 @@ import logging
 import re
 import tarfile
 import time
-from typing import BinaryIO, Callable, IO, Optional, TextIO, Tuple
+from typing import BinaryIO, Callable, IO, TextIO, Tuple
 
 from google.api_core import exceptions
 from google.cloud import error_reporting
@@ -56,16 +56,16 @@ class FeatureMetadata:
         elevation_max: The highest elevation height encountered.
     """
 
-    elevation_min: Optional[float] = None
-    elevation_max: Optional[float] = None
-    chunk_size: Optional[int] = None
-    time: Optional[datetime.datetime] = None
+    elevation_min: float | None = None
+    elevation_max: float | None = None
+    chunk_size: int | None = None
+    time: datetime.datetime | None = None
 
 
 def _retry_and_report_errors(
-    error_reporter_func: Optional[
-        Callable[[functions_framework.CloudEvent, Exception], None]
-    ] = None
+    error_reporter_func: (
+        Callable[[functions_framework.CloudEvent, Exception], None] | None
+    ) = None
 ) -> Callable[
     [Callable[[functions_framework.CloudEvent], None]],
     Callable[[functions_framework.CloudEvent], None],
@@ -218,6 +218,42 @@ def _get_crs_from_wps(nc_dataset: netCDF4.Dataset) -> str:
     source_crs = cart_proj.source_crs.to_json_dict()["conversion"]["method"]["id"]
     crs = source_crs["authority"] + ":" + str(source_crs["code"])
     return crs
+
+
+@functions_framework.cloud_event
+@_retry_and_report_errors()
+def write_heat_scenario_config_metadata(
+    cloud_event: functions_framework.CloudEvent,
+) -> None:
+    """Writes metadata and features for uploaded heat scenario config.
+
+    This function is triggered when files for heat configuration are uploaded to
+    GCS. It writes an entry to the metastore for the configuration.
+    """
+    file_name = pathlib.PurePosixPath(cloud_event.data["name"])
+    # For AtmoML, use `Heat_Data_` files to trigger HeatScenarioConfig write
+    # to metastore
+    if re.search(file_names.HEAT_CONFIG_TXT_REGEX, file_name.name):
+        storage_client = storage.Client()
+        db = firestore.Client()
+
+        config_blob = storage_client.bucket(cloud_event.data["bucket"]).blob(
+            cloud_event.data["name"]
+        )
+        with config_blob.open("rt") as txt_fd:
+            config_dict = config_readers.read_key_value_pairs(txt_fd)
+
+        metastore.HeatScenarioConfig(
+            name=config_blob.name,
+            # File names should be in the form:
+            # <study_area>/<parent_config_name>/<file_name>
+            # Ex: NYC_Heat/Summer_Config/Heat_Data_2012.txt
+            parent_config_name=file_name.parent.name,
+            gcs_uri=f"gs://{config_blob.bucket.name}/{config_blob.name}",
+            simulation_year=int(config_dict["simulation_year"]),
+            simulation_months=config_dict["simulation_months"],
+            percentile=int(config_dict["percentile"]),
+        ).set(db)
 
 
 @functions_framework.cloud_event
@@ -731,7 +767,7 @@ def _read_polygons_from_byte_stream(
 
 def _build_flood_feature_matrix_from_archive(
     archive: BinaryIO,
-) -> Tuple[Optional[NDArray], FeatureMetadata, Optional[geo_data.ElevationHeader]]:
+) -> Tuple[NDArray | None, FeatureMetadata, geo_data.ElevationHeader | None]:
     """Builds a feature matrix for the given archive.
 
     Args:
@@ -744,11 +780,11 @@ def _build_flood_feature_matrix_from_archive(
       returning tuple will be None.
     """
     metadata: FeatureMetadata = FeatureMetadata()
-    elevation: Optional[geo_data.Elevation] = None
-    boundaries: Optional[list[Tuple[geometry.Polygon, int]]] = None
-    buildings: Optional[list[Tuple[geometry.Polygon, int]]] = None
-    green_areas: Optional[list[Tuple[geometry.Polygon, int]]] = None
-    soil_classes: Optional[list[Tuple[geometry.Polygon, int]]] = None
+    elevation: geo_data.Elevation | None = None
+    boundaries: list[Tuple[geometry.Polygon, int]] | None = None
+    buildings: list[Tuple[geometry.Polygon, int]] | None = None
+    green_areas: list[Tuple[geometry.Polygon, int]] | None = None
+    soil_classes: list[Tuple[geometry.Polygon, int]] | None = None
     files_in_tar = []
 
     with tarfile.TarFile(fileobj=archive) as tar:

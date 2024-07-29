@@ -1,7 +1,7 @@
 import math
 import pathlib
 import typing
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy
 from osgeo import gdal
@@ -68,8 +68,8 @@ def transform_geotiff_with_boundaries_to_esri_ascii(
     temp_buffer_file_path: str | pathlib.Path,
     output_file: typing.TextIO,
     band: int = 1,
-    no_data_value: Optional[float] = None,
-    boundaries_polygons: Optional[list[Tuple[geometry.Polygon, int]]] = None,
+    no_data_value: float | None = None,
+    boundaries_polygons: list[Tuple[geometry.Polygon, int]] | None = None,
     row_buffer_size: int = 500,
 ) -> None:
     """Transforms elevation raster data from GeoTIFF file stream to Esri ASCII one.
@@ -122,8 +122,8 @@ def _transform_geotiff_chunk_data_with_boundaries_to_esri_ascii(
     elevation_buffer_file_path: str | pathlib.Path,
     output_file: typing.TextIO,
     band: int = 1,
-    no_data_value: Optional[float] = None,
-    boundaries_polygons: Optional[list[Tuple[geometry.Polygon, int]]] = None,
+    no_data_value: float | None = None,
+    boundaries_polygons: list[Tuple[geometry.Polygon, int]] | None = None,
 ):
     """Transforms part of elevation data from GeoTIFF buffer file to Esri ASCII."""
     with open(elevation_buffer_file_path, "rb") as input_file:

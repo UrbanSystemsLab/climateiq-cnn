@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy
 import numpy.typing as npt
@@ -39,7 +39,7 @@ def _build_soil_class_infiltration_layers(
 
 def transform_to_feature_raster_layers(
     elevation: geo_data.Elevation,
-    boundaries_polygons: Optional[list[Tuple[geometry.Polygon, int]]],
+    boundaries_polygons: list[Tuple[geometry.Polygon, int]] | None,
     buildings_polygons: list[Tuple[geometry.Polygon, int]],
     green_areas_polygons: list[Tuple[geometry.Polygon, int]],
     soil_classes_polygons: list[Tuple[geometry.Polygon, int]],

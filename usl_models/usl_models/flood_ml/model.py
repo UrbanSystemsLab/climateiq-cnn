@@ -13,12 +13,6 @@ from usl_models.flood_ml import model_params
 FloodModelParams: TypeAlias = model_params.FloodModelParams
 
 
-class Input(TypedDict):
-    geospatial: tf.Tensor
-    temporal: tf.Tensor
-    spatiotemporal: tf.Tensor
-
-
 class FloodModel:
     """Flood model class."""
 

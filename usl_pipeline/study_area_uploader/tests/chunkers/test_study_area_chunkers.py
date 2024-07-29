@@ -2,7 +2,7 @@ import pathlib
 import shutil
 import tarfile
 import tempfile
-from typing import Optional, Tuple
+from typing import Tuple
 import typing.io
 from unittest import mock
 
@@ -87,7 +87,7 @@ def assert_check_tar(
     soil_classes_polygons: list[Tuple[geometry.Polygon, int]] = [],
 ) -> None:
     """Checks that contents of TAR-file match the expected elevation/polygons data."""
-    observed_elevation: Optional[geo_data.Elevation] = None
+    observed_elevation: geo_data.Elevation | None = None
     observed_boundaries_polygons = []
     observed_buildings_polygons = []
     observed_green_areas_polygons = []

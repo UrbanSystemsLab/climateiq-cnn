@@ -1,6 +1,6 @@
 from enum import StrEnum
 import pathlib
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Tuple
 
 import fiona
 import fiona.crs
@@ -20,7 +20,7 @@ _PointFragment = Iterable[_Point]
 
 def _transform_point_fragment(
     fragment: _PointFragment,
-    point_transformer: Optional[transformer.Transformer],
+    point_transformer: transformer.Transformer | None,
 ) -> _PointFragment:
     if point_transformer is None:
         return fragment
@@ -32,8 +32,8 @@ def _transform_point_fragment(
 
 def read_polygons_from_shape_file(
     file_path: str | pathlib.Path,
-    target_crs: Optional[str] = None,
-    mask_value_feature_property: Optional[str] = None,
+    target_crs: str | None = None,
+    mask_value_feature_property: str | None = None,
 ) -> list[Tuple[geometry.Polygon, int]]:
     """Reads polygon data from shape file.
 
@@ -52,7 +52,7 @@ def read_polygons_from_shape_file(
     """
     layer = fiona.open(str(file_path))
     source_crs = fiona.crs.to_string(layer.crs)
-    point_transformer: Optional[transformer.Transformer] = None
+    point_transformer: transformer.Transformer | None = None
     if target_crs is not None and target_crs != source_crs:
         point_transformer = pyproj.Transformer.from_crs(
             source_crs, target_crs, always_xy=True
