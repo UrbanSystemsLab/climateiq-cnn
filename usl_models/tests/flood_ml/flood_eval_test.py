@@ -40,6 +40,33 @@ def test_batch_spatial_mae():
     np.testing.assert_allclose(actual, expected, rtol=1e-6)
 
 
+def test_spatial_nse():
+    """Tests spatial NSE calculation."""
+    label = tf.transpose(
+        tf.reshape(tf.range(36, dtype=tf.float64), (3, 3, 4)), (2, 0, 1)
+    )
+    error = tf.range(4, dtype=tf.float64) / 10
+    pred = label + tf.tile(error[:, tf.newaxis, tf.newaxis], (1, 3, 3))
+
+    actual = eval.spatial_nse(pred, label)
+    expected = tf.broadcast_to(0.972, (3, 3))
+    np.testing.assert_allclose(actual, expected, rtol=1e-6)
+
+
+def test_batch_spatial_nse():
+    """Tests spatial NSE calculation over a batch."""
+    label = tf.transpose(
+        tf.reshape(tf.range(72, dtype=tf.float64), (2, 3, 3, 4)), (0, 3, 1, 2)
+    )
+    error = tf.reshape(tf.range(8, dtype=tf.float64), (2, 4)) / 10
+    pred = label + tf.tile(error[:, :, tf.newaxis, tf.newaxis], (1, 1, 3, 3))
+
+    actual = eval.spatial_nse(pred, label, batch=True)
+    # NSEs per batch: [0.972, 0.748] -> avg = 0.86
+    expected = tf.broadcast_to(0.86, (3, 3))
+    np.testing.assert_allclose(actual, expected, rtol=1e-6)
+
+
 def test_temporal_mae():
     """Tests temporal MAE calculation."""
     label = tf.reshape(tf.range(36, dtype=tf.float64), (4, 3, 3))

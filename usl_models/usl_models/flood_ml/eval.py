@@ -39,6 +39,32 @@ def spatial_mae(
     return abs_error
 
 
+def spatial_nse(
+    predictions: tf.Tensor, labels: tf.Tensor, batch: bool = False
+) -> tf.Tensor:
+    """Calculates spatial Nash-Sutcliffe efficiency (NSE).
+
+    Args:
+            predictions: [H, W] tensor of predictions.
+            labels: [H, W] tensor of ground-truth labels.
+            batch: Whether the inputs include a batch dimension, in which case they
+                have shape [N, H, W].
+
+    Returns:
+        [H, W] tensor of NSE. If a batch dimension is included, the output is the
+        average NSE over all examples.
+    """
+    temp_axis = 1 if batch else 0
+    obs_mean = tf.reduce_mean(labels, axis=temp_axis)
+    # Add temporal dimension back into obs_mean so shapes are compatible
+    obs_mean = tf.expand_dims(obs_mean, temp_axis)
+    mse = tf.reduce_sum((labels - predictions) ** 2, axis=temp_axis)
+    nse = 1 - mse / tf.reduce_sum((labels - obs_mean) ** 2, axis=temp_axis)
+    if batch:
+        return tf.reduce_mean(nse, axis=0)
+    return nse
+
+
 def temporal_mae(
     predictions: tf.Tensor, labels: tf.Tensor, batch: bool = False
 ) -> tf.Tensor:
