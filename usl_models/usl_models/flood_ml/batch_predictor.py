@@ -118,6 +118,7 @@ class BatchPredictor:
         )
 
     def get_prediction_jsonl_path(self, study_area_id: str, scenario_id: str) -> str:
+        """Returns the GCS filepath for a prediction jsonl file."""
         return (
             f"{self.run_id}/flood/{self.model_id}/{study_area_id}"
             + f"/{scenario_id}/prediction.results-1-of-1"
