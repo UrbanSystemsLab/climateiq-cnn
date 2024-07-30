@@ -124,30 +124,30 @@ class BatchPredictor:
             + f"/{scenario_id}/prediction.results-1-of-1"
         )
 
+    def get_prediction_npy_blob(
+        self, study_area_id: str, config_id: str, chunk_id: str
+    ) -> storage.Blob:
+        """Loads a prediction npy blob from GCS."""
+        return self.client.get_bucket(self.output_bucket).blob(
+            self.get_prediction_npy_path(study_area_id, config_id, chunk_id)
+        )
+
     def save_prediction_npy(
         self, study_area_id: str, config_id: str, chunk_id: str, prediction: np.ndarray
     ) -> None:
         """Saves a prediction npy file to GCS."""
-        path = self.get_prediction_npy_path(study_area_id, config_id, chunk_id)
-        logging.info(f"Saving chunk to {path} with shape {prediction.shape}")
-        blob = self.client.get_bucket(self.output_bucket).blob(path)
+        blob = self.get_prediction_npy_blob(study_area_id, config_id, chunk_id)
+        logging.info(
+            f"Saving temporary chunk to {blob.path} with shape {prediction.shape}"
+        )
         with blob.open("wb") as fd:
             np.save(fd, prediction)
 
-    def load_prediction_npy(
-        self, study_area_id: str, config_id: str, chunk_id: str, delete: bool = False
-    ) -> np.ndarray:
-        """Loads a prediction npy file from GCS."""
-        blob = self.client.get_bucket(self.output_bucket).blob(
-            self.get_prediction_npy_path(study_area_id, config_id, chunk_id)
-        )
+    @staticmethod
+    def load_nbp_blob(blob: storage.Blob) -> np.ndarray:
+        """Loads a numpy array from GCS Blob."""
         with blob.open("rb") as fd:
-            prediction = np.load(fd)
-
-        if delete:
-            blob.delete()
-
-        return prediction
+            return np.load(fd)
 
     def set_model_run_metadata(self, scenario_ids: list[str]):
         """Sets model run metadata in firestore."""
@@ -206,13 +206,17 @@ class BatchPredictor:
     ):
         """Convert npy files to a single jsonl file."""
         jsonl_path = self.get_prediction_jsonl_path(study_area_id, scenario_id)
-        with self.client.bucket(self.output_bucket).blob(jsonl_path).open("w") as fd:
+        output_blob = self.client.bucket(self.output_bucket).blob(jsonl_path)
+        with output_blob.open("w") as fd:
             for chunk_id in chunk_ids:
-                path = self.get_prediction_npy_path(study_area_id, config_id, chunk_id)
-                logging.info(f"Bundling {path}...")
-                prediction = self.load_prediction_npy(
-                    study_area_id, config_id, chunk_id, delete=True
+                chunk_blob = self.get_prediction_npy_blob(
+                    study_area_id, config_id, chunk_id
                 )
-                json_data = self.prediction_to_json(prediction, chunk_id)
+                logging.info(f"Bundling {chunk_blob.path}...")
+                chunk_prediction = self.load_nbp_blob(chunk_blob)
+                json_data = self.prediction_to_json(chunk_prediction, chunk_id)
                 json.dump(json_data, fd)
                 fd.write("\n")
+
+                # Clean up temporary .npy files.
+                chunk_blob.delete()
