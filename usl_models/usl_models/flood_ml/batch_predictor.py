@@ -164,22 +164,24 @@ class BatchPredictor:
         prediction_id = f"Prediction-{study_area_id}-{scenario_id}"
         prediction_ref = run_ref.collection("predictions").document(prediction_id)
 
-        chunks = self.get_chunk_metadata(chunk_ids)
+        chunks = self.get_chunk_metadata(study_area_id, scenario_id, chunk_ids)
 
         prediction_ref.set(
             {
                 "study_area_id": study_area_id,
                 "scenario_configuration_id": scenario_id,
-                "path": self.get_prediction_jsonl_path(study_area_id, scenario_id),
                 "chunks": chunks,
             }
         )
 
-    def get_chunk_metadata(self, chunk_ids: list[str]) -> list[dict]:
+    def get_chunk_metadata(
+        self, study_area_id: str, scenario_id: str, chunk_ids: list[str]
+    ) -> list[dict]:
         """Returns a list of chunk metadata."""
         return [
             {
                 "id": chunk_id,
+                "path": self.get_prediction_jsonl_path(study_area_id, scenario_id),
             }
             for chunk_id in chunk_ids
         ]
