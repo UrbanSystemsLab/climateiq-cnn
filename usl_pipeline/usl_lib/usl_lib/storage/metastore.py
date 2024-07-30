@@ -524,6 +524,7 @@ class HeatScenarioConfig:
 
 class SimulationType(enum.StrEnum):
     CITY_CAT = "CityCAT"
+    WRF = "WRF"
 
 
 @dataclasses.dataclass(slots=True)

@@ -1,3 +1,4 @@
+import datetime
 from unittest import mock
 
 from google.cloud import firestore
@@ -379,3 +380,34 @@ def test_simulation_label_chunk_dataset_split_produces_different_splits() -> Non
     # seeds ensures we will get the same sets for the same
     # configuration names, making this test reproducible.
     assert chunks_dataset_split_for_config_1 != chunks_dataset_split_for_config_2
+
+
+def test_simulation_label_temporal_chunk_set():
+    mock_db = mock.MagicMock()
+    metastore.SimulationLabelTemporalChunk(
+        gcs_uri="gs://bucket/study_area/config_group/Heat_Data_2012.txt",
+        time=datetime.datetime(2012, 2, 2, 18, 0, 0),
+    ).set(mock_db, "study_area", "config_group/Heat_Data_2012.txt")
+    mock_db.assert_has_calls(
+        [
+            mock.call.collection("simulations"),
+            mock.call.collection().document(
+                "study_area-config_group%2FHeat_Data_2012.txt"
+            ),
+            mock.call.collection().document().collection("label_chunks"),
+            mock.call.collection()
+            .document()
+            .collection()
+            .document("2012-02-02 18:00:00"),
+            mock.call.collection()
+            .document()
+            .collection()
+            .document()
+            .set(
+                {
+                    "gcs_uri": "gs://bucket/study_area/config_group/Heat_Data_2012.txt",
+                    "time": datetime.datetime(2012, 2, 2, 18, 0, 0),
+                },
+            ),
+        ]
+    )

@@ -417,6 +417,12 @@ def _build_wrf_label_matrix(
             label_blob = storage_client.bucket(output_bucket).blob(str(label_file_name))
 
             _write_as_npy(label_blob, label_matrix)
+
+            # TODO: Can consider using a different file to trigger Simulation metastore
+            # write to reduce duplicated metastore entry updates. Currently, we will
+            # upsert Simulation entry for every wrfout.d03 file processed (even though
+            # Simulation entry is the same for every wrfout chunk).
+            _write_wrf_simulation_metastore_entry(chunk_blob, metadata)
             _write_wrf_label_chunk_metastore_entry(chunk_blob, label_blob, metadata)
         else:
             raise ValueError(f"Unexpected file {chunk_name}")
@@ -450,6 +456,28 @@ def _process_wrf_label_and_metadata(fd: IO[bytes]) -> Tuple[NDArray, FeatureMeta
     )
 
 
+def _write_wrf_simulation_metastore_entry(
+    file_blob: storage.Blob, metadata: FeatureMetadata
+) -> None:
+    db = firestore.Client()
+
+    # Pick out the study_area and file/chunk name from GCS path
+    # File names should be in the form:
+    # <study_area_name>/<some_sub_folder>/<file_name>
+    file_path = pathlib.PurePosixPath(file_blob.name)
+    file_path_parts = file_path.parts
+    study_area_name = file_path_parts[0]
+    config_path = _construct_heat_config_path(file_path, metadata)
+
+    # Enter the simulation in our metastore.
+    metastore.Simulation(
+        gcs_prefix_uri=f"gs://{file_blob.bucket.name}/{study_area_name}",
+        simulation_type=metastore.SimulationType.WRF,
+        study_area=metastore.StudyArea.get_ref(db, study_area_name),
+        configuration=metastore.HeatScenarioConfig.get_ref(db, config_path),
+    ).set(db)
+
+
 def _write_wrf_label_chunk_metastore_entry(
     chunk_blob: storage.Blob, label_blob: storage.Blob, metadata: FeatureMetadata
 ) -> None:
@@ -461,13 +489,28 @@ def _write_wrf_label_chunk_metastore_entry(
       metadata: Additional metadata describing the features.
     """
     db = firestore.Client()
-    study_area_name = _parse_chunk_path(chunk_blob.name)[0]
+
+    # Pick out the study_area and file/chunk name from GCS path
+    # File names should be in the form:
+    # <study_area_name>/<some_sub_folder>/<file_name>
+    file_path = pathlib.PurePosixPath(chunk_blob.name)
+    file_path_parts = file_path.parts
+    study_area_name = file_path_parts[0]
+    config_path = _construct_heat_config_path(file_path, metadata)
 
     metastore.SimulationLabelTemporalChunk(
         gcs_uri=f"gs://{label_blob.bucket.name}/{label_blob.name}",
         time=metadata.time,
-        # TODO: Figure out how to differentiate each wrf label chunk (config_path)
-    ).set(db, study_area_name, config_path="None")
+    ).set(db, study_area_name, config_path)
+
+
+def _construct_heat_config_path(
+    file_path: pathlib.PurePosixPath, metadata: FeatureMetadata
+) -> str:
+    # Time should always be extracted as feature metadata
+    # but needs to be optional field to allow for class reuse for flood.
+    assert metadata.time is not None
+    return f"{str(file_path.parent)}/Heat_Data_{metadata.time.year}.txt"
 
 
 @functions_framework.cloud_event
