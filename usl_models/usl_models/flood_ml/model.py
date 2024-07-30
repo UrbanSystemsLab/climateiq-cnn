@@ -27,7 +27,7 @@ class FloodModel:
         """Prediction result dictionary."""
 
         prediction: tf.Tensor
-        chunk_id: str
+        chunk_id: str | tf.Tensor
 
     def __init__(
         self,
