@@ -67,6 +67,24 @@ def test_batch_spatial_nse():
     np.testing.assert_allclose(actual, expected, rtol=1e-6)
 
 
+def test_spatial_nse_zero_deviation():
+    """Tests spatial NSE calculation when there's no temporal deviation.
+
+    When the label doesn't change over the course of the entire time series,
+    the SSD in the denominator evaluates to zero, which can lead to NaN and
+    inf values.
+
+    This test checks that the epsilon added to the denominator prevents such
+    non-numerical outputs.
+    """
+    shape = (4, 3, 3)
+    label = tf.ones(shape)
+    pred = label + tf.random.normal(shape)
+
+    nse = eval.spatial_nse(pred, label)
+    assert tf.reduce_all(tf.math.is_finite(nse))
+
+
 def test_temporal_mae():
     """Tests temporal MAE calculation."""
     label = tf.reshape(tf.range(36, dtype=tf.float64), (4, 3, 3))

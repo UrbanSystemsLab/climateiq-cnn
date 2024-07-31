@@ -55,12 +55,15 @@ def batch_spatial_mae(predictions: tf.Tensor, labels: tf.Tensor) -> tf.Tensor:
     return tf.reduce_mean(tf.abs(predictions - labels), axis=0)
 
 
-def spatial_nse(prediction: tf.Tensor, label: tf.Tensor) -> tf.Tensor:
+def spatial_nse(
+    prediction: tf.Tensor, label: tf.Tensor, eps: float = 1e-9
+) -> tf.Tensor:
     """Calculates spatial NSE over a single prediction sequence.
 
     Args:
         prediction: [T, H, W] prediction sequence tensor.
         label: [T, H, W] label sequence tensor.
+        eps: Small epsilon to add to the SSD to avoid dividing by zero.
 
     Returns:
         [H, W] tensor of Nash-Sutcliffe efficiency (NSE).
@@ -71,15 +74,19 @@ def spatial_nse(prediction: tf.Tensor, label: tf.Tensor) -> tf.Tensor:
     temp_axis = 0
     obs_mean = tf.reduce_mean(label, axis=temp_axis)
     mse = tf.reduce_sum((label - prediction) ** 2, axis=temp_axis)
-    return 1 - mse / tf.reduce_sum((label - obs_mean) ** 2, axis=temp_axis)
+    ssd = tf.reduce_sum((label - obs_mean) ** 2, axis=temp_axis) + eps
+    return 1 - mse / ssd
 
 
-def batch_spatial_nse(predictions: tf.Tensor, labels: tf.Tensor) -> tf.Tensor:
+def batch_spatial_nse(
+    predictions: tf.Tensor, labels: tf.Tensor, eps: float = 1e-9
+) -> tf.Tensor:
     """Calculates spatial NSE over a batch of prediction sequences.
 
     Args:
         predictions: [B, T, H, W] tensor of time series predictions.
         labels: [B, T, H, W] tensor of time series ground-truth labels.
+        eps: Small epsilon to add to the SSD to avoid dividing by zero.
 
     Returns:
         [H, W] tensor of Nash-Sutcliffe efficiency (NSE) averaged over the
@@ -89,12 +96,10 @@ def batch_spatial_nse(predictions: tf.Tensor, labels: tf.Tensor) -> tf.Tensor:
     assert tf.rank(predictions) == 4
 
     temp_axis = 1
-    obs_mean = tf.reduce_mean(labels, axis=temp_axis)
-    # Add temporal dimension back so shapes are compatible
-    obs_mean = tf.expand_dims(obs_mean, temp_axis)
+    obs_mean = tf.reduce_mean(labels, axis=temp_axis, keepdims=True)
     mse = tf.reduce_sum((labels - predictions) ** 2, axis=temp_axis)
-    nse = 1 - mse / tf.reduce_sum((labels - obs_mean) ** 2, axis=temp_axis)
-    return tf.reduce_mean(nse, axis=0)
+    ssd = tf.reduce_sum((labels - obs_mean) ** 2, axis=temp_axis) + eps
+    return tf.reduce_mean(1 - mse / ssd, axis=0)
 
 
 def temporal_mae(prediction: tf.Tensor, label: tf.Tensor) -> tf.Tensor:
