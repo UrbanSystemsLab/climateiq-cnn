@@ -28,7 +28,7 @@ def test_batch_spatial_mae():
     label = tf.reshape(tf.range(18, dtype=tf.float64), (2, 3, 3))
     pred = label * 1.01
 
-    actual = eval.spatial_mae(pred, label, batch=True)
+    actual = eval.batch_spatial_mae(pred, label)
     expected = tf.convert_to_tensor(
         [
             [0.045, 0.055, 0.065],
@@ -61,7 +61,7 @@ def test_batch_spatial_nse():
     error = tf.reshape(tf.range(8, dtype=tf.float64), (2, 4)) / 10
     pred = label + tf.tile(error[:, :, tf.newaxis, tf.newaxis], (1, 1, 3, 3))
 
-    actual = eval.spatial_nse(pred, label, batch=True)
+    actual = eval.batch_spatial_nse(pred, label)
     # NSEs per batch: [0.972, 0.748] -> avg = 0.86
     expected = tf.broadcast_to(0.86, (3, 3))
     np.testing.assert_allclose(actual, expected, rtol=1e-6)
@@ -84,7 +84,7 @@ def test_batch_temporal_mae():
     error = tf.reshape(tf.range(8, dtype=tf.float64), (2, 4)) / 10
     pred = label + tf.tile(error[:, :, tf.newaxis, tf.newaxis], (1, 1, 3, 3))
 
-    actual = eval.temporal_mae(pred, label, batch=True)
+    actual = eval.batch_temporal_mae(pred, label)
     expected = tf.convert_to_tensor([0.2, 0.3, 0.4, 0.5], dtype=tf.float64)
     np.testing.assert_allclose(actual, expected, rtol=1e-6)
 
@@ -106,6 +106,6 @@ def test_batch_temporal_rmse():
     error = tf.reshape(tf.range(8, dtype=tf.float64), (2, 4)) / 10
     pred = label + tf.tile(error[:, :, tf.newaxis, tf.newaxis], (1, 1, 3, 3))
 
-    actual = eval.temporal_rmse(pred, label, batch=True)
+    actual = eval.batch_temporal_rmse(pred, label)
     expected = expected = tf.sqrt([0.08, 0.13, 0.2, 0.29])
     np.testing.assert_allclose(actual, expected, rtol=1e-6)
