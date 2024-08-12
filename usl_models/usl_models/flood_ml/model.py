@@ -251,13 +251,16 @@ class FloodConvLSTM(tf.keras.Model):
                 # Remaining layers are TimeDistributed and are applied to each
                 # temporal slice
                 layers.TimeDistributed(layers.Conv2D(8, 5, **st_cnn_params)),
+                layers.TimeDistributed(layers.BatchNormalization()),  # Batch Norm
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
                 layers.TimeDistributed(layers.Conv2D(16, 5, **st_cnn_params)),
+                layers.TimeDistributed(layers.BatchNormalization()),  # Batch Norm
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
+                layers.TimeDistributed(layers.Dropout(0.3)),  # Dropout to avoid overfitting
             ],
             name="spatiotemporal_cnn",
         )
@@ -271,9 +274,12 @@ class FloodConvLSTM(tf.keras.Model):
                     (self._spatial_height, self._spatial_width, constants.GEO_FEATURES)
                 ),
                 layers.Conv2D(16, 5, **geo_cnn_params),
+                layers.BatchNormalization(),  # Batch Norm
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
                 layers.Conv2D(64, 5, **geo_cnn_params),
+                layers.BatchNormalization(),  # Batch Norm
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
+                layers.Dropout(0.3),  # Dropout
             ],
             name="geospatial_cnn",
         )
@@ -297,9 +303,20 @@ class FloodConvLSTM(tf.keras.Model):
                     strides=1,
                     padding="same",
                     activation="tanh",
+                    return_sequences=True,
+                ),
+                layers.BatchNormalization(),  # Batch Norm
+                layers.Attention(),  # Attention Layer
+                layers.ConvLSTM2D(
+                    self._params["lstm_units"],
+                    self._params["lstm_kernel_size"],
+                    strides=1,
+                    padding="same",
+                    activation="tanh",
                     dropout=self._params["lstm_dropout"],
                     recurrent_dropout=self._params["lstm_recurrent_dropout"],
                 ),
+                layers.Dropout(0.3),  # Dropout
             ],
             name="conv_lstm",
         )
@@ -313,6 +330,7 @@ class FloodConvLSTM(tf.keras.Model):
                     (conv_lstm_height, conv_lstm_width, self._params["lstm_units"])
                 ),
                 layers.Conv2DTranspose(8, 4, strides=4, **output_cnn_params),
+                layers.BatchNormalization(),  # Batch Norm
                 layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params),
             ],
             name="output_cnn",
