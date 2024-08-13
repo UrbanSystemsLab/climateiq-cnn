@@ -306,7 +306,7 @@ class FloodConvLSTM(tf.keras.Model):
                     return_sequences=True,
                 ),
                 layers.BatchNormalization(),  # Batch Norm
-                layers.Attention(),  # Attention Layer
+                layers.Lambda(lambda x: layers.Attention()([x, x])),
                 layers.ConvLSTM2D(
                     self._params["lstm_units"],
                     self._params["lstm_kernel_size"],
