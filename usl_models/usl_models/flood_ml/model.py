@@ -260,7 +260,7 @@ class FloodConvLSTM(tf.keras.Model):
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
-                layers.TimeDistributed(layers.Dropout(0.3)),  # Dropout to avoid overfitting
+                layers.TimeDistributed(layers.Dropout(0.3)),  # Dropout
             ],
             name="spatiotemporal_cnn",
         )
