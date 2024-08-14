@@ -1,22 +1,133 @@
 """AtmoML model definition."""
-
-from typing import TypeAlias, TypedDict
-
+import logging
+from typing import TypeAlias, TypedDict, Iterator, List, Callable
+import keras
 import tensorflow as tf
 from keras import layers
 
-# from usl_models.atmo_ml import constants
+from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
 
 AtmoModelParams: TypeAlias = model_params.AtmoModelParams
+class AtmoModel:
+    """Atmo model class."""
 
+    class Input(TypedDict):
+        """Input tensors dictionary."""
+        spatial: tf.Tensor
+        spatiotemporal: tf.Tensor
 
-class AtmoInput(TypedDict):
-    """Input tensors dictionary for the Atmo model."""
+    class Result(TypedDict):
+        """Prediction result dictionary."""
+        prediction: tf.Tensor
+        chunk_id: str | tf.Tensor
 
-    spatial: tf.Tensor
-    spatiotemporal: tf.Tensor
+    def __init__(
+        self,
+        params: AtmoModelParams | None = None,
+        spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
+    ):
+        """Creates the Atmo model.
+
+        Args:
+            params: A dictionary of configurable model parameters.
+            spatial_dims: Tuple of spatial height and width input dimensions.
+                Needed for defining input shapes. This is an optional arg that
+                can be changed (primarily for testing/debugging).
+        """
+        self._model_params = params or model_params.default_params()
+        self._spatial_dims = spatial_dims
+        self._model = self._build_model()
+
+    @classmethod
+    def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "AtmoModel":
+        """Loads the model from a checkpoint URI.
+
+        We load weights only to keep custom methods intact.
+        This only works if the model architecture is identical to the architecture
+        used during export.
+
+        Args:
+            artifact_uri: The path to the SavedModel directory.
+                This should end in `/model` if using a GCloud artifact.
+
+        Returns:
+            The loaded AtmoModel.
+        """
+        model = cls(**kwargs)
+        loaded_model = keras.models.load_model(artifact_uri)
+        assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
+        model._model.set_weights(loaded_model.get_weights())
+        return model
+
+    def _build_model(self) -> keras.Model:
+        """Creates the correct internal (Keras) model architecture."""
+        model = AtmoConvLSTM(
+            self._model_params,
+            spatial_dims=self._spatial_dims,
+            num_spatial_features=self._model_params["num_spatial_features"],
+            num_spatiotemporal_features=self._model_params["num_spatiotemporal_features"],
+        )
+        model.compile(
+            optimizer=tf.keras.optimizers.get(self._model_params["optimizer_config"]),
+            loss=tf.keras.losses.MeanSquaredError(),
+            metrics=[
+                tf.keras.metrics.MeanAbsoluteError(),
+                tf.keras.metrics.RootMeanSquaredError(),
+            ],
+        )
+        return model
+
+    def call(self, input: Input) -> tf.Tensor:
+        return self._model.call(input)
+
+    def fit(
+        self,
+        train_dataset: tf.data.Dataset,
+        val_dataset: tf.data.Dataset | None = None,
+        epochs: int = 1,
+        steps_per_epoch: int | None = None,
+        early_stopping: int | None = None,
+        callbacks: List[Callable] | None = None,
+    ):
+        """Fit the model to the given dataset."""
+        if callbacks is None:
+            callbacks = []
+        if early_stopping is not None:
+            callbacks.append(
+                keras.callbacks.EarlyStopping(
+                    monitor="loss", mode="min", patience=early_stopping
+                )
+            )
+
+        return self._model.fit(
+            train_dataset,
+            validation_data=val_dataset,
+            epochs=epochs,
+            steps_per_epoch=steps_per_epoch,
+            callbacks=callbacks,
+        )
+
+    def load_weights(self, filepath: str) -> None:
+        """Loads weights from an existing file.
+
+        Args:
+            filepath: Path to the weights file to load into the current model.
+        """
+        self._model.load_weights(filepath)
+        logging.info("Loaded model weights from %s", filepath)
+
+    def save_model(self, filepath: str, **kwargs) -> None:
+        """Saves a .keras model to the specified path.
+
+        Args:
+            filepath: Path to which to save the model. Must end in ".keras".
+            kwargs: Additional arguments to pass to keras' model.save method.
+        """
+        self._model.save(filepath, **kwargs)
+        logging.info("Saved model to %s", filepath)
+
 
 
 ###############################################################################
@@ -222,7 +333,7 @@ class AtmoConvLSTM(tf.keras.Model):
             name="wdir10_output_cnn",
         )
 
-    def call(self, inputs: AtmoInput) -> tf.Tensor:
+    def call(self, inputs: Input) -> tf.Tensor:
         """Makes a forward pass of the model.
 
         Args:
