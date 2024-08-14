@@ -1,6 +1,6 @@
 """AtmoML model definition."""
 import logging
-from typing import TypeAlias, TypedDict, Iterator, List, Callable
+from typing import TypeAlias, TypedDict, List, Callable
 import keras
 import tensorflow as tf
 from keras import layers
