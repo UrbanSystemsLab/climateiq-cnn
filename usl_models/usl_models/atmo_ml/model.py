@@ -10,6 +10,8 @@ from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
 
 AtmoModelParams: TypeAlias = model_params.AtmoModelParams
+
+
 class AtmoModel:
     """Atmo model class."""
 
@@ -67,7 +69,9 @@ class AtmoModel:
             self._model_params,
             spatial_dims=self._spatial_dims,
             num_spatial_features=self._model_params["num_spatial_features"],
-            num_spatiotemporal_features=self._model_params["num_spatiotemporal_features"],
+            num_spatiotemporal_features=(
+                self._model_params["num_spatiotemporal_features"]
+            ),
         )
         model.compile(
             optimizer=tf.keras.optimizers.get(self._model_params["optimizer_config"]),
@@ -80,6 +84,7 @@ class AtmoModel:
         return model
 
     def call(self, input: Input) -> tf.Tensor:
+        """Forward pass for predictions. See `AtmoConvLSTM.call`."""
         return self._model.call(input)
 
     def fit(
@@ -127,7 +132,6 @@ class AtmoModel:
         """
         self._model.save(filepath, **kwargs)
         logging.info("Saved model to %s", filepath)
-
 
 
 ###############################################################################
@@ -333,7 +337,7 @@ class AtmoConvLSTM(tf.keras.Model):
             name="wdir10_output_cnn",
         )
 
-    def call(self, inputs: Input) -> tf.Tensor:
+    def call(self, inputs: AtmoModel.Input) -> tf.Tensor:
         """Makes a forward pass of the model.
 
         Args:
