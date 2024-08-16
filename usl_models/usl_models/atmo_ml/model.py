@@ -5,7 +5,7 @@ from typing import TypeAlias, TypedDict, List, Callable
 import keras
 import tensorflow as tf
 from keras import layers
-
+from typing import Optional
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
@@ -32,8 +32,8 @@ class AtmoModel:
         self,
         params: AtmoModelParams | None = None,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
-        num_spatial_features: int = None,
-        num_spatiotemporal_features: int = None,
+        num_spatial_features: Optional[int] = None,
+        num_spatiotemporal_features: Optional[int] = None,
     ):
         """Creates the Atmo model.
 
