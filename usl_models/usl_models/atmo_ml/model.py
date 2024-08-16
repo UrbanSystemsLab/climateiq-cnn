@@ -71,10 +71,8 @@ class AtmoModel:
         model = AtmoConvLSTM(
             self._model_params,
             spatial_dims=self._spatial_dims,
-            num_spatial_features=self._model_params["num_spatial_features"],
-            num_spatiotemporal_features=(
-                self._model_params["num_spatiotemporal_features"]
-            ),
+            num_spatial_features=self._spatial_features,
+            num_spatiotemporal_features=self._spatiotemporal_features,
         )
         model.compile(
             optimizer=tf.keras.optimizers.get(self._model_params["optimizer_config"]),
