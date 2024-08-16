@@ -1,4 +1,5 @@
 """AtmoML model definition."""
+
 import logging
 from typing import TypeAlias, TypedDict, List, Callable
 import keras
@@ -17,11 +18,13 @@ class AtmoModel:
 
     class Input(TypedDict):
         """Input tensors dictionary."""
+
         spatial: tf.Tensor
         spatiotemporal: tf.Tensor
 
     class Result(TypedDict):
         """Prediction result dictionary."""
+
         prediction: tf.Tensor
         chunk_id: str | tf.Tensor
 
