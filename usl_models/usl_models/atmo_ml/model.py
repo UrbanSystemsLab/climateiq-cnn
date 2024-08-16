@@ -42,6 +42,8 @@ class AtmoModel:
             spatial_dims: Tuple of spatial height and width input dimensions.
                 Needed for defining input shapes. This is an optional arg that
                 can be changed (primarily for testing/debugging).
+            num_spatial_features: nb of spt features
+            num_spatiotemporal_features: nb of spatiotemp feat.
         """
         self._model_params = params or model_params.default_params()
         self._spatial_dims = spatial_dims
