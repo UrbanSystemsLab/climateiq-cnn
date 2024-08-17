@@ -5,7 +5,6 @@ from typing import TypeAlias, TypedDict, List, Callable
 import keras
 import tensorflow as tf
 from keras import layers
-from typing import Optional
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
