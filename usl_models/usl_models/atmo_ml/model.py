@@ -32,8 +32,8 @@ class AtmoModel:
         self,
         params: AtmoModelParams | None = None,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
-        num_spatial_features: Optional[int] = None,
-        num_spatiotemporal_features: Optional[int] = None,
+        num_spatial_features: int = constants.num_spatial_features,
+        num_spatiotemporal_features: int = constants.num_spatiotemporal_features,
     ):
         """Creates the Atmo model.
 
