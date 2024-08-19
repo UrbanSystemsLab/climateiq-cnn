@@ -30,7 +30,7 @@ def fake_input_batch(
     batch_size: int,
     height: int = _TEST_MAP_HEIGHT,
     width: int = _TEST_MAP_WIDTH,
-) -> atmo_model.AtmoInput:
+) -> atmo_model.AtmoModel.Input:
     """Creates a fake training batch for testing.
 
     Args:

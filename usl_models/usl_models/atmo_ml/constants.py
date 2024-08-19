@@ -8,3 +8,5 @@ MAP_WIDTH = 200
 INPUT_TIME_STEPS = 6
 OUTPUT_CHANNELS = 5
 OUTPUT_TIME_STEPS = 10
+num_spatial_features = 18
+num_spatiotemporal_features = 9
