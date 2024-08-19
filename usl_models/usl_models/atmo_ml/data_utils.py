@@ -1,6 +1,5 @@
 """Data functions for AtmoML model."""
 
-from numpy.lib import stride_tricks
 import tensorflow as tf
 
 
@@ -27,8 +26,12 @@ def boundary_pairs(data: tf.Tensor) -> tf.Tensor:
         A time sequence of "boundary condition" paired tensors of shape
         [B, T-1, H, W, 2C].
     """
-    pairs = stride_tricks.sliding_window_view(data, 2, axis=1)
-    pairs = tf.reshape(pairs, pairs.shape[:-2] + (-1,))
+    # Shift the time dimension by 1 and pair each step with the next one
+    t1 = data[:, :-1, :, :, :]  # [B, T-1, H, W, C]
+    t2 = data[:, 1:, :, :, :]  # [B, T-1, H, W, C]
+
+    # Concatenate along the channel axis to form pairs
+    pairs = tf.concat([t1, t2], axis=-1)  # [B, T-1, H, W, 2C]
     return pairs
 
 
@@ -51,10 +54,19 @@ def split_time_step_pairs(data: tf.Tensor) -> tf.Tensor:
     Returns:
         A time sequence of single tensors of shape [B, 2T, H, W, C].
     """
-    # We need to permute the tensor to place the time and channel axes together
-    # during the reshape, in order to avoid disturbing the spatial dimensions.
+    # Transpose to [B, H, W, T, 2C] so that we can split the channel dimension
     permuted = tf.transpose(data, (0, 2, 3, 1, 4))
-    shape = permuted.shape[:3] + (permuted.shape[-2] * 2, permuted.shape[-1] // 2)
-    reshaped = tf.reshape(permuted, shape)
+
+    # Get the dynamic shape
+    batch_size = tf.shape(permuted)[0]
+    height = tf.shape(permuted)[1]
+    width = tf.shape(permuted)[2]
+    time_steps = tf.shape(permuted)[3] * 2  # Original time steps are doubled
+    channels = tf.shape(permuted)[4] // 2  # Original channels are halved
+
+    # Reshape to [B, H, W, 2T, C]
+    reshaped = tf.reshape(permuted, (batch_size, height, width, time_steps, channels))
+
+    # Transpose back to [B, 2T, H, W, C]
     output = tf.transpose(reshaped, (0, 3, 1, 2, 4))
     return output

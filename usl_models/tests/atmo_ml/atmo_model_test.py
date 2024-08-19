@@ -1,15 +1,16 @@
 """Tests for Atmo model."""
 
 import tensorflow as tf
-
+import tempfile
+import numpy as np
 from usl_models.atmo_ml import model as atmo_model
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import model_params
 
 _TEST_MAP_HEIGHT = 100
 _TEST_MAP_WIDTH = 100
-_TEST_SPATIAL_FEATURES = 20
-_TEST_SPATIOTEMPORAL_FEATURES = 6
+_TEST_SPATIAL_FEATURES = 18
+_TEST_SPATIOTEMPORAL_FEATURES = 9
 
 
 def pytest_model_params() -> model_params.AtmoModelParams:
@@ -85,3 +86,169 @@ def test_atmo_convlstm():
     )
 
     assert prediction.shape == expected_output_shape
+
+
+def test_train():
+    """Tests the AtmoModel training.
+
+    Expected training inputs:
+        spatial: tf.Tensor[shape=(B, H, W, num_spatial_features)]
+        spatiotemporal: tf.Tensor[shape=(B, T, H, W, num_spatiotemporal_features)]
+
+    Expected labels and outputs: tf.Tensor[shape=(B, T, H, W, output_channels)]
+    """
+    batch_size = 16
+    epochs = 2
+    params = pytest_model_params()
+
+    model = atmo_model.AtmoModel(
+        params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+    )
+
+    # Create fake training and validation datasets
+    train_dataset = tf.data.Dataset.from_tensor_slices(
+        (
+            fake_input_batch(batch_size),
+            tf.random.normal(
+                [
+                    batch_size,
+                    constants.OUTPUT_TIME_STEPS,
+                    _TEST_MAP_HEIGHT,
+                    _TEST_MAP_WIDTH,
+                    constants.OUTPUT_CHANNELS,
+                ]
+            ),
+        )
+    ).batch(batch_size)
+
+    val_dataset = tf.data.Dataset.from_tensor_slices(
+        (
+            fake_input_batch(batch_size),
+            tf.random.normal(
+                [
+                    batch_size,
+                    constants.OUTPUT_TIME_STEPS,
+                    _TEST_MAP_HEIGHT,
+                    _TEST_MAP_WIDTH,
+                    constants.OUTPUT_CHANNELS,
+                ]
+            ),
+        )
+    ).batch(batch_size)
+
+    history = model.fit(
+        train_dataset,
+        val_dataset=val_dataset,
+        epochs=epochs,
+        steps_per_epoch=1,
+    )
+    assert len(history.history["loss"]) == epochs
+    assert "val_loss" in history.history
+
+
+def test_early_stopping():
+    """Tests early stopping during model training."""
+    tf.keras.utils.set_random_seed(1)
+
+    batch_size = 4
+    params = pytest_model_params()
+    epochs = 20
+
+    model = atmo_model.AtmoModel(
+        params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+    )
+
+    # Create fake training and validation datasets
+    train_dataset = tf.data.Dataset.from_tensor_slices(
+        (
+            fake_input_batch(batch_size),
+            tf.random.normal(
+                [
+                    batch_size,
+                    constants.OUTPUT_TIME_STEPS,
+                    _TEST_MAP_HEIGHT,
+                    _TEST_MAP_WIDTH,
+                    constants.OUTPUT_CHANNELS,
+                ]
+            ),
+        )
+    ).batch(batch_size)
+
+    val_dataset = tf.data.Dataset.from_tensor_slices(
+        (
+            fake_input_batch(batch_size),
+            tf.random.normal(
+                [
+                    batch_size,
+                    constants.OUTPUT_TIME_STEPS,
+                    _TEST_MAP_HEIGHT,
+                    _TEST_MAP_WIDTH,
+                    constants.OUTPUT_CHANNELS,
+                ]
+            ),
+        )
+    ).batch(batch_size)
+
+    history = model.fit(
+        train_dataset,
+        val_dataset=val_dataset,
+        early_stopping=1,
+        epochs=epochs,
+        steps_per_epoch=1,
+    )
+    assert len(history.history["loss"]) < epochs
+
+
+def test_model_checkpoint():
+    """Tests saving and loading a model checkpoint."""
+    batch_size = 16
+    params = pytest_model_params()
+
+    model = atmo_model.AtmoModel(
+        params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+    )
+
+    # Create fake training and validation datasets
+    train_dataset = tf.data.Dataset.from_tensor_slices(
+        (
+            fake_input_batch(batch_size),
+            tf.random.normal(
+                [
+                    batch_size,
+                    constants.OUTPUT_TIME_STEPS,
+                    _TEST_MAP_HEIGHT,
+                    _TEST_MAP_WIDTH,
+                    constants.OUTPUT_CHANNELS,
+                ]
+            ),
+        )
+    ).batch(batch_size)
+
+    val_dataset = tf.data.Dataset.from_tensor_slices(
+        (
+            fake_input_batch(batch_size),
+            tf.random.normal(
+                [
+                    batch_size,
+                    constants.OUTPUT_TIME_STEPS,
+                    _TEST_MAP_HEIGHT,
+                    _TEST_MAP_WIDTH,
+                    constants.OUTPUT_CHANNELS,
+                ]
+            ),
+        )
+    ).batch(batch_size)
+
+    model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
+
+    with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
+        model.save_model(tmp.name, overwrite=True)
+        new_model = atmo_model.AtmoModel(
+            params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+        )
+        new_model.load_weights(tmp.name)
+
+    old_weights = model._model.get_weights()
+    new_weights = new_model._model.get_weights()
+    for old, new in zip(old_weights, new_weights):
+        np.testing.assert_array_equal(old, new)
