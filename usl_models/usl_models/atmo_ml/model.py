@@ -188,6 +188,11 @@ class AtmoConvLSTM(tf.keras.Model):
                 Needed for defining input shapes.
             num_spatiotemporal_features: Total dimensionality of the spatiotemporal
                 features. Needed for defining input shapes.
+            lu_index_vocab_size (int): The number of unique values in the LU_INDEX
+                feature. This is used to define the size of the vocabulary for the
+                embedding layer.
+            embedding_dim (int): Size of the embedding vectors for the LU_INDEX
+            feature. This determines the dimensionality of the embedding space.
         """
         super().__init__()
 
