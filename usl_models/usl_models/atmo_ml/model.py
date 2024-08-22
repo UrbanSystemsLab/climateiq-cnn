@@ -5,7 +5,7 @@ from typing import TypeAlias, TypedDict, List, Callable
 import keras
 import tensorflow as tf
 from keras import layers
-from keras.layers import Embedding, Concatenate
+from keras.layers import Embedding
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
