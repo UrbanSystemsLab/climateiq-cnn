@@ -58,12 +58,14 @@ def split_time_step_pairs(data: tf.Tensor) -> tf.Tensor:
     permuted = tf.transpose(data, (0, 2, 3, 1, 4))
 
     # Get the dynamic shape
-    B, H, W, T_HALF, C_PAIR = tf.shape(permuted)
-    T = T_HALF * 2  # Original time steps are doubled
-    C = C_PAIR // 2  # Original channels are halved
+    batch_size = tf.shape(permuted)[0]
+    height = tf.shape(permuted)[1]
+    width = tf.shape(permuted)[2]
+    time_steps = tf.shape(permuted)[3] * 2  # Original time steps are doubled
+    channels = tf.shape(permuted)[4] // 2  # Original channels are halved
 
     # Reshape to [B, H, W, 2T, C]
-    reshaped = tf.reshape(permuted, (B, H, W, T, C))
+    reshaped = tf.reshape(permuted, (batch_size, height, width, time_steps, channels))
 
     # Transpose back to [B, 2T, H, W, C]
     output = tf.transpose(reshaped, (0, 3, 1, 2, 4))
