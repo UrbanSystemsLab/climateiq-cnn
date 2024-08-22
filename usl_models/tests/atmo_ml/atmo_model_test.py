@@ -9,8 +9,10 @@ from usl_models.atmo_ml import model_params
 
 _TEST_MAP_HEIGHT = 100
 _TEST_MAP_WIDTH = 100
-_TEST_SPATIAL_FEATURES = 18
+_TEST_SPATIAL_FEATURES = 17  # LU_INDEX is now separate
 _TEST_SPATIOTEMPORAL_FEATURES = 9
+_LU_INDEX_VOCAB_SIZE = 61
+_EMBEDDING_DIM = 8
 
 
 def pytest_model_params() -> model_params.AtmoModelParams:
@@ -55,10 +57,16 @@ def fake_input_batch(
             _TEST_SPATIOTEMPORAL_FEATURES,
         )
     )
-
+    LU_INDEX = tf.random.uniform(
+        (batch_size, height, width),
+        minval=0,
+        maxval=_LU_INDEX_VOCAB_SIZE,
+        dtype=tf.int32,
+    )
     return {
         "spatial": spatial,
         "spatiotemporal": spatiotemporal,
+        "LU_INDEX": LU_INDEX,
     }
 
 
@@ -74,6 +82,8 @@ def test_atmo_convlstm():
         spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
         num_spatial_features=_TEST_SPATIAL_FEATURES,
         num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,  # Added for LU_INDEX
+        embedding_dim=_EMBEDDING_DIM,  # Added for LU_INDEX embedding
     )
     prediction = model(fake_input)
 
@@ -102,7 +112,10 @@ def test_train():
     params = pytest_model_params()
 
     model = atmo_model.AtmoModel(
-        params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+        params,
+        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
+        embedding_dim=_EMBEDDING_DIM,
     )
 
     # Create fake training and validation datasets
@@ -155,7 +168,10 @@ def test_early_stopping():
     epochs = 20
 
     model = atmo_model.AtmoModel(
-        params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+        params,
+        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
+        embedding_dim=_EMBEDDING_DIM,
     )
 
     # Create fake training and validation datasets
@@ -205,7 +221,10 @@ def test_model_checkpoint():
     params = pytest_model_params()
 
     model = atmo_model.AtmoModel(
-        params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+        params,
+        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
+        embedding_dim=_EMBEDDING_DIM,
     )
 
     # Create fake training and validation datasets
@@ -244,7 +263,10 @@ def test_model_checkpoint():
     with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
         model.save_model(tmp.name, overwrite=True)
         new_model = atmo_model.AtmoModel(
-            params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+            params,
+            spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+            lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
+            embedding_dim=_EMBEDDING_DIM,
         )
         new_model.load_weights(tmp.name)
 

@@ -5,6 +5,7 @@ from typing import TypeAlias, TypedDict, List, Callable
 import keras
 import tensorflow as tf
 from keras import layers
+from keras.layers import Embedding, Concatenate
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
@@ -20,6 +21,7 @@ class AtmoModel:
 
         spatial: tf.Tensor
         spatiotemporal: tf.Tensor
+        LU_INDEX: tf.Tensor
 
     class Result(TypedDict):
         """Prediction result dictionary."""
@@ -173,6 +175,8 @@ class AtmoConvLSTM(tf.keras.Model):
         spatial_dims: tuple[int, int],
         num_spatial_features: int,
         num_spatiotemporal_features: int,
+        lu_index_vocab_size: int = 61,  # Nb of unique classes in LU_INDEX
+        embedding_dim: int = 8,  # Size of the embedding vectors for LU_INDEX
     ):
         """Creates the Atmo ConvLSTM model.
 
@@ -191,6 +195,14 @@ class AtmoConvLSTM(tf.keras.Model):
         self._spatial_height, self._spatial_width = spatial_dims
         self._spatial_features = num_spatial_features
         self._spatiotemporal_features = num_spatiotemporal_features
+        self._embedding_dim = embedding_dim  # Save embedding_dim as a class attribute
+
+        # Define Embedding Layer for LU_INDEX
+        self.lu_index_embedding = Embedding(
+            input_dim=lu_index_vocab_size,
+            output_dim=embedding_dim,
+            input_length=self._spatial_height * self._spatial_width,
+        )
 
         # Model definition
 
@@ -200,7 +212,11 @@ class AtmoConvLSTM(tf.keras.Model):
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
-                    (self._spatial_height, self._spatial_width, self._spatial_features)
+                    (
+                        self._spatial_height,
+                        self._spatial_width,
+                        self._spatial_features + embedding_dim,
+                    )
                 ),
                 layers.Conv2D(64, 5, **spatial_cnn_params),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
@@ -356,6 +372,22 @@ class AtmoConvLSTM(tf.keras.Model):
         """
         spatial_input = inputs["spatial"]
         st_input = inputs["spatiotemporal"]
+        lu_index_input = inputs["LU_INDEX"]  # LU_INDEX is passed separately
+
+        # Reshape LU_INDEX matrix for embedding
+        lu_index_input_flat = tf.reshape(
+            lu_index_input, (-1, self._spatial_height * self._spatial_width)
+        )
+        lu_index_embedded_flat = self.lu_index_embedding(lu_index_input_flat)
+
+        # Reshape back to matrix form
+        lu_index_embedded = tf.reshape(
+            lu_index_embedded_flat,
+            (-1, self._spatial_height, self._spatial_width, self._embedding_dim),
+        )
+
+        # Concatenate LU_INDEX embedding with other spatial features
+        spatial_input = tf.concat([spatial_input, lu_index_embedded], axis=-1)
 
         spatial_cnn_output = self._spatial_cnn(spatial_input)
         st_cnn_output = self._st_cnn(st_input)
