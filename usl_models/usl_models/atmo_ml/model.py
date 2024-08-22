@@ -5,7 +5,7 @@ from typing import TypeAlias, TypedDict, List, Callable
 import keras
 import tensorflow as tf
 from keras import layers
-from keras.layers import Embedding, Concatenate
+from keras.layers import Embedding
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
@@ -35,6 +35,8 @@ class AtmoModel:
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
         num_spatial_features: int = constants.num_spatial_features,
         num_spatiotemporal_features: int = constants.num_spatiotemporal_features,
+        lu_index_vocab_size: int = constants.lu_index_vocab_size,
+        embedding_dim: int = constants.embedding_dim,
     ):
         """Creates the Atmo model.
 
@@ -45,11 +47,16 @@ class AtmoModel:
                 can be changed (primarily for testing/debugging).
             num_spatial_features: nb of spt features
             num_spatiotemporal_features: nb of spatiotemp feat.
+            lu_index_vocab_size: Number of unique values in the LU_INDEX
+            feature.
+            embedding_dim: Size of the embedding vectors for LU_INDEX.
         """
         self._model_params = params or model_params.default_params()
         self._spatial_dims = spatial_dims
         self._spatial_features = num_spatial_features
         self._spatiotemporal_features = num_spatiotemporal_features
+        self._lu_index_vocab_size = lu_index_vocab_size
+        self._embedding_dim = embedding_dim
         self._model = self._build_model()
 
     @classmethod
@@ -80,6 +87,8 @@ class AtmoModel:
             spatial_dims=self._spatial_dims,
             num_spatial_features=self._spatial_features,
             num_spatiotemporal_features=self._spatiotemporal_features,
+            lu_index_vocab_size=self._lu_index_vocab_size,
+            embedding_dim=self._embedding_dim,
         )
         model.compile(
             optimizer=tf.keras.optimizers.get(self._model_params["optimizer_config"]),
@@ -188,6 +197,11 @@ class AtmoConvLSTM(tf.keras.Model):
                 Needed for defining input shapes.
             num_spatiotemporal_features: Total dimensionality of the spatiotemporal
                 features. Needed for defining input shapes.
+            lu_index_vocab_size (int): The number of unique values in the LU_INDEX
+                feature. This is used to define the size of the vocabulary for the
+                embedding layer.
+            embedding_dim (int): Size of the embedding vectors for the LU_INDEX
+            feature. This determines the dimensionality of the embedding space.
         """
         super().__init__()
 

@@ -13,3 +13,5 @@ num_spatiotemporal_features = 9
 Time_STEPS_PER_DAY = 4
 NUM_DAYS = 500
 TOTAL_TIME_STEPS = Time_STEPS_PER_DAY * NUM_DAYS
+lu_index_vocab_size = 61
+embedding_dim = 8
