@@ -159,6 +159,8 @@ class AtmoModel:
         """Loads the entire model (architecture + weights)."""
         self._model = keras.models.load_model(filepath)
         logging.info("Loaded full model from %s", filepath)
+
+
 ###############################################################################
 #                       Custom Keras Model definitions
 #
