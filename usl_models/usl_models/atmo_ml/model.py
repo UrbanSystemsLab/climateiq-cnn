@@ -150,7 +150,15 @@ class AtmoModel:
         self._model.save(filepath, **kwargs)
         logging.info("Saved model to %s", filepath)
 
+    def save_weights(self, filepath: str) -> None:
+        """Saves the model weights."""
+        self._model.save_weights(filepath)
+        logging.info("Saved model weights to %s", filepath)
 
+    def load_model(self, filepath: str) -> None:
+        """Loads the entire model (architecture + weights)."""
+        self._model = keras.models.load_model(filepath)
+        logging.info("Loaded full model from %s", filepath)
 ###############################################################################
 #                       Custom Keras Model definitions
 #
