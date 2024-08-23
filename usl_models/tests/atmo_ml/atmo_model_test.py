@@ -263,7 +263,7 @@ def test_model_checkpoint():
     model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
 
     with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
-        model._model.save_model(tmp.name, overwrite=True)
+        model._model.save(tmp.name, overwrite=True)
         new_model = atmo_model.AtmoModel(
             params,
             spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
