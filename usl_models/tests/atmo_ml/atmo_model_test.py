@@ -272,7 +272,7 @@ def test_model_checkpoint():
             lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
             embedding_dim=_EMBEDDING_DIM,
         )
-        new_model._model.load_weights(tmp.name)
+        new_model._model.load_model(tmp.name)
 
     old_weights = model._model.get_weights()
     new_weights = new_model._model.get_weights()
