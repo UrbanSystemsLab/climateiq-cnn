@@ -223,6 +223,8 @@ def test_model_checkpoint():
     model = atmo_model.AtmoModel(
         params,
         spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+        num_spatial_features=_TEST_SPATIAL_FEATURES,
+        num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
         lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
         embedding_dim=_EMBEDDING_DIM,
     )
@@ -261,14 +263,16 @@ def test_model_checkpoint():
     model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
 
     with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
-        model.save_model(tmp.name, overwrite=True)
+        model._model.save_model(tmp.name, overwrite=True)
         new_model = atmo_model.AtmoModel(
             params,
             spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+            num_spatial_features=_TEST_SPATIAL_FEATURES,
+            num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
             lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
             embedding_dim=_EMBEDDING_DIM,
         )
-        new_model.load_weights(tmp.name)
+        new_model._model.load_weights(tmp.name)
 
     old_weights = model._model.get_weights()
     new_weights = new_model._model.get_weights()
