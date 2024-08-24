@@ -273,7 +273,7 @@ def test_model_checkpoint():
             embedding_dim=_EMBEDDING_DIM,
         )
         new_model._model = tf.keras.models.load_model(tmp.name, compile=False)
-        
+
         # Recompile the model with the optimizer and loss
         new_model._model.compile(
             optimizer=tf.keras.optimizers.get(params["optimizer_config"]),
