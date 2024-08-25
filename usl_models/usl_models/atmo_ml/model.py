@@ -396,6 +396,24 @@ class AtmoConvLSTM(tf.keras.Model):
         """
         spatial_input = inputs["spatial"]
         st_input = inputs["spatiotemporal"]
+
+        # Ensure all spatial features are present; if not, replace with zeros
+        if spatial_input.shape[-1] < self._spatial_features:
+            missing_channels = self._spatial_features - spatial_input.shape[-1]
+            spatial_input = tf.pad(
+                spatial_input,
+                paddings=[[0, 0], [0, 0], [0, 0], [0, missing_channels]],
+                constant_values=0,
+            )
+
+        # Ensure all spatiotemporal features are present; if not, replace with zeros
+        if st_input.shape[-1] < self._spatiotemporal_features:
+            missing_channels = self._spatiotemporal_features - st_input.shape[-1]
+            st_input = tf.pad(
+                st_input,
+                paddings=[[0, 0], [0, 0], [0, 0], [0, 0], [0, missing_channels]],
+                constant_values=0,
+            )
         lu_index_input = inputs["LU_INDEX"]  # LU_INDEX is passed separately
 
         # Reshape LU_INDEX matrix for embedding
