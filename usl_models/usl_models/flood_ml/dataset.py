@@ -81,7 +81,7 @@ def load_dataset(
     # If no batch specified, do not batch the dataset, which is required
     # for generating data for batch prediction in VertexAI.
     if batch_size:
-        dataset = dataset.batch(batch_size)
+        dataset = dataset.batch(batch_size, drop_remainder=True)
     return dataset
 
 
@@ -166,7 +166,7 @@ def load_dataset_windowed(
     # If no batch specified, do not batch the dataset, which is required
     # for generating data for batch prediction in VertexAI.
     if batch_size:
-        dataset = dataset.batch(batch_size)
+        dataset = dataset.batch(batch_size, drop_remainder=True)
     return dataset
 
 
@@ -234,7 +234,7 @@ def load_prediction_dataset(
     # If no batch specified, do not batch the dataset, which is required
     # for generating data for batch prediction in VertexAI.
     if batch_size:
-        prediction_dataset = prediction_dataset.batch(batch_size)
+        prediction_dataset = prediction_dataset.batch(batch_size, drop_remainder=True)
     return prediction_dataset
 
 
