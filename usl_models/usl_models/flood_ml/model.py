@@ -107,7 +107,7 @@ class FloodModel:
         strategy = tf.distribute.MirroredStrategy()
         with strategy.scope():
           model = FloodModel.from_checkpoint(artifact_uri="gs://path/to/model")
-          for results in model.batch_predict_n(strategy, dataset, n=4):
+          for results in model.batch_predict_n(dataset, n=4):
             for result in results:
               print(result)
         ```
