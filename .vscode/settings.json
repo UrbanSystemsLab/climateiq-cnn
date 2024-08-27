@@ -1,0 +1,9 @@
+{
+    "jupyter.notebookFileRoot": "${fileDirname}/..",
+    "python.testing.pytestArgs": [
+        "usl_models", "--rootdir=usl_models", "-k",  "not integration"
+    ],
+    "python.testing.cwd": "usl_models",
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
+}

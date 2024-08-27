@@ -10,12 +10,14 @@ setup(
         # us-docker.pkg.dev/vertex-ai/training/tf-gpu.2-14.py310:latest
         # we use for training.
         "numpy==1.26.4",
-        "tensorflow==2.14.1",
-        "keras==2.14.0",
+        "matplotlib==3.9.2",
+        "tensorflow==2.15.1",
+        "keras==2.15.0",
         "google-cloud-aiplatform==1.43.0",
         "google-cloud-storage==2.15.0",
         # firestore is not present in the image, but we match the cloud-storage version.
         "google-cloud-firestore==2.15.0",
+        "seaborn==0.13.2",
     ],
     extras_require={
         "dev": [
