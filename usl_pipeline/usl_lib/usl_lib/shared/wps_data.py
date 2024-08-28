@@ -320,5 +320,12 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.NONE,
             },
         },
+        # LU_INDEX
+        "LU_INDEX": {
+            "unit": Unit.NONE,
+            "scaling": {
+                "type": ScalingType.NONE,
+            },
+        },
     }
 )
