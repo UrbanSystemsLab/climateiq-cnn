@@ -327,5 +327,27 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.NONE,
             },
         },
+        # [Derived] Solar Time from UTC (Cyclic feature)
+        # in Minutes of Day (MIN)
+        # Sine Component of Solar Time
+        "SOLAR_TIME_SIN": {
+            "unit": Unit.NONE,
+            "scaling": {
+                "type": ScalingType.GLOBAL,
+                "min": -1,
+                "max": 1,
+            },
+        },
+        # [Derived] Solar Time from UTC (Cyclic feature)
+        # in Minutes of Day (MIN)
+        # Cosine Component of Solar Time
+        "SOLAR_TIME_COS": {
+            "unit": Unit.NONE,
+            "scaling": {
+                "type": ScalingType.GLOBAL,
+                "min": -1,
+                "max": 1,
+            },
+        },
     }
 )
