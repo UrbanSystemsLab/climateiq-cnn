@@ -66,6 +66,13 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.NONE,
             },
         },
+        # LU_INDEX is 61 cat. LCZ data 1 feature
+        "LU_INDEX": {
+            "unit": Unit.NONE,
+            "scaling": {
+                "type": ScalingType.NONE,
+            },
+        },
         # Monthly Climatology MODIS surface albedo
         "ALBEDO12M": {
             "unit": Unit.PERCENTAGE,
