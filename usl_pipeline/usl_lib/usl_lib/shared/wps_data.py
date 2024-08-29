@@ -66,6 +66,13 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.NONE,
             },
         },
+        # LU_INDEX is 61 cat. LCZ data 1 feature
+        "LU_INDEX": {
+            "unit": Unit.NONE,
+            "scaling": {
+                "type": ScalingType.NONE,
+            },
+        },
         # Monthly Climatology MODIS surface albedo
         "ALBEDO12M": {
             "unit": Unit.PERCENTAGE,
@@ -316,13 +323,6 @@ ML_REQUIRED_VARS_REPO = dict(
         # UCP7 Urban fraction
         "FRC_URB2D": {
             "unit": Unit.FRACTION,
-            "scaling": {
-                "type": ScalingType.NONE,
-            },
-        },
-        # LU_INDEX
-        "LU_INDEX": {
-            "unit": Unit.NONE,
             "scaling": {
                 "type": ScalingType.NONE,
             },
