@@ -1,93 +1,110 @@
-# input_output_sequences.py
-
 import tensorflow as tf
 
 
 def create_input_output_sequences(inputs, labels, time_steps_per_day=4):
-    """
-    Creates input and output sequences for the AtmoML model.
-
-    Args:
-        inputs: A tensor of shape [B, T, H, W, C] where B is the batch size,
-                T is the total time steps, H is height, W is width, and C is channels.
-        labels: A tensor of shape [B, T, H, W, C] corresponding to the inputs.
-        time_steps_per_day: Number of time steps representing a day. Default is 4 (e.g., 0:00, 6:00, 12:00, 18:00).
-
-    Returns:
-        input_sequences: Input sequences for the model.
-        output_sequences: Corresponding output sequences for the model.
-    """
-    total_time_steps = tf.shape(inputs)[1]
-    num_days = total_time_steps // time_steps_per_day
-
-    print(
-        f"Total time steps: {total_time_steps.numpy()}, Number of days: {num_days.numpy()}"
-    )
-
+    num_days = inputs.shape[1] // time_steps_per_day
     input_sequences = []
     output_sequences = []
 
     for day in range(num_days):
-        # Create input sequence for each day
-        current_input_sequence = []
+        daily_input_sequences = []
+        daily_output_sequences = []
 
-        # Handle the historical input (X_{d-1}^{18})
-        if day > 0:
-            historical_input = inputs[
-                :,
-                (day - 1) * time_steps_per_day + 3 : (day - 1) * time_steps_per_day + 4,
-                :,
-                :,
-                :,
-            ]
-            print(f"Day {day}: Historical input shape: {historical_input.shape}")
-            current_input_sequence.append(historical_input)
+        # Special case: First day (no previous data)
+        if day == 0:
+            # Use the first day's data itself for the initial sequence
+            input_seq = tf.stack(
+                [
+                    inputs[
+                        :, day * time_steps_per_day + 0
+                    ],  # X_{d-1}^{18} (treated as X^0)
+                    inputs[:, day * time_steps_per_day + 0],  # X^0
+                    inputs[:, day * time_steps_per_day + 1],  # X^6
+                ],
+                axis=-1,
+            )
+            daily_input_sequences.append(input_seq)
         else:
-            zero_pad = tf.zeros_like(inputs[:, :1, :, :, :])
-            print(f"Day {day}: Zero padding shape: {zero_pad.shape}")
-            current_input_sequence.append(
-                zero_pad
-            )  # Zero padding for missing historical data
-
-        # Add current day's 0:00 and 6:00 data
-        day_inputs = inputs[
-            :, day * time_steps_per_day : day * time_steps_per_day + 2, :, :, :
-        ]
-        print(f"Day {day}: Current day inputs (0:00, 6:00) shape: {day_inputs.shape}")
-        current_input_sequence.append(day_inputs)
-
-        # Concatenate initial sequence to maintain consistent length of 3
-        input_sequence = tf.concat(
-            current_input_sequence, axis=1
-        )  # Should result in length 3
-        print(f"Day {day}: Input sequence after concat shape: {input_sequence.shape}")
-
-        # Generate sequences using only the required indices:
-        if day * time_steps_per_day + 3 < total_time_steps:
-            next_day_input = inputs[
-                :,
-                day * time_steps_per_day + 3 : (day + 1) * time_steps_per_day,
-                :,
-                :,
-                :,
-            ]
-            full_sequence = tf.concat(
-                [input_sequence[:, 1:, :, :, :], next_day_input], axis=1
+            # Standard input sequence construction for day d
+            input_seq = tf.stack(
+                [
+                    inputs[
+                        :, (day - 1) * time_steps_per_day + (time_steps_per_day - 1)
+                    ],  # X_{d-1}^{18}
+                    inputs[:, day * time_steps_per_day + 0],  # X^0
+                    inputs[:, day * time_steps_per_day + 1],  # X^6
+                ],
+                axis=-1,
             )
-            print(
-                f"Day {day}: Final input sequence shape for day: {full_sequence.shape}"
+            daily_input_sequences.append(input_seq)
+
+        # Construct input sequences for the current day
+        for t in range(1, time_steps_per_day - 1):
+            input_seq = tf.stack(
+                [
+                    inputs[:, day * time_steps_per_day + (t - 1)],  # X_{t-1}
+                    inputs[:, day * time_steps_per_day + t],  # X^t
+                    inputs[:, day * time_steps_per_day + (t + 1)],  # X^{t+1}
+                ],
+                axis=-1,
             )
-            input_sequences.append(full_sequence)
+            daily_input_sequences.append(input_seq)
 
-        # Create output sequence: (Y^0, Y^3), (Y^6, Y^9), etc.
-        output_sequence = labels[
-            :, day * time_steps_per_day : (day + 1) * time_steps_per_day, :, :, :
-        ]
-        print(f"Day {day}: Output sequence shape: {output_sequence.shape}")
-        output_sequences.append(output_sequence)
+        # Handle the case for the last sequence in the day
+        if day < num_days - 1:
+            input_seq = tf.stack(
+                [
+                    inputs[
+                        :, day * time_steps_per_day + (time_steps_per_day - 2)
+                    ],  # X_{t-1}
+                    inputs[
+                        :, day * time_steps_per_day + (time_steps_per_day - 1)
+                    ],  # X^t
+                    inputs[:, (day + 1) * time_steps_per_day + 0],  # X_{d+1}^0
+                ],
+                axis=-1,
+            )
+        else:
+            # For the last day, repeat the last available data point
+            input_seq = tf.stack(
+                [
+                    inputs[
+                        :, day * time_steps_per_day + (time_steps_per_day - 2)
+                    ],  # X_{t-1}
+                    inputs[
+                        :, day * time_steps_per_day + (time_steps_per_day - 1)
+                    ],  # X^t
+                    inputs[
+                        :, day * time_steps_per_day + (time_steps_per_day - 1)
+                    ],  # X^t (repeated for no next day)
+                ],
+                axis=-1,
+            )
+        daily_input_sequences.append(input_seq)
 
-    # Stack sequences for batch processing
-    input_sequences = tf.stack(input_sequences, axis=1)  # [B, num_days, 4, 3, H, W, C]
-    output_sequences = tf.stack(output_sequences, axis=1)  # [B, num_days, 4, H, W, C]
+        # Collect input sequences for the day
+        input_sequences.append(tf.stack(daily_input_sequences, axis=1))
+
+        # Construct output sequences for the current day
+        for t in range(time_steps_per_day - 1):
+            output_seq = tf.stack(
+                [
+                    labels[:, day * time_steps_per_day + t],  # Y^t
+                    labels[:, day * time_steps_per_day + (t + 1)],  # Y^{t+1}
+                ],
+                axis=-1,
+            )
+            daily_output_sequences.append(output_seq)
+
+        # Collect output sequences for the day
+        output_sequences.append(tf.stack(daily_output_sequences, axis=1))
+
+    # Stack all days together
+    input_sequences = tf.stack(input_sequences, axis=0)
+    output_sequences = tf.stack(output_sequences, axis=0)
+
+    # Squeeze to remove any extra dimensions
+    # input_sequences = tf.squeeze(input_sequences, axis=[2, 3, 4])
+    # output_sequences = tf.squeeze(output_sequences, axis=[2, 3, 4])
 
     return input_sequences, output_sequences
