@@ -9,7 +9,7 @@ from usl_models.atmo_ml import model_params
 
 _TEST_MAP_HEIGHT = 100
 _TEST_MAP_WIDTH = 100
-_TEST_SPATIAL_FEATURES = 17  # LU_INDEX is now separate
+_TEST_SPATIAL_FEATURES = 17  # lu_index is now separate
 _TEST_SPATIOTEMPORAL_FEATURES = 9
 _LU_INDEX_VOCAB_SIZE = 61
 _EMBEDDING_DIM = 8
@@ -59,7 +59,7 @@ def fake_input_batch(
             _TEST_SPATIOTEMPORAL_FEATURES,
         )
     )
-    LU_INDEX = tf.random.uniform(
+    lu_index = tf.random.uniform(
         (batch_size, height, width),
         minval=0,
         maxval=_LU_INDEX_VOCAB_SIZE,
@@ -68,7 +68,7 @@ def fake_input_batch(
     return {
         "spatial": spatial,
         "spatiotemporal": spatiotemporal,
-        "LU_INDEX": LU_INDEX,
+        "lu_index": lu_index,
     }
 
 
@@ -84,8 +84,8 @@ def test_atmo_convlstm():
         spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
         num_spatial_features=_TEST_SPATIAL_FEATURES,
         num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
-        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,  # Added for LU_INDEX
-        embedding_dim=_EMBEDDING_DIM,  # Added for LU_INDEX embedding
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,  # Added for lu_index
+        embedding_dim=_EMBEDDING_DIM,  # Added for lu_index embedding
     )
     prediction = model(fake_input)
 
