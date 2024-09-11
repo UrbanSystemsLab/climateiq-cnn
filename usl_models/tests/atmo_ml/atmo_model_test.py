@@ -9,8 +9,10 @@ from usl_models.atmo_ml import model_params
 
 _TEST_MAP_HEIGHT = 100
 _TEST_MAP_WIDTH = 100
-_TEST_SPATIAL_FEATURES = 18
+_TEST_SPATIAL_FEATURES = 17  # lu_index is now separate
 _TEST_SPATIOTEMPORAL_FEATURES = 9
+_LU_INDEX_VOCAB_SIZE = 61
+_EMBEDDING_DIM = 8
 
 
 def pytest_model_params() -> model_params.AtmoModelParams:
@@ -31,6 +33,8 @@ def fake_input_batch(
     batch_size: int,
     height: int = _TEST_MAP_HEIGHT,
     width: int = _TEST_MAP_WIDTH,
+    num_spatial_features: int = _TEST_SPATIAL_FEATURES,
+    num_spatiotemporal_features: int = _TEST_SPATIOTEMPORAL_FEATURES,
 ) -> atmo_model.AtmoModel.Input:
     """Creates a fake training batch for testing.
 
@@ -55,10 +59,16 @@ def fake_input_batch(
             _TEST_SPATIOTEMPORAL_FEATURES,
         )
     )
-
+    lu_index = tf.random.uniform(
+        (batch_size, height, width),
+        minval=0,
+        maxval=_LU_INDEX_VOCAB_SIZE,
+        dtype=tf.int32,
+    )
     return {
         "spatial": spatial,
         "spatiotemporal": spatiotemporal,
+        "lu_index": lu_index,
     }
 
 
@@ -74,6 +84,8 @@ def test_atmo_convlstm():
         spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
         num_spatial_features=_TEST_SPATIAL_FEATURES,
         num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,  # Added for lu_index
+        embedding_dim=_EMBEDDING_DIM,  # Added for lu_index embedding
     )
     prediction = model(fake_input)
 
@@ -83,6 +95,70 @@ def test_atmo_convlstm():
         _TEST_MAP_HEIGHT,
         _TEST_MAP_WIDTH,
         constants.OUTPUT_CHANNELS,  # T2, RH2, WSPD10, WDIR10_SIN, WDIR10_COS
+    )
+
+    assert prediction.shape == expected_output_shape
+
+
+def test_handle_missing_spatial_features():
+    """Tests model handling when some spatial features are missing."""
+    batch_size = 4
+    params = pytest_model_params()
+
+    # Create input with missing spatial features
+    missing_spatial_features = _TEST_SPATIAL_FEATURES - 5
+    fake_input = fake_input_batch(
+        batch_size, num_spatial_features=missing_spatial_features
+    )
+
+    model = atmo_model.AtmoConvLSTM(
+        params,
+        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+        num_spatial_features=_TEST_SPATIAL_FEATURES,
+        num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
+        embedding_dim=_EMBEDDING_DIM,
+    )
+    prediction = model(fake_input)
+
+    expected_output_shape = (
+        batch_size,
+        constants.OUTPUT_TIME_STEPS,
+        _TEST_MAP_HEIGHT,
+        _TEST_MAP_WIDTH,
+        constants.OUTPUT_CHANNELS,
+    )
+
+    assert prediction.shape == expected_output_shape
+
+
+def test_handle_missing_spatiotemporal_features():
+    """Tests model handling when some spatiotemporal features are missing."""
+    batch_size = 4
+    params = pytest_model_params()
+
+    # Create input with missing spatiotemporal features
+    missing_spatiotemporal_features = _TEST_SPATIOTEMPORAL_FEATURES - 3
+    fake_input = fake_input_batch(
+        batch_size, num_spatiotemporal_features=missing_spatiotemporal_features
+    )
+
+    model = atmo_model.AtmoConvLSTM(
+        params,
+        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+        num_spatial_features=_TEST_SPATIAL_FEATURES,
+        num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
+        embedding_dim=_EMBEDDING_DIM,
+    )
+    prediction = model(fake_input)
+
+    expected_output_shape = (
+        batch_size,
+        constants.OUTPUT_TIME_STEPS,
+        _TEST_MAP_HEIGHT,
+        _TEST_MAP_WIDTH,
+        constants.OUTPUT_CHANNELS,
     )
 
     assert prediction.shape == expected_output_shape
@@ -102,7 +178,10 @@ def test_train():
     params = pytest_model_params()
 
     model = atmo_model.AtmoModel(
-        params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+        params,
+        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
+        embedding_dim=_EMBEDDING_DIM,
     )
 
     # Create fake training and validation datasets
@@ -155,7 +234,10 @@ def test_early_stopping():
     epochs = 20
 
     model = atmo_model.AtmoModel(
-        params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+        params,
+        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
+        embedding_dim=_EMBEDDING_DIM,
     )
 
     # Create fake training and validation datasets
@@ -205,7 +287,12 @@ def test_model_checkpoint():
     params = pytest_model_params()
 
     model = atmo_model.AtmoModel(
-        params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+        params,
+        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+        num_spatial_features=_TEST_SPATIAL_FEATURES,
+        num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
+        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
+        embedding_dim=_EMBEDDING_DIM,
     )
 
     # Create fake training and validation datasets
@@ -242,11 +329,26 @@ def test_model_checkpoint():
     model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
 
     with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
-        model.save_model(tmp.name, overwrite=True)
+        model._model.save(tmp.name, overwrite=True)
         new_model = atmo_model.AtmoModel(
-            params, spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH)
+            params,
+            spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
+            num_spatial_features=_TEST_SPATIAL_FEATURES,
+            num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
+            lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
+            embedding_dim=_EMBEDDING_DIM,
         )
-        new_model.load_weights(tmp.name)
+        new_model._model = tf.keras.models.load_model(tmp.name, compile=False)
+
+        # Recompile the model with the optimizer and loss
+        new_model._model.compile(
+            optimizer=tf.keras.optimizers.get(params["optimizer_config"]),
+            loss=tf.keras.losses.MeanSquaredError(),
+            metrics=[
+                tf.keras.metrics.MeanAbsoluteError(),
+                tf.keras.metrics.RootMeanSquaredError(),
+            ],
+        )
 
     old_weights = model._model.get_weights()
     new_weights = new_model._model.get_weights()
