@@ -984,9 +984,11 @@ def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
         times = dataset["Times"]
 
         # Convert time variable to datetime objects
-        times = numpy.array([
+        times = xarray.DataArray(
+            [
                 numpy.datetime64("".join(t.astype(str)).replace("_", "T"))
-                for t in times.values]
+                for t in times.values
+            ]
         )
 
         # Extract hours and minutes from the datetime objects
