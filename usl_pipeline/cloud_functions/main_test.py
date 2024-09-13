@@ -672,9 +672,7 @@ def test_compute_solar_time_components():
     longitudes[:] = numpy.array(
         [[-74.00, -73.90], [-74.10, -73.80]], dtype=numpy.float32
     )
-    latitudes[:] = numpy.array(
-        [[40.70, 40.70], [40.80, 40.80]], dtype=numpy.float32
-    )
+    latitudes[:] = numpy.array([[40.70, 40.70], [40.80, 40.80]], dtype=numpy.float32)
 
     memfile = ncfile.close()
     ncfile_bytes = memfile.tobytes()
