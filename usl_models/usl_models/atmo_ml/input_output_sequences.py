@@ -1,10 +1,27 @@
+"""Data spatial window functions for AtmoML model."""
+
 import tensorflow as tf
+from usl_models.atmo_ml import constants
 
 
-def create_input_output_sequences(inputs, labels, time_steps_per_day=4):
+def create_input_output_sequences(
+    inputs, labels, time_steps_per_day=constants.TOTAL_TIME_STEPS
+):
+    """Full input sequence (4 time steps).
+
+    [(X_{d-1}^{18}, X^0, X^6), (X^0, X^6, X^{12}),
+    (X^6, X^{12}, X^{18}), (X^{12}, X^{18}, X_{d+1}^0)]
+    Full output sequence (4 time steps):
+    [(Y^0, Y^3), (Y^6, Y^9), (Y^{12}, Y^{15}), (Y^{18}, Y^{21})]
+    Args:
+        inputs: [X_{d-1}^{18}, X^0, X^6, X^{12}, X^{18}), X_{d+1}^0)]
+        labels : [Y^0, Y^3, Y^6, Y^9, Y^{12}, Y^{15}, Y^{18}, Y^{21}]
+        time_steps_per_day (int, optional): _description_. Defaults to 4.
+
+    Yields:
+        _type_: _description_
+    """
     num_days = inputs.shape[1] // time_steps_per_day
-    input_sequences = []
-    output_sequences = []
 
     for day in range(num_days):
         daily_input_sequences = []
@@ -82,11 +99,8 @@ def create_input_output_sequences(inputs, labels, time_steps_per_day=4):
             )
         daily_input_sequences.append(input_seq)
 
-        # Collect input sequences for the day
-        input_sequences.append(tf.stack(daily_input_sequences, axis=1))
-
         # Construct output sequences for the current day
-        for t in range(time_steps_per_day - 1):
+        for t in range(0, time_steps_per_day - 1, 2):
             output_seq = tf.stack(
                 [
                     labels[:, day * time_steps_per_day + t],  # Y^t
@@ -96,15 +110,8 @@ def create_input_output_sequences(inputs, labels, time_steps_per_day=4):
             )
             daily_output_sequences.append(output_seq)
 
-        # Collect output sequences for the day
-        output_sequences.append(tf.stack(daily_output_sequences, axis=1))
-
-    # Stack all days together
-    input_sequences = tf.stack(input_sequences, axis=0)
-    output_sequences = tf.stack(output_sequences, axis=0)
-
-    # Squeeze to remove any extra dimensions
-    # input_sequences = tf.squeeze(input_sequences, axis=[2, 3, 4])
-    # output_sequences = tf.squeeze(output_sequences, axis=[2, 3, 4])
-
-    return input_sequences, output_sequences
+        # Instead of stacking, we process sequences directly (e.g., pass to model)
+        for input_seq, output_seq in zip(daily_input_sequences, daily_output_sequences):
+            tf.print("Input sequence:", input_seq.numpy().flatten().tolist())
+            tf.print("Output sequence:", output_seq.numpy().flatten().tolist())
+            yield input_seq, output_seq
