@@ -650,20 +650,31 @@ def test_compute_wind_components():
     # (time, num_metgrid_levels, south_north, west_east)
     assert wspd.shape == (1, 2, 2, 2)
 
+
 def test_compute_solar_time_components():
-    ncfile = netCDF4.Dataset("met_em.d03.2010-02-02_18:00:00.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile = netCDF4.Dataset(
+        "met_em.d03.2010-02-02_18:00:00.nc", mode="w", format="NETCDF4", memory=1
+    )
     ncfile.createDimension("Time", 1)
     ncfile.createDimension("west_east", 2)
     ncfile.createDimension("south_north", 2)
 
     # In WPS/WRF files, 'Times'->dimension and 'Time'->variable
     times = ncfile.createVariable("Times", "f8", ("Time",))
-    longitudes = ncfile.createVariable("XLONG_M", "float32", ("Time", "south_north", "west_east"))
-    latitudes = ncfile.createVariable("XLAT_M", "float32", ("Time", "south_north", "west_east"))
+    longitudes = ncfile.createVariable(
+        "XLONG_M", "float32", ("Time", "south_north", "west_east")
+    )
+    latitudes = ncfile.createVariable(
+        "XLAT_M", "float32", ("Time", "south_north", "west_east")
+    )
 
     times[0] = numpy.datetime64("2010-02-02T18:00:00")
-    longitudes[:] = numpy.array([[ -74.00, -73.90], [ -74.10, -73.80]], dtype=numpy.float32)
-    latitudes[:] = numpy.array([[40.70, 40.70], [40.80, 40.80]], dtype=numpy.float32)
+    longitudes[:] = numpy.array(
+        [[-74.00, -73.90], [-74.10, -73.80]], dtype=numpy.float32
+    )
+    latitudes[:] = numpy.array(
+        [[40.70, 40.70], [40.80, 40.80]], dtype=numpy.float32
+    )
 
     memfile = ncfile.close()
     ncfile_bytes = memfile.tobytes()
@@ -674,7 +685,9 @@ def test_compute_solar_time_components():
     # Check computations of new variables
     solartime_sin = processed_ds.data_vars["SOLAR_TIME_SIN"]
     solartime_sin_expected = [[[0.2588, 0.2592], [0.2584, 0.2596]]]
-    numpy.testing.assert_array_almost_equal(solartime_sin_expected, solartime_sin.values)
+    numpy.testing.assert_array_almost_equal(
+        solartime_sin_expected, solartime_sin.values
+    )
 
     solartime_cos = processed_ds.data_vars["SOLAR_TIME_COS"]
     solartime_cos_expected = [[[-0.9659, -0.9657], [-0.9661, -0.9655]]]
@@ -683,6 +696,7 @@ def test_compute_solar_time_components():
     # Check shape of new variable - should take on the shape according to new dims:
     # (time, south_north, west_east)
     assert solartime_sin.shape == (1, 2, 2)
+
 
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
