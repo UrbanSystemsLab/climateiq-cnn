@@ -691,7 +691,9 @@ def test_compute_solar_time_components():
 
     solartime_cos = processed_ds.data_vars["SOLAR_TIME_COS"]
     solartime_cos_expected = [[[-0.9659, -0.9657], [-0.9661, -0.9655]]]
-    numpy.testing.assert_array_almost_equal(solartime_cos_expected, solartime_cos.values)
+    numpy.testing.assert_array_almost_equal(
+        solartime_cos_expected, solartime_cos.values
+    )
 
     # Check shape of new variable - should take on the shape according to new dims:
     # (time, south_north, west_east)
