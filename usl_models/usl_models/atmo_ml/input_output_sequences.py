@@ -5,7 +5,7 @@ from usl_models.atmo_ml import constants
 
 
 def create_input_output_sequences(
-    inputs, labels, time_steps_per_day=constants.TOTAL_TIME_STEPS
+    inputs, labels, time_steps_per_day=constants.TOTAL_TIME_STEPS, debug=False
 ):
     """Full input sequence (4 time steps).
 
@@ -17,6 +17,7 @@ def create_input_output_sequences(
         inputs: [X_{d-1}^{18}, X^0, X^6, X^{12}, X^{18}), X_{d+1}^0)]
         labels : [Y^0, Y^3, Y^6, Y^9, Y^{12}, Y^{15}, Y^{18}, Y^{21}]
         time_steps_per_day (int, optional): _description_. Defaults to 4.
+        debug (bool, optional): Whether to print debug information. Defaults to False.
 
     Yields:
         _type_: _description_
@@ -112,6 +113,7 @@ def create_input_output_sequences(
 
         # Instead of stacking, we process sequences directly (e.g., pass to model)
         for input_seq, output_seq in zip(daily_input_sequences, daily_output_sequences):
+            if debug:
             tf.print("Input sequence:", input_seq.numpy().flatten().tolist())
             tf.print("Output sequence:", output_seq.numpy().flatten().tolist())
             yield input_seq, output_seq
