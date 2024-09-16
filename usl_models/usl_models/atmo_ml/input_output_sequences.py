@@ -114,6 +114,6 @@ def create_input_output_sequences(
         # Instead of stacking, we process sequences directly (e.g., pass to model)
         for input_seq, output_seq in zip(daily_input_sequences, daily_output_sequences):
             if debug:
-            tf.print("Input sequence:", input_seq.numpy().flatten().tolist())
-            tf.print("Output sequence:", output_seq.numpy().flatten().tolist())
+                tf.print("Input sequence:", input_seq.numpy().flatten().tolist())
+                tf.print("Output sequence:", output_seq.numpy().flatten().tolist())
             yield input_seq, output_seq
