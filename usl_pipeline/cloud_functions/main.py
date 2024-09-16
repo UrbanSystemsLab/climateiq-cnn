@@ -161,7 +161,7 @@ def build_and_upload_study_area_chunk(
     cloud_event: functions_framework.CloudEvent,
 ) -> None:
     return _build_and_upload_study_area_chunk(
-        file_name=pathlib.PurePosixPath(cloud_event.data["name"])
+        file_name=pathlib.PurePosixPath(cloud_event.data["name"]),
         bucket_name=cloud_event.data["bucket"])
 
 
@@ -172,7 +172,7 @@ def build_and_upload_study_area_chunk_http(
 ) -> None:
     request_json = request.get_json()
     return _build_and_upload_study_area_chunk(
-        file_name=pathlib.PurePosixPath(request_json["name"])
+        file_name=pathlib.PurePosixPath(request_json["name"]),
         bucket_name=request_json["bucket"])
 
 
