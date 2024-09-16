@@ -575,7 +575,7 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
         request.get_json()["name"], str(exc)
     )
 )
-def build_feature_matrix_http(request: functions_framework.Request) -> None:
+def build_feature_matrix_http(request: flask.Request) -> None:
     """Builds a feature matrix when a set of geo files is uploaded.
 
     This function is triggered when files containing geo data are uploaded to
