@@ -13,6 +13,7 @@ from google.api_core import exceptions
 from google.cloud import error_reporting
 from google.cloud import firestore
 from google.cloud import storage
+import flask
 import functions_framework
 import netCDF4
 import numpy
@@ -159,15 +160,29 @@ def _retry_and_report_errors(
 def build_and_upload_study_area_chunk(
     cloud_event: functions_framework.CloudEvent,
 ) -> None:
-    """Creates a study area chunk, uploads to bucket, and writes to metastore.
+    return _build_and_upload_study_area_chunk(
+        file_name=pathlib.PurePosixPath(cloud_event.data["name"])
+        bucket_name=cloud_event.data["bucket"])
+
+
+@functions_framework.http
+@_retry_and_report_errors()
+def build_and_upload_study_area_chunk_http(
+    request: flask.CloudEvent,
+) -> None:
+    request_json = request.get_json()
+    return _build_and_upload_study_area_chunk(
+        file_name=pathlib.PurePosixPath(request_json["name"])
+        bucket_name=request_json["bucket"])
+
+
+def _build_and_upload_study_area_chunk(file_name: pathlib.PurePosixPath, bucket_name: str):
+        """Creates a study area chunk, uploads to bucket, and writes to metastore.
 
     This function is triggered when files containing raw geo data for a study area
     are uploaded to GCS. It will load the file into study area chunks bucket and
     write a new study area to metastore.
     """
-    file_name = pathlib.PurePosixPath(cloud_event.data["name"])
-    bucket_name = cloud_event.data["bucket"]
-
     # For AtmoML, only 3rd domain (500m) output files will be used
     if re.search(file_names.WPS_DOMAIN3_NC_REGEX, file_name.name):
         storage_client = storage.Client()
@@ -395,6 +410,23 @@ def build_wrf_label_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     )
 
 
+@functions_framework.http
+@_retry_and_report_errors()
+def build_wrf_label_matrix(request: flask.Request) -> None:
+    """Builds a label matrix when a set of simulation output files is uploaded.
+
+    This function is triggered when files containing simulation data are uploaded to
+    GCS. It produces a label matrix for the sim data and writes that label matrix to
+    another GCS bucket for eventual use in model training and prediction.
+    """
+    request_json = request.get_json()
+    _build_wrf_label_matrix(
+        request_json["bucket"],
+        request_json["name"],
+        cloud_storage.LABEL_CHUNKS_BUCKET,
+    )
+
+
 def _build_wrf_label_matrix(
     bucket_name: str, chunk_name: str, output_bucket: str
 ) -> None:
@@ -532,6 +564,25 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
         cloud_storage.FEATURE_CHUNKS_BUCKET,
     )
 
+@functions_framework.http
+@_retry_and_report_errors(
+    lambda request, exc: _write_chunk_metastore_error(
+        request.get_json()["name"], str(exc)
+    )
+)
+def build_feature_matrix_http(request: functions_framework.Request) -> None:
+    """Builds a feature matrix when a set of geo files is uploaded.
+
+    This function is triggered when files containing geo data are uploaded to
+    GCS. It produces a feature matrix for the geo data and writes that feature matrix to
+    another GCS bucket for eventual use in model training and prediction.
+    """
+    request_json = request.get_json()
+    _build_feature_matrix(
+        request_json["bucket"],
+        request_json["name"],
+        cloud_storage.FEATURE_CHUNKS_BUCKET,
+    )
 
 def _build_feature_matrix(
     bucket_name: str, chunk_path: str, output_bucket: str
