@@ -6,6 +6,7 @@ import numpy as np
 from usl_models.atmo_ml import model as atmo_model
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import model_params
+from usl_models.atmo_ml import input_output_sequences
 
 _TEST_MAP_HEIGHT = 100
 _TEST_MAP_WIDTH = 100
@@ -215,9 +216,13 @@ def test_train():
         )
     ).batch(batch_size)
 
+    # Process input-output sequences for training
+    processed_train_dataset = model._process_sequences(train_dataset)
+    processed_val_dataset = model._process_sequences(val_dataset)
+
     history = model.fit(
-        train_dataset,
-        val_dataset=val_dataset,
+        processed_train_dataset,
+        val_dataset=processed_val_dataset,
         epochs=epochs,
         steps_per_epoch=1,
     )
@@ -271,9 +276,13 @@ def test_early_stopping():
         )
     ).batch(batch_size)
 
+    # Process input-output sequences for training
+    processed_train_dataset = model._process_sequences(train_dataset)
+    processed_val_dataset = model._process_sequences(val_dataset)
+
     history = model.fit(
-        train_dataset,
-        val_dataset=val_dataset,
+        processed_train_dataset,
+        val_dataset=processed_val_dataset,
         early_stopping=1,
         epochs=epochs,
         steps_per_epoch=1,
@@ -326,7 +335,13 @@ def test_model_checkpoint():
         )
     ).batch(batch_size)
 
-    model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
+    # Process input-output sequences for training
+    processed_train_dataset = model._process_sequences(train_dataset)
+    processed_val_dataset = model._process_sequences(val_dataset)
+
+    model.fit(
+        processed_train_dataset, val_dataset=processed_val_dataset, steps_per_epoch=1
+    )
 
     with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
         model._model.save(tmp.name, overwrite=True)
@@ -354,3 +369,30 @@ def test_model_checkpoint():
     new_weights = new_model._model.get_weights()
     for old, new in zip(old_weights, new_weights):
         np.testing.assert_array_equal(old, new)
+
+
+def test_sequence_generation():
+    """Tests that the input-output sequence generation works as expected."""
+    batch_size = 4
+    fake_input = fake_input_batch(batch_size)
+
+    # Generate random labels
+    labels = tf.random.normal(
+        [
+            batch_size,
+            constants.OUTPUT_TIME_STEPS,
+            _TEST_MAP_HEIGHT,
+            _TEST_MAP_WIDTH,
+            constants.OUTPUT_CHANNELS,
+        ]
+    )
+
+    # Use the sequence generation function directly
+    sequence_generator = input_output_sequences.create_input_output_sequences(
+        fake_input["spatiotemporal"], labels
+    )
+
+    for input_seq, output_seq in sequence_generator:
+        # Check the shapes of generated sequences
+        assert input_seq.shape == (batch_size, _TEST_SPATIOTEMPORAL_FEATURES, 3)
+        assert output_seq.shape == (batch_size, 2)

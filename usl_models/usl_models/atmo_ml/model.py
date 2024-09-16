@@ -9,6 +9,7 @@ from keras.layers import Embedding
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
+from usl_models.atmo_ml import input_output_sequences
 
 AtmoModelParams: TypeAlias = model_params.AtmoModelParams
 
@@ -114,6 +115,12 @@ class AtmoModel:
         callbacks: List[Callable] | None = None,
     ):
         """Fit the model to the given dataset."""
+
+        # Call the input-output sequence processing function here
+        train_dataset = self._process_sequences(train_dataset)
+        if val_dataset is not None:
+            val_dataset = self._process_sequences(val_dataset)
+
         if callbacks is None:
             callbacks = []
         if early_stopping is not None:
@@ -129,6 +136,76 @@ class AtmoModel:
             epochs=epochs,
             steps_per_epoch=steps_per_epoch,
             callbacks=callbacks,
+        )
+
+    def _process_sequences(self, dataset):
+        """Helper function to process dataset sequences."""
+        processed_data = []
+        for data in dataset:
+            inputs, labels = data
+
+            # Extract the required tensors from the inputs
+            spatial_input = inputs["spatial"]
+            spatiotemporal_input = inputs["spatiotemporal"]
+            lu_index_input = inputs["lu_index"]
+
+            # Process the spatiotemporal sequence
+            sequence_generator = input_output_sequences.create_input_output_sequences(
+                spatiotemporal_input, labels
+            )
+
+            for input_sequence, output_sequence in sequence_generator:
+                processed_data.append(
+                    (
+                        {
+                            "spatial": spatial_input,
+                            "spatiotemporal": input_sequence,
+                            "lu_index": lu_index_input,
+                        },
+                        output_sequence,
+                    )
+                )
+
+        # Return the processed dataset with proper dictionary structure
+        return tf.data.Dataset.from_generator(
+            lambda: iter(processed_data),
+            output_signature=(
+                {
+                    "spatial": tf.TensorSpec(
+                        shape=(
+                            None,
+                            constants.MAP_HEIGHT,
+                            constants.MAP_WIDTH,
+                            constants.num_spatial_features,
+                        ),
+                        dtype=tf.float32,
+                    ),
+                    "spatiotemporal": tf.TensorSpec(
+                        shape=(
+                            None,
+                            constants.INPUT_TIME_STEPS,
+                            constants.MAP_HEIGHT,
+                            constants.MAP_WIDTH,
+                            constants.num_spatiotemporal_features,
+                        ),
+                        dtype=tf.float32,
+                    ),
+                    "lu_index": tf.TensorSpec(
+                        shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                        dtype=tf.int32,
+                    ),
+                },
+                tf.TensorSpec(
+                    shape=(
+                        None,
+                        constants.OUTPUT_TIME_STEPS,
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                        constants.OUTPUT_CHANNELS,
+                    ),
+                    dtype=tf.float32,
+                ),
+            ),
         )
 
     def load_weights(self, filepath: str) -> None:
