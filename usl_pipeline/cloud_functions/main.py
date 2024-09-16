@@ -416,7 +416,7 @@ def build_wrf_label_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 
 @functions_framework.http
 @_retry_and_report_errors()
-def build_wrf_label_matrix(request: flask.Request) -> None:
+def build_wrf_label_matrix_http(request: flask.Request) -> None:
     """Builds a label matrix when a set of simulation output files is uploaded.
 
     This function is triggered when files containing simulation data are uploaded to
