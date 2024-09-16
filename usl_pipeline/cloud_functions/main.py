@@ -162,7 +162,8 @@ def build_and_upload_study_area_chunk(
 ) -> None:
     return _build_and_upload_study_area_chunk(
         file_name=pathlib.PurePosixPath(cloud_event.data["name"]),
-        bucket_name=cloud_event.data["bucket"])
+        bucket_name=cloud_event.data["bucket"],
+    )
 
 
 @functions_framework.http
@@ -173,11 +174,14 @@ def build_and_upload_study_area_chunk_http(
     request_json = request.get_json()
     return _build_and_upload_study_area_chunk(
         file_name=pathlib.PurePosixPath(request_json["name"]),
-        bucket_name=request_json["bucket"])
+        bucket_name=request_json["bucket"],
+    )
 
 
-def _build_and_upload_study_area_chunk(file_name: pathlib.PurePosixPath, bucket_name: str):
-        """Creates a study area chunk, uploads to bucket, and writes to metastore.
+def _build_and_upload_study_area_chunk(
+    file_name: pathlib.PurePosixPath, bucket_name: str
+):
+    """Creates a study area chunk, uploads to bucket, and writes to metastore.
 
     This function is triggered when files containing raw geo data for a study area
     are uploaded to GCS. It will load the file into study area chunks bucket and
@@ -564,6 +568,7 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
         cloud_storage.FEATURE_CHUNKS_BUCKET,
     )
 
+
 @functions_framework.http
 @_retry_and_report_errors(
     lambda request, exc: _write_chunk_metastore_error(
@@ -583,6 +588,7 @@ def build_feature_matrix_http(request: functions_framework.Request) -> None:
         request_json["name"],
         cloud_storage.FEATURE_CHUNKS_BUCKET,
     )
+
 
 def _build_feature_matrix(
     bucket_name: str, chunk_path: str, output_bucket: str
