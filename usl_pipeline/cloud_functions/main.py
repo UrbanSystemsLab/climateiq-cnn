@@ -169,7 +169,7 @@ def build_and_upload_study_area_chunk(
 @functions_framework.http
 @_retry_and_report_errors()
 def build_and_upload_study_area_chunk_http(
-    request: flask.CloudEvent,
+    request: flask.Request,
 ) -> None:
     request_json = request.get_json()
     return _build_and_upload_study_area_chunk(
