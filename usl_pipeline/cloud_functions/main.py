@@ -167,7 +167,6 @@ def build_and_upload_study_area_chunk(
 
 
 @functions_framework.http
-@_retry_and_report_errors()
 def build_and_upload_study_area_chunk_http(
     request: flask.Request,
 ) -> None:
@@ -415,7 +414,6 @@ def build_wrf_label_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 
 
 @functions_framework.http
-@_retry_and_report_errors()
 def build_wrf_label_matrix_http(request: flask.Request) -> None:
     """Builds a label matrix when a set of simulation output files is uploaded.
 
@@ -570,11 +568,6 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 
 
 @functions_framework.http
-@_retry_and_report_errors(
-    lambda request, exc: _write_chunk_metastore_error(
-        request.get_json()["name"], str(exc)
-    )
-)
 def build_feature_matrix_http(request: flask.Request) -> None:
     """Builds a feature matrix when a set of geo files is uploaded.
 
