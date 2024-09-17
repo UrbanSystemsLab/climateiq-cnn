@@ -651,6 +651,66 @@ def test_compute_wind_components():
     assert wspd.shape == (1, 2, 2, 2)
 
 
+def test_compute_solar_time_components():
+    # Create an in-memory NetCDF file with the necessary dimensions and variables
+    ncfile = netCDF4.Dataset("inmemory.nc", mode="w", format="NETCDF4", memory=1)
+    ncfile.createDimension("Time", 1)
+    ncfile.createDimension("west_east", 2)
+    ncfile.createDimension("south_north", 2)
+
+    # In WPS/WRF files, 'Times' is often defined with numeric values
+    times = ncfile.createVariable("Times", "f8", ("Time",))
+    longitudes = ncfile.createVariable(
+        "XLONG_M", "float32", ("Time", "south_north", "west_east")
+    )
+    latitudes = ncfile.createVariable(
+        "XLAT_M", "float32", ("Time", "south_north", "west_east")
+    )
+
+    # Set time in seconds since the epoch (e.g., seconds since 1970-01-01 00:00:00)
+    time_units = "seconds since 1970-01-01 00:00:00"
+
+    # Convert numpy.datetime64 to Python datetime object
+    time_in_python_datetime = datetime.datetime(2010, 2, 2, 18, 0, 0)
+
+    # Use date2num with Python datetime
+    times[0] = netCDF4.date2num(time_in_python_datetime, time_units)
+
+    # Set longitude and latitude values
+    longitudes[:] = numpy.array(
+        [[-74.00, -73.90], [-74.10, -73.80]], dtype=numpy.float32
+    )
+    latitudes[:] = numpy.array([[40.70, 40.70], [40.80, 40.80]], dtype=numpy.float32)
+
+    # Close the NetCDF file and retrieve its contents as bytes
+    memfile = ncfile.close()
+    ncfile_bytes = memfile.tobytes()
+
+    # Open the in-memory NetCDF file with xarray
+    ds = xarray.open_dataset(io.BytesIO(ncfile_bytes))
+
+    # Process the dataset with the _compute_solar_time_components function
+    processed_ds = main._compute_solar_time_components(ds)
+
+    # Check the computed sine values of solar time
+    solartime_sin = processed_ds.data_vars["SOLAR_TIME_SIN"]
+    solartime_sin_expected = [[[-0.9613, -0.9608], [-0.9617, -0.9603]]]
+    numpy.testing.assert_array_almost_equal(
+        solartime_sin_expected, solartime_sin.values, decimal=4
+    )
+
+    # Check the computed cosine values of solar time
+    solartime_cos = processed_ds.data_vars["SOLAR_TIME_COS"]
+    solartime_cos_expected = [[[0.2756, 0.2773], [0.274, 0.279]]]
+    numpy.testing.assert_array_almost_equal(
+        solartime_cos_expected, solartime_cos.values, decimal=4
+    )
+
+    # Verify the shape of the computed solar time variables
+    assert solartime_sin.shape == (1, 2, 2)
+    assert solartime_cos.shape == (1, 2, 2)
+
+
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_write_wps_chunk_metastore_entry_handles_subfolders(
