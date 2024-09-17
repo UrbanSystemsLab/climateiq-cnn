@@ -169,12 +169,13 @@ def build_and_upload_study_area_chunk(
 @functions_framework.http
 def build_and_upload_study_area_chunk_http(
     request: flask.Request,
-) -> None:
+) -> flask.Response:
     request_json = request.get_json()
-    return _build_and_upload_study_area_chunk(
+    _build_and_upload_study_area_chunk(
         file_name=pathlib.PurePosixPath(request_json["name"]),
         bucket_name=request_json["bucket"],
     )
+    return flask.jsonify({"message", "Upload complete."})
 
 
 def _build_and_upload_study_area_chunk(
@@ -414,7 +415,7 @@ def build_wrf_label_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 
 
 @functions_framework.http
-def build_wrf_label_matrix_http(request: flask.Request) -> None:
+def build_wrf_label_matrix_http(request: flask.Request) -> flask.Response:
     """Builds a label matrix when a set of simulation output files is uploaded.
 
     This function is triggered when files containing simulation data are uploaded to
@@ -427,6 +428,7 @@ def build_wrf_label_matrix_http(request: flask.Request) -> None:
         request_json["name"],
         cloud_storage.LABEL_CHUNKS_BUCKET,
     )
+    return flask.jsonify({"message", "Label matrix built."})
 
 
 def _build_wrf_label_matrix(
@@ -568,7 +570,7 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 
 
 @functions_framework.http
-def build_feature_matrix_http(request: flask.Request) -> None:
+def build_feature_matrix_http(request: flask.Request) -> flask.Response:
     """Builds a feature matrix when a set of geo files is uploaded.
 
     This function is triggered when files containing geo data are uploaded to
@@ -581,6 +583,7 @@ def build_feature_matrix_http(request: flask.Request) -> None:
         request_json["name"],
         cloud_storage.FEATURE_CHUNKS_BUCKET,
     )
+    return flask.jsonify({"message": "Feature matrix built."})
 
 
 def _build_feature_matrix(
