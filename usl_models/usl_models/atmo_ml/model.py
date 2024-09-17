@@ -9,6 +9,7 @@ from keras.layers import Embedding
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
+from usl_models.atmo_ml import dataset
 
 AtmoModelParams: TypeAlias = model_params.AtmoModelParams
 
@@ -114,6 +115,12 @@ class AtmoModel:
         callbacks: List[Callable] | None = None,
     ):
         """Fit the model to the given dataset."""
+        # Process datasets using the process_dataset function
+        processed_train_dataset = dataset.process_dataset(train_dataset)
+        processed_val_dataset = (
+            dataset.process_dataset(val_dataset) if val_dataset else None
+        )
+
         if callbacks is None:
             callbacks = []
         if early_stopping is not None:
@@ -124,8 +131,8 @@ class AtmoModel:
             )
 
         return self._model.fit(
-            train_dataset,
-            validation_data=val_dataset,
+            processed_train_dataset,
+            validation_data=processed_val_dataset,
             epochs=epochs,
             steps_per_epoch=steps_per_epoch,
             callbacks=callbacks,
