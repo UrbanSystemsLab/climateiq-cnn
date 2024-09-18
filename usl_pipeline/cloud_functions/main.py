@@ -158,12 +158,14 @@ def _retry_and_report_errors(
 
 def _error_to_response(f):
     """Converts exceptions to an error 500 response with a stacktrace."""
+
     @functools.wraps(f)
     def decorated(*args, **kwargs):
         try:
             return f(*args, **kwargs)
         except Exception:
             return flask.make_response(traceback.format_exc(limit=10), 500)
+
     return decorated
 
 
