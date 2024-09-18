@@ -5,7 +5,6 @@ from typing import TypeAlias, TypedDict, List, Callable
 import keras
 import tensorflow as tf
 from keras import layers
-from keras.layers import Embedding
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import model_params
@@ -21,7 +20,6 @@ class AtmoModel:
 
         spatial: tf.Tensor
         spatiotemporal: tf.Tensor
-        lu_index: tf.Tensor
 
     class Result(TypedDict):
         """Prediction result dictionary."""
@@ -35,8 +33,6 @@ class AtmoModel:
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
         num_spatial_features: int = constants.num_spatial_features,
         num_spatiotemporal_features: int = constants.num_spatiotemporal_features,
-        lu_index_vocab_size: int = constants.lu_index_vocab_size,
-        embedding_dim: int = constants.embedding_dim,
     ):
         """Creates the Atmo model.
 
@@ -47,16 +43,11 @@ class AtmoModel:
                 can be changed (primarily for testing/debugging).
             num_spatial_features: nb of spt features
             num_spatiotemporal_features: nb of spatiotemp feat.
-            lu_index_vocab_size: Number of unique values in the lu_index
-            feature.
-            embedding_dim: Size of the embedding vectors for lu_index.
         """
         self._model_params = params or model_params.default_params()
         self._spatial_dims = spatial_dims
         self._spatial_features = num_spatial_features
         self._spatiotemporal_features = num_spatiotemporal_features
-        self._lu_index_vocab_size = lu_index_vocab_size
-        self._embedding_dim = embedding_dim
         self._model = self._build_model()
 
     @classmethod
@@ -87,8 +78,6 @@ class AtmoModel:
             spatial_dims=self._spatial_dims,
             num_spatial_features=self._spatial_features,
             num_spatiotemporal_features=self._spatiotemporal_features,
-            lu_index_vocab_size=self._lu_index_vocab_size,
-            embedding_dim=self._embedding_dim,
         )
         model.compile(
             optimizer=tf.keras.optimizers.get(self._model_params["optimizer_config"]),
@@ -150,16 +139,6 @@ class AtmoModel:
         self._model.save(filepath, **kwargs)
         logging.info("Saved model to %s", filepath)
 
-    def save_weights(self, filepath: str) -> None:
-        """Saves the model weights."""
-        self._model.save_weights(filepath)
-        logging.info("Saved model weights to %s", filepath)
-
-    def load_model(self, filepath: str) -> None:
-        """Loads the entire model (architecture + weights)."""
-        self._model = keras.models.load_model(filepath)
-        logging.info("Loaded full model from %s", filepath)
-
 
 ###############################################################################
 #                       Custom Keras Model definitions
@@ -194,8 +173,6 @@ class AtmoConvLSTM(tf.keras.Model):
         spatial_dims: tuple[int, int],
         num_spatial_features: int,
         num_spatiotemporal_features: int,
-        lu_index_vocab_size: int = 61,  # Nb of unique classes in lu_index
-        embedding_dim: int = 8,  # Size of the embedding vectors for lu_index
     ):
         """Creates the Atmo ConvLSTM model.
 
@@ -207,11 +184,6 @@ class AtmoConvLSTM(tf.keras.Model):
                 Needed for defining input shapes.
             num_spatiotemporal_features: Total dimensionality of the spatiotemporal
                 features. Needed for defining input shapes.
-            lu_index_vocab_size (int): The number of unique values in the lu_index
-                feature. This is used to define the size of the vocabulary for the
-                embedding layer.
-            embedding_dim (int): Size of the embedding vectors for the lu_index
-            feature. This determines the dimensionality of the embedding space.
         """
         super().__init__()
 
@@ -219,14 +191,6 @@ class AtmoConvLSTM(tf.keras.Model):
         self._spatial_height, self._spatial_width = spatial_dims
         self._spatial_features = num_spatial_features
         self._spatiotemporal_features = num_spatiotemporal_features
-        self._embedding_dim = embedding_dim  # Save embedding_dim as a class attribute
-
-        # Define Embedding Layer for lu_index
-        self.lu_index_embedding = Embedding(
-            input_dim=lu_index_vocab_size,
-            output_dim=embedding_dim,
-            input_length=self._spatial_height * self._spatial_width,
-        )
 
         # Model definition
 
@@ -236,11 +200,7 @@ class AtmoConvLSTM(tf.keras.Model):
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
-                    (
-                        self._spatial_height,
-                        self._spatial_width,
-                        self._spatial_features + embedding_dim,
-                    )
+                    (self._spatial_height, self._spatial_width, self._spatial_features)
                 ),
                 layers.Conv2D(64, 5, **spatial_cnn_params),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
@@ -396,40 +356,6 @@ class AtmoConvLSTM(tf.keras.Model):
         """
         spatial_input = inputs["spatial"]
         st_input = inputs["spatiotemporal"]
-
-        # Ensure all spatial features are present; if not, replace with zeros
-        if spatial_input.shape[-1] < self._spatial_features:
-            missing_channels = self._spatial_features - spatial_input.shape[-1]
-            spatial_input = tf.pad(
-                spatial_input,
-                paddings=[[0, 0], [0, 0], [0, 0], [0, missing_channels]],
-                constant_values=0,
-            )
-
-        # Ensure all spatiotemporal features are present; if not, replace with zeros
-        if st_input.shape[-1] < self._spatiotemporal_features:
-            missing_channels = self._spatiotemporal_features - st_input.shape[-1]
-            st_input = tf.pad(
-                st_input,
-                paddings=[[0, 0], [0, 0], [0, 0], [0, 0], [0, missing_channels]],
-                constant_values=0,
-            )
-        lu_index_input = inputs["lu_index"]  # lu_index is passed separately
-
-        # Reshape lu_index matrix for embedding
-        lu_index_input_flat = tf.reshape(
-            lu_index_input, (-1, self._spatial_height * self._spatial_width)
-        )
-        lu_index_embedded_flat = self.lu_index_embedding(lu_index_input_flat)
-
-        # Reshape back to matrix form
-        lu_index_embedded = tf.reshape(
-            lu_index_embedded_flat,
-            (-1, self._spatial_height, self._spatial_width, self._embedding_dim),
-        )
-
-        # Concatenate lu_index embedding with other spatial features
-        spatial_input = tf.concat([spatial_input, lu_index_embedded], axis=-1)
 
         spatial_cnn_output = self._spatial_cnn(spatial_input)
         st_cnn_output = self._st_cnn(st_input)

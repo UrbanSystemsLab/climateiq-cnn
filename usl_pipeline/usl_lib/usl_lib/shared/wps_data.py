@@ -66,13 +66,6 @@ ML_REQUIRED_VARS_REPO = dict(
                 "type": ScalingType.NONE,
             },
         },
-        # LU_INDEX is 61 cat. LCZ data 1 feature
-        "LU_INDEX": {
-            "unit": Unit.NONE,
-            "scaling": {
-                "type": ScalingType.NONE,
-            },
-        },
         # Monthly Climatology MODIS surface albedo
         "ALBEDO12M": {
             "unit": Unit.PERCENTAGE,
@@ -325,28 +318,6 @@ ML_REQUIRED_VARS_REPO = dict(
             "unit": Unit.FRACTION,
             "scaling": {
                 "type": ScalingType.NONE,
-            },
-        },
-        # [Derived] Solar Time from UTC (Cyclic feature)
-        # in Minutes of Day (MIN)
-        # Sine Component of Solar Time
-        "SOLAR_TIME_SIN": {
-            "unit": Unit.NONE,
-            "scaling": {
-                "type": ScalingType.GLOBAL,
-                "min": -1,
-                "max": 1,
-            },
-        },
-        # [Derived] Solar Time from UTC (Cyclic feature)
-        # in Minutes of Day (MIN)
-        # Cosine Component of Solar Time
-        "SOLAR_TIME_COS": {
-            "unit": Unit.NONE,
-            "scaling": {
-                "type": ScalingType.GLOBAL,
-                "min": -1,
-                "max": 1,
             },
         },
     }
