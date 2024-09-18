@@ -4,11 +4,6 @@ import tensorflow as tf
 
 
 def test_create_input_output_sequences():
-    # Define test parameters
-    time_steps_per_day = 4
-    num_days = 2
-    total_time_steps = time_steps_per_day * num_days
-
     # Create fake input data and labels for clarity
     inputs = tf.constant(
         [
@@ -77,7 +72,7 @@ def test_create_input_output_sequences():
 
     # Call the function and collect sequences inside
     for input_seq, output_seq in input_output_sequences.create_input_output_sequences(
-        inputs, labels, total_time_steps
+        inputs, labels
     ):
         # Simplify the sequences for direct comparison with expected values
         generated_inputs.append(input_seq.numpy().flatten().tolist())

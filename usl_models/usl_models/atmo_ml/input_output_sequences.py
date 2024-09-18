@@ -5,7 +5,7 @@ from usl_models.atmo_ml import constants
 
 
 def create_input_output_sequences(
-    inputs, labels, time_steps_per_day=constants.TOTAL_TIME_STEPS, debug=False
+    inputs, labels, time_steps_per_day=constants.INPUT_TIME_STEPS, debug=True
 ):
     """Full input sequence (4 time steps).
 
@@ -22,11 +22,27 @@ def create_input_output_sequences(
     Yields:
         _type_: _description_
     """
-    num_days = inputs.shape[1] // time_steps_per_day
+    # Ensure inputs have enough time steps
+    total_time_steps = inputs.shape[1]
+
+    if total_time_steps < time_steps_per_day:
+        raise ValueError(
+            f"Not enough time steps: {total_time_steps}. "
+            f"Expected at least {time_steps_per_day}."
+        )
+
+    # Number of full days available
+    num_days = total_time_steps // time_steps_per_day
+
+    if debug:
+        print(f"Number of full days: {num_days}")
 
     for day in range(num_days):
         daily_input_sequences = []
         daily_output_sequences = []
+
+        if debug:
+            print(f"Processing day {day + 1}/{num_days}")
 
         # Special case: First day (no previous data)
         if day == 0:
