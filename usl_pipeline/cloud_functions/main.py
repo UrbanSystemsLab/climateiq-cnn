@@ -7,6 +7,7 @@ import logging
 import re
 import tarfile
 import time
+import traceback
 from typing import BinaryIO, Callable, IO, TextIO, Tuple
 
 from google.api_core import exceptions
@@ -155,6 +156,17 @@ def _retry_and_report_errors(
     return decorator
 
 
+def _error_to_response(f):
+    """Converts exceptions to an error 500 response with a stacktrace."""
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except Exception:
+            return flask.make_response(traceback.format_exc(limit=10), 500)
+    return decorated
+
+
 @functions_framework.cloud_event
 @_retry_and_report_errors()
 def build_and_upload_study_area_chunk(
@@ -167,6 +179,7 @@ def build_and_upload_study_area_chunk(
 
 
 @functions_framework.http
+@_error_to_response
 def build_and_upload_study_area_chunk_http(
     request: flask.Request,
 ) -> flask.Response:
@@ -415,6 +428,7 @@ def build_wrf_label_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 
 
 @functions_framework.http
+@_error_to_response
 def build_wrf_label_matrix_http(request: flask.Request) -> flask.Response:
     """Builds a label matrix when a set of simulation output files is uploaded.
 
@@ -570,6 +584,7 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
 
 
 @functions_framework.http
+@_error_to_response
 def build_feature_matrix_http(request: flask.Request) -> flask.Response:
     """Builds a feature matrix when a set of geo files is uploaded.
 
