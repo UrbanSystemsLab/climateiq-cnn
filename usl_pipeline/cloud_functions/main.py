@@ -1037,12 +1037,19 @@ def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
         latitudes = dataset["XLAT_M"][0, :, :]
         times = dataset["Times"]
 
-        # Convert time variable to datetime objects (assume Times is in seconds)
-        # Modify the time unit as per your dataset's definition
-        time_unit = "seconds since 1970-01-01 00:00:00"
+        # Convert time variable to datetime objects
         times = xarray.DataArray(
             [
-                numpy.datetime64(netCDF4.num2date(t, time_unit).isoformat())
+                # Check if the value is a Unix timestamp (numeric type)
+                (
+                    numpy.datetime64(
+                        datetime.datetime.utcfromtimestamp(t).strftime(
+                            "%Y-%m-%dT%H:%M:%S"
+                        )
+                    )
+                    if isinstance(t, (int, float))
+                    else numpy.datetime64("".join(t.astype(str)).replace("_", "T"))
+                )
                 for t in times.values
             ]
         )

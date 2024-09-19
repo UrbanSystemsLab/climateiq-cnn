@@ -652,13 +652,15 @@ def test_compute_wind_components():
 
 
 def test_compute_solar_time_components():
-    # Create an in-memory NetCDF file with the necessary dimensions and variables
-    ncfile = netCDF4.Dataset("inmemory.nc", mode="w", format="NETCDF4", memory=1)
+    # Create an in-memory NetCDF file with dimensions and variables
+    ncfile = netCDF4.Dataset(
+        "met_em.d03.2010-02-02_18:00:00.nc", mode="w", format="NETCDF4", memory=1
+    )
     ncfile.createDimension("Time", 1)
     ncfile.createDimension("west_east", 2)
     ncfile.createDimension("south_north", 2)
 
-    # In WPS/WRF files, 'Times' is often defined with numeric values
+    # In WPS/WRF files, 'Times' is often defined as a time dimension
     times = ncfile.createVariable("Times", "f8", ("Time",))
     longitudes = ncfile.createVariable(
         "XLONG_M", "float32", ("Time", "south_north", "west_east")
@@ -667,14 +669,8 @@ def test_compute_solar_time_components():
         "XLAT_M", "float32", ("Time", "south_north", "west_east")
     )
 
-    # Set time in seconds since the epoch (e.g., seconds since 1970-01-01 00:00:00)
-    time_units = "seconds since 1970-01-01 00:00:00"
-
-    # Convert numpy.datetime64 to Python datetime object
-    time_in_python_datetime = datetime.datetime(2010, 2, 2, 18, 0, 0)
-
-    # Use date2num with Python datetime
-    times[0] = netCDF4.date2num(time_in_python_datetime, time_units)
+    # Set the time using numpy.datetime64 for the expected format
+    times[0] = numpy.datetime64("2010-02-02T18:00:00")
 
     # Set longitude and latitude values
     longitudes[:] = numpy.array(
