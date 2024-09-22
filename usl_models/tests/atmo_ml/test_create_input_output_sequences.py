@@ -43,40 +43,36 @@ def test_create_input_output_sequences():
         ]
     )  # Shape [1, 8, 1, 1, 1]
 
-    # Updated expected input sequences for comparison based on generated output
+    # Expected input/output sequences
     expected_inputs = [
-        [1, 1, 2],  # Day 1
-        [1, 2, 3],  # Day 1
-        [2, 3, 4],  # Day 1
-        [3, 4, 5],  # Day 1
-        [4, 5, 6],  # Day 2
-        [5, 6, 7],  # Day 2
-        [6, 7, 8],  # Day 2
-        [7, 8, 8],  # Day 2
+        [1, 1],
+        [1, 2],
+        [2, 3],
+        [3, 4],
+        [4, 5],
+        [4, 5],
+        [5, 6],
+        [6, 7],
+        [7, 8],
+        [8, 8],
     ]
-
-    # Updated expected output sequences for comparison based on generated output
     expected_outputs = [
-        [10, 11],  # Day 1
-        [12, 13],  # Day 1
-        [14, 15],  # Day 1
-        [16, 17],  # Day 1
-        [18, 19],  # Day 2
-        [20, 21],  # Day 2
-        [22, 23],  # Day 2
-        [24, 25],  # Day 2
+        [10, 10],
+        [10, 11],
+        [12, 13],
+        [14, 15],
+        [16, 17],
+        [16, 17],
+        [18, 19],
+        [20, 21],
+        [22, 23],
+        [24, 25],
     ]
-
-    generated_inputs = []
-    generated_outputs = []
 
     # Call the function and collect sequences inside
-    for input_seq, output_seq in input_output_sequences.create_input_output_sequences(
-        inputs, labels
-    ):
-        # Simplify the sequences for direct comparison with expected values
-        generated_inputs.append(input_seq.numpy().flatten().tolist())
-        generated_outputs.append(output_seq.numpy().flatten().tolist())
+    generated_inputs, generated_outputs = (
+        input_output_sequences.create_input_output_sequences(inputs, labels)
+    )
 
     # Check if generated sequences match expected sequences
     for gen_input, exp_input in zip(generated_inputs, expected_inputs):
