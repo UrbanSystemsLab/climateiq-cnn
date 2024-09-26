@@ -690,14 +690,14 @@ def test_compute_solar_time_components():
 
     # Check the computed sine values of solar time
     solartime_sin = processed_ds.data_vars["SOLAR_TIME_SIN"]
-    solartime_sin_expected = [[[-0.9613, -0.9608], [-0.9617, -0.9603]]]
+    solartime_sin_expected = [[[-0.2756, -0.2773], [-0.274, -0.279]]]
     numpy.testing.assert_array_almost_equal(
         solartime_sin_expected, solartime_sin.values, decimal=4
     )
 
     # Check the computed cosine values of solar time
     solartime_cos = processed_ds.data_vars["SOLAR_TIME_COS"]
-    solartime_cos_expected = [[[0.2756, 0.2773], [0.274, 0.279]]]
+    solartime_cos_expected = [[[-0.9613, -0.9608], [-0.9617, -0.9603]]]
     numpy.testing.assert_array_almost_equal(
         solartime_cos_expected, solartime_cos.values, decimal=4
     )

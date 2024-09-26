@@ -1054,15 +1054,21 @@ def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
             ]
         )
 
-        # Extract hours and minutes from the datetime objects
-        utc_hours_minutes = (
-            times.astype("datetime64[h]").astype(int) % 24
-            + times.astype("datetime64[m]").astype(int) % 60 / 60
-        )
+        print("Debug - Converted Times:", times)
+
+        # Extract hours and minutes from the datetime objects separately
+        utc_hours = times.dt.hour  # Extract the hour component
+        utc_minutes = times.dt.minute  # Extract the minute component
+
+        # Convert to fractional hours (hours + minutes/60)
+        utc_hours_minutes = utc_hours + utc_minutes / 60.0
+
+        print("Debug - UTC Hours and Minutes (in fraction):", utc_hours_minutes)
 
         # Define the function to calculate solar time
         def calculate_solar_time(utc_time, longitude):
-            return (utc_time + longitude / 15) % 24
+            solar_time = (utc_time + longitude / 15) % 24
+            return solar_time
 
         # Vectorized solar time calculation using xarray apply_ufunc
         solar_times = xarray.apply_ufunc(
@@ -1071,6 +1077,8 @@ def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
             longitudes,
             vectorize=True,
         )
+
+        print("Debug - Calculated Solar Times:", solar_times)
 
         # Convert time in hours to sine and cosine components
         def time_to_sine(hours):
@@ -1084,6 +1092,9 @@ def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
         # Compute sine and cosine components of solar time
         solar_time_sin = xarray.apply_ufunc(time_to_sine, solar_times, vectorize=True)
         solar_time_cos = xarray.apply_ufunc(time_to_cosine, solar_times, vectorize=True)
+
+        print("Debug - Solar Time Sine:", solar_time_sin)
+        print("Debug - Solar Time Cosine:", solar_time_cos)
 
         # Match the dimensionality and coordinate structure
         new_dims = ["Time", "south_north", "west_east"]
