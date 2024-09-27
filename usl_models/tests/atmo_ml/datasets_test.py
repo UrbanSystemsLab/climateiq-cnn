@@ -14,7 +14,7 @@ def test_atmo_dataset(mock_create_dataset) -> None:
     mock_storage_client = mock.MagicMock(spec=storage.Client)
 
     # Set parameters for the dataset
-    bucket_name = "your-bucket-name"
+    bucket_name = "our-bucket-name"
     spatiotemporal_file_names = [
         "spatiotemporal_data_1.npy",
         "spatiotemporal_data_2.npy",
