@@ -1,5 +1,5 @@
 import tensorflow as tf
-from usl_models.atmo_ml import cnn_inputsoutputs
+from usl_models.atmo_ml import cnn_inputs_outputs
 
 
 def test_divide_into_days():
@@ -80,7 +80,7 @@ def test_divide_into_days():
     ]
 
     # Call the function to process inputs and labels
-    day_inputs_list, day_labels_list = cnn_inputsoutputs.divide_into_days(
+    day_inputs_list, day_labels_list = cnn_inputs_outputs.divide_into_days(
         inputs, labels, input_steps_per_day=4, label_steps_per_day=8
     )
 
