@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from google.cloud import storage
+from google.cloud import storage  # type: ignore[attr-defined]
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import cnn_inputs_outputs
 
