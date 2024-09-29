@@ -1,7 +1,7 @@
 import io
 from unittest import mock
 
-from google.cloud import storage  # type: ignore[attr-defined]
+from google.cloud import storage  # type: ignore
 import numpy
 
 from usl_models.atmo_ml import datasets
