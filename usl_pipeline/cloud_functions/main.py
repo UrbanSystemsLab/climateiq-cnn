@@ -985,6 +985,7 @@ def _compute_custom_wps_variables(dataset: xarray.Dataset) -> xarray.Dataset:
     """
     dataset = _compute_wind_components(dataset)
     # TODO: compute solar time
+    dataset = _compute_solar_time_components(dataset)
 
     return dataset
 
@@ -1038,6 +1039,92 @@ def _compute_wind_components(dataset: xarray.Dataset) -> xarray.Dataset:
         dataset = dataset.assign(
             WDIR_COS=xarray.DataArray(
                 wind_direction_cos, coords=vv_centered.coords, dims=new_dims
+            )
+        )
+
+    return dataset
+
+
+def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
+    # Solar Time Computation for every Longitude of the City
+    # Solar Time Sine and Cosine Derivation from there
+    if all(var in dataset.keys() for var in ["XLONG_M", "XLAT_M", "Times"]):
+        # Extract longitude, latitude, and time variables from dataset
+        longitudes = dataset["XLONG_M"][0, :, :]
+        latitudes = dataset["XLAT_M"][0, :, :]
+        times = dataset["Times"]
+
+        # Convert time variable to datetime objects
+        times = xarray.DataArray(
+            [
+                # Check if the value is a Unix timestamp (numeric type)
+                (
+                    numpy.datetime64(
+                        datetime.datetime.utcfromtimestamp(t).strftime(
+                            "%Y-%m-%dT%H:%M:%S"
+                        )
+                    )
+                    if isinstance(t, (int, float))
+                    else numpy.datetime64("".join(t.astype(str)).replace("_", "T"))
+                )
+                for t in times.values
+            ]
+        )
+
+        print("Debug - Converted Times:", times)
+
+        # Extract hours and minutes from the datetime objects separately
+        utc_hours = times.dt.hour  # Extract the hour component
+        utc_minutes = times.dt.minute  # Extract the minute component
+
+        # Convert to fractional hours (hours + minutes/60)
+        utc_hours_minutes = utc_hours + utc_minutes / 60.0
+
+        print("Debug - UTC Hours and Minutes (in fraction):", utc_hours_minutes)
+
+        # Define the function to calculate solar time
+        def calculate_solar_time(utc_time, longitude):
+            solar_time = (utc_time + longitude / 15) % 24
+            return solar_time
+
+        # Vectorized solar time calculation using xarray apply_ufunc
+        solar_times = xarray.apply_ufunc(
+            calculate_solar_time,
+            xarray.DataArray(utc_hours_minutes, dims=["Time"]),
+            longitudes,
+            vectorize=True,
+        )
+
+        print("Debug - Calculated Solar Times:", solar_times)
+
+        # Convert time in hours to sine and cosine components
+        def time_to_sine(hours):
+            radians = (hours / 24.0) * 2 * numpy.pi
+            return numpy.sin(radians)
+
+        def time_to_cosine(hours):
+            radians = (hours / 24.0) * 2 * numpy.pi
+            return numpy.cos(radians)
+
+        # Compute sine and cosine components of solar time
+        solar_time_sin = xarray.apply_ufunc(time_to_sine, solar_times, vectorize=True)
+        solar_time_cos = xarray.apply_ufunc(time_to_cosine, solar_times, vectorize=True)
+
+        print("Debug - Solar Time Sine:", solar_time_sin)
+        print("Debug - Solar Time Cosine:", solar_time_cos)
+
+        # Match the dimensionality and coordinate structure
+        new_dims = ["Time", "south_north", "west_east"]
+
+        # Assign new variables to dataset
+        dataset = dataset.assign(
+            SOLAR_TIME_SIN=xarray.DataArray(
+                solar_time_sin, coords=latitudes.coords, dims=new_dims
+            )
+        )
+        dataset = dataset.assign(
+            SOLAR_TIME_COS=xarray.DataArray(
+                solar_time_cos, coords=latitudes.coords, dims=new_dims
             )
         )
 
