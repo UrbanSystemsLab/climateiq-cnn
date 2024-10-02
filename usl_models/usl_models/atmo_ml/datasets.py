@@ -1,50 +1,79 @@
 import tensorflow as tf
 import numpy as np
-from google.cloud import storage  # type: ignore
+from google.cloud import storage, firestore  # type: ignore
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import cnn_inputs_outputs
 
 
-# Load data from Google Cloud Storage instead of local file paths
+# Load data from Google Cloud Storage with Firestore logging
 def load_data_from_cloud(
-    bucket_name: str, file_name: str, storage_client: storage.Client
+    bucket_name: str,
+    file_name: str,
+    storage_client: storage.Client,
+    firestore_client: firestore.Client = None,
 ):
-    """Load data from Google Cloud Storage."""
+    """Load data from Google Cloud Storage, with optional Firestore logging."""
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(file_name)
     downloaded_data = blob.download_as_bytes()
+
+    # Log progress to Firestore (if Firestore client is provided)
+    if firestore_client:
+        doc_ref = firestore_client.collection("dataset_loading").document(file_name)
+        doc_ref.set({"file_name": file_name, "status": "loaded"})
+
     return np.load(downloaded_data)
 
 
 def load_spatiotemporal_data_from_cloud(
-    bucket_name: str, file_name: str, storage_client: storage.Client
+    bucket_name: str,
+    file_name: str,
+    storage_client: storage.Client,
+    firestore_client: firestore.Client = None,
 ) -> tf.Tensor:
-    """Load spatiotemporal data from Google Cloud Storage."""
-    data = load_data_from_cloud(bucket_name, file_name, storage_client)
+    """Load spatiotemporal data from Google Cloud Storage with Firestore logging."""
+    data = load_data_from_cloud(
+        bucket_name, file_name, storage_client, firestore_client
+    )
     return tf.convert_to_tensor(data, dtype=tf.float32)
 
 
 def load_labels_from_cloud(
-    bucket_name: str, file_name: str, storage_client: storage.Client
+    bucket_name: str,
+    file_name: str,
+    storage_client: storage.Client,
+    firestore_client: firestore.Client = None,
 ) -> tf.Tensor:
-    """Load labels from Google Cloud Storage."""
-    labels = load_data_from_cloud(bucket_name, file_name, storage_client)
+    """Load labels from Google Cloud Storage with Firestore logging."""
+    labels = load_data_from_cloud(
+        bucket_name, file_name, storage_client, firestore_client
+    )
     return tf.convert_to_tensor(labels, dtype=tf.float32)
 
 
 def load_lu_index_from_cloud(
-    bucket_name: str, file_name: str, storage_client: storage.Client
+    bucket_name: str,
+    file_name: str,
+    storage_client: storage.Client,
+    firestore_client: firestore.Client = None,
 ) -> tf.Tensor:
-    """Load land use index (categorical) from Google Cloud Storage."""
-    lu_index_data = load_data_from_cloud(bucket_name, file_name, storage_client)
+    """Load land use index from Google Cloud Storage with Firestore logging."""
+    lu_index_data = load_data_from_cloud(
+        bucket_name, file_name, storage_client, firestore_client
+    )
     return tf.convert_to_tensor(lu_index_data, dtype=tf.int32)
 
 
 def load_spatial_data_from_cloud(
-    bucket_name: str, file_name: str, storage_client: storage.Client
+    bucket_name: str,
+    file_name: str,
+    storage_client: storage.Client,
+    firestore_client: firestore.Client = None,
 ) -> tf.Tensor:
-    """Load spatial data from Google Cloud Storage."""
-    spatial_data = load_data_from_cloud(bucket_name, file_name, storage_client)
+    """Load spatial data from Google Cloud Storage with Firestore logging."""
+    spatial_data = load_data_from_cloud(
+        bucket_name, file_name, storage_client, firestore_client
+    )
     return tf.convert_to_tensor(spatial_data, dtype=tf.float32)
 
 
@@ -58,8 +87,9 @@ def create_atmo_dataset(
     batch_size: int = 32,
     shuffle: bool = True,
     storage_client: storage.Client = None,
+    firestore_client: firestore.Client = None,
 ) -> tf.data.Dataset:
-    """Creates the dataset for the AtmoML model.
+    """Creates the dataset for the AtmoML model with optional Firestore logging.
 
     Args:
         bucket_name: The GCS bucket name.
@@ -71,6 +101,7 @@ def create_atmo_dataset(
         batch_size: Batch size for the dataset.
         shuffle: Whether to shuffle the dataset.
         storage_client: An instance of Google Cloud Storage client.
+        firestore_client: An optional Firestore client to log data loading status.
 
     Returns:
         A tf.data.Dataset object yielding input dictionaries compatible with AtmoML.
@@ -78,20 +109,20 @@ def create_atmo_dataset(
 
     def data_generator():
         lu_index_data = load_lu_index_from_cloud(
-            bucket_name, lu_index_file_name, storage_client
+            bucket_name, lu_index_file_name, storage_client, firestore_client
         )
         spatial_data = load_spatial_data_from_cloud(
-            bucket_name, spatial_file_name, storage_client
+            bucket_name, spatial_file_name, storage_client, firestore_client
         )
 
         for spatiotemporal_file_name, label_file_name in zip(
             spatiotemporal_file_names, label_file_names
         ):
             spatiotemporal_data = load_spatiotemporal_data_from_cloud(
-                bucket_name, spatiotemporal_file_name, storage_client
+                bucket_name, spatiotemporal_file_name, storage_client, firestore_client
             )
             label_data = load_labels_from_cloud(
-                bucket_name, label_file_name, storage_client
+                bucket_name, label_file_name, storage_client, firestore_client
             )
 
             # Divide the spatiotemporal data and labels into days
@@ -151,3 +182,17 @@ def create_atmo_dataset(
     dataset = dataset.batch(batch_size)
 
     return dataset
+
+
+def make_predictions(model: tf.keras.Model, dataset: tf.data.Dataset) -> np.ndarray:
+    """Make predictions using the AtmoML model on the provided dataset.
+
+    Args:
+        model: The trained AtmoML model.
+        dataset: The dataset to predict on.
+
+    Returns:
+        A numpy array of predictions.
+    """
+    predictions = model.predict(dataset)
+    return predictions

@@ -1,17 +1,17 @@
 import io
 from unittest import mock
-
-from google.cloud import storage  # type: ignore
-import numpy
-
+import numpy as np
+from google.cloud import storage, firestore  # type: ignore
 from usl_models.atmo_ml import datasets
 from usl_models.atmo_ml import cnn_inputs_outputs
 
 
 @mock.patch.object(datasets, "create_atmo_dataset")
-def test_atmo_dataset(mock_create_dataset) -> None:
-    """Create expected dataset for the atmo model from GCS objects."""
+@mock.patch("usl_models.atmo_ml.datasets.make_predictions")
+def test_atmo_dataset(mock_make_predictions, mock_create_dataset) -> None:
+    """Create expected dataset for the atmo model from GCS and Firestore objects."""
     mock_storage_client = mock.MagicMock(spec=storage.Client)
+    mock_firestore_client = mock.MagicMock(spec=firestore.Client)
 
     # Set parameters for the dataset
     bucket_name = "our-bucket-name"
@@ -26,10 +26,10 @@ def test_atmo_dataset(mock_create_dataset) -> None:
     batch_size = 4
 
     # Set up mock data for the GCS
-    stinp_1 = numpy.random.rand(batch_size, 100, 100, 1)
-    labelinput_1 = numpy.random.rand(batch_size, 100, 100, 1)
-    stinp_2 = numpy.random.rand(batch_size, 100, 100, 1)
-    labelinput_2 = numpy.random.rand(batch_size, 100, 100, 1)
+    stinp_1 = np.random.rand(batch_size, 100, 100, 1)
+    labelinput_1 = np.random.rand(batch_size, 100, 100, 1)
+    stinp_2 = np.random.rand(batch_size, 100, 100, 1)
+    labelinput_2 = np.random.rand(batch_size, 100, 100, 1)
 
     # Call the function to process inputs and labels
     mock_spatiotemporal_data_1, mock_labels_1 = cnn_inputs_outputs.divide_into_days(
@@ -38,8 +38,8 @@ def test_atmo_dataset(mock_create_dataset) -> None:
     mock_spatiotemporal_data_2, mock_labels_2 = cnn_inputs_outputs.divide_into_days(
         stinp_2, labelinput_2, input_steps_per_day=4, label_steps_per_day=8
     )
-    mock_spatial_data = numpy.random.rand(100, 100, 1)
-    mock_lu_index_data = numpy.random.randint(1, 62, (100, 100))
+    mock_spatial_data = np.random.rand(100, 100, 1)
+    mock_lu_index_data = np.random.randint(1, 62, (100, 100))
 
     def mock_blob_func(blob_name):
         """Returns the mock data depending on the blob requested."""
@@ -59,7 +59,7 @@ def test_atmo_dataset(mock_create_dataset) -> None:
             raise ValueError(f"Unexpected name {blob_name} passed to mock.")
 
         buf = io.BytesIO()
-        numpy.save(buf, mock_data)
+        np.save(buf, mock_data)
         buf.seek(0)
 
         mock_blob = mock.MagicMock(spec=storage.Blob)
@@ -68,6 +68,11 @@ def test_atmo_dataset(mock_create_dataset) -> None:
 
     # Set the storage client to return the right mock data for each GCS path.
     mock_storage_client.bucket().blob.side_effect = mock_blob_func
+
+    # Mock Firestore interactions
+    mock_firestore_client.collection().document().get().to_dict.return_value = {
+        "some_firestore_key": "some_value"
+    }
 
     # Create the dataset using mocked data
     dataset = datasets.create_atmo_dataset(
@@ -79,18 +84,29 @@ def test_atmo_dataset(mock_create_dataset) -> None:
         time_steps_per_day=time_steps_per_day,
         batch_size=batch_size,
         storage_client=mock_storage_client,
+        firestore_client=mock_firestore_client,  # Add Firestore client here
     )
+
+    # Mock predictions returned by the model
+    mock_predictions = np.random.rand(batch_size, time_steps_per_day, 100, 100, 1)
+    mock_make_predictions.return_value = mock_predictions
+
+    # Call the prediction function and validate
+    predictions = datasets.make_predictions(mock.MagicMock(), dataset)
+    assert predictions.shape == mock_predictions.shape, "Predictions shape mismatch"
 
     # Iterate through the dataset and check the shape
     for data in dataset:
         inputs, labels = data
-        assert inputs.shape == (
+        assert inputs["spatiotemporal"].shape == (
             batch_size,
             time_steps_per_day,
             100,
             100,
             1,
-        ), "Input shape mismatch"
+        ), "Input spatiotemporal shape mismatch"
+        assert inputs["spatial"].shape == (100, 100, 1), "Spatial data shape mismatch"
+        assert inputs["lu_index"].shape == (100 * 100,), "Land use index shape mismatch"
         assert labels.shape == (
             batch_size,
             time_steps_per_day,
@@ -98,5 +114,7 @@ def test_atmo_dataset(mock_create_dataset) -> None:
             100,
             1,
         ), "Label shape mismatch"
+
         print("Inputs:", inputs)
         print("Labels:", labels)
+        print("Predictions:", predictions)
