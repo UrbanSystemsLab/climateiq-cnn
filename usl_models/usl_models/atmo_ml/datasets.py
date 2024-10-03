@@ -77,11 +77,61 @@ def load_spatial_data_from_cloud(
     return tf.convert_to_tensor(spatial_data, dtype=tf.float32)
 
 
+def load_prediction_dataset(
+    bucket_name: str,
+    spatiotemporal_file_names: list,
+    spatial_file_name: str,
+    lu_index_file_name: str,
+    batch_size: int,
+    time_steps_per_day: int,
+    storage_client: storage.Client,
+):
+    """Load prediction data from GCS and generate batches for predictions.
+
+    Args:
+        bucket_name: Name of the GCS bucket.
+        spatiotemporal_file_names: List of GCS paths for spatiotemporal data.
+        spatial_file_name: GCS path for spatial data.
+        lu_index_file_name: GCS path for LU index.
+        batch_size: Batch size for prediction.
+        time_steps_per_day: Number of time steps per day for spatiotemporal data.
+        storage_client: The GCS client.
+
+    Yields:
+        A batch of prediction inputs.
+    """
+    bucket = storage_client.bucket(bucket_name)
+
+    # Load spatial and LU index data
+    spatial_blob = bucket.blob(spatial_file_name)
+    lu_index_blob = bucket.blob(lu_index_file_name)
+
+    spatial_data = np.load(spatial_blob.open("rb"))
+    lu_index_data = np.load(lu_index_blob.open("rb"))
+
+    # Load spatiotemporal data in batches for prediction
+    for st_file_name in spatiotemporal_file_names:
+        spatiotemporal_blob = bucket.blob(st_file_name)
+        spatiotemporal_data = np.load(spatiotemporal_blob.open("rb"))
+
+        # Split the spatiotemporal data into batches
+        for i in range(0, spatiotemporal_data.shape[0], batch_size):
+            batch_spatiotemporal = spatiotemporal_data[i : i + batch_size]
+
+            # Yield the batch of inputs
+            inputs = {
+                "spatiotemporal": batch_spatiotemporal,
+                "spatial": spatial_data,
+                "lu_index": lu_index_data.flatten(),
+            }
+            yield inputs
+
+
 def create_atmo_dataset(
     bucket_name: str,
     spatiotemporal_file_names: list[str],
     label_file_names: list[str],
-    spatial_file_name: str,  # Adding the spatial feature file
+    spatial_file_name: str,
     lu_index_file_name: str,
     time_steps_per_day: int,
     batch_size: int = 32,
