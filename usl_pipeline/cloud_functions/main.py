@@ -9,7 +9,6 @@ import tarfile
 import time
 import traceback
 from typing import BinaryIO, Callable, IO, TextIO, Tuple
-from enum import Enum
 from google.api_core import exceptions
 from google.cloud import error_reporting
 from google.cloud import firestore
