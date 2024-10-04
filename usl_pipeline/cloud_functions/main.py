@@ -66,20 +66,6 @@ class Unit(Enum):
     METERSPERSEC = 7
 
 
-# Configuration for the features
-ML_REQUIRED_VARS_REPO = {
-    "PRES": {
-        "unit": Unit.PASCALS,
-        "scaling": {"type": ScalingType.GLOBAL, "min": 98000, "max": 121590},
-    },
-    "GHT": {
-        "unit": Unit.METERS,
-        "scaling": {"type": ScalingType.GLOBAL, "min": 0, "max": 6000},
-    },
-    # Other configurations (truncated for brevity)
-}
-
-
 @dataclasses.dataclass(slots=True)
 class FeatureMetadata:
     """Additional information about the extracted features.
@@ -996,8 +982,8 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
 
         # Apply feature engineering and build features matrix
         features_components = []
-        for var_name in ML_REQUIRED_VARS_REPO.keys():
-            var_config = ML_REQUIRED_VARS_REPO[var_name]
+        for var_name in wps_data.ML_REQUIRED_VARS_REPO.keys():
+            var_config = wps_data.ML_REQUIRED_VARS_REPO[var_name]
             feature = _process_wps_feature(
                 feature=ds.data_vars[var_name], var_config=var_config
             )
