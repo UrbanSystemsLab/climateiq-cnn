@@ -50,22 +50,6 @@ _RAINFALL_VECTOR_LENGTH = (60 // 5) * 24 * 3
 _FEATURE_SCALING_TRIGGER_SUFFIX = ".scale_trigger"
 
 
-class ScalingType(Enum):
-    NONE = 1
-    GLOBAL = 2
-    LOCAL = 3
-
-
-class Unit(Enum):
-    NONE = 1
-    PASCALS = 2
-    METERS = 3
-    PERCENTAGE = 4
-    KELVIN = 5
-    FRACTION = 6
-    METERSPERSEC = 7
-
-
 @dataclasses.dataclass(slots=True)
 class FeatureMetadata:
     """Additional information about the extracted features.
