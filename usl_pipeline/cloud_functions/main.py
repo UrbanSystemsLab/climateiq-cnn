@@ -40,6 +40,7 @@ from usl_lib.transformers import feature_raster_transformers
 # of time between when an event is triggered and when the cloud
 # function actually runs, which can be a bit of time if there are a
 # lot of triggers.
+# Added
 _MAX_RETRY_SECONDS = 60 * 60
 
 # The vector is long enough to express rainfall every five minutes for up to three days.
