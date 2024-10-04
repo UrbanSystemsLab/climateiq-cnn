@@ -28,7 +28,7 @@ from usl_lib.chunkers import raster_chunkers
 from usl_lib.readers import simulation_readers
 from usl_lib.readers import config_readers
 from usl_lib.readers import elevation_readers, polygon_readers
-from usl_lib.shared import geo_data
+from usl_lib.shared import geo_data, wps_data
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
