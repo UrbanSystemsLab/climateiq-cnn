@@ -9,6 +9,7 @@ import tarfile
 import time
 import traceback
 from typing import BinaryIO, Callable, IO, TextIO, Tuple
+from enum import Enum
 from google.api_core import exceptions
 from google.cloud import error_reporting
 from google.cloud import firestore
@@ -47,6 +48,23 @@ _RAINFALL_VECTOR_LENGTH = (60 // 5) * 24 * 3
 
 # Storage bucket file name extension that should trigger feature matrix rescaling.
 _FEATURE_SCALING_TRIGGER_SUFFIX = ".scale_trigger"
+
+
+# Enums for scaling types and units
+class ScalingType(Enum):
+    NONE = 1
+    GLOBAL = 2
+    LOCAL = 3
+
+
+class Unit(Enum):
+    NONE = 1
+    PASCALS = 2
+    METERS = 3
+    PERCENTAGE = 4
+    KELVIN = 5
+    FRACTION = 6
+    METERSPERSEC = 7
 
 
 @dataclasses.dataclass(slots=True)
