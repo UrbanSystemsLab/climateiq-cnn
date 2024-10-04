@@ -69,19 +69,11 @@ class Unit(Enum):
 ML_REQUIRED_VARS_REPO = {
     "PRES": {
         "unit": Unit.PASCALS,
-        "scaling": {
-            "type": ScalingType.GLOBAL,
-            "min": 98000,
-            "max": 121590
-        }
+        "scaling": {"type": ScalingType.GLOBAL, "min": 98000, "max": 121590},
     },
     "GHT": {
         "unit": Unit.METERS,
-        "scaling": {
-            "type": ScalingType.GLOBAL,
-            "min": 0,
-            "max": 6000
-        }
+        "scaling": {"type": ScalingType.GLOBAL, "min": 0, "max": 6000},
     },
     # Other configurations (truncated for brevity)
 }
