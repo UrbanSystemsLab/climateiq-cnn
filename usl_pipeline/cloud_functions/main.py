@@ -952,7 +952,7 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
     # Ignore type checker error - BytesIO inherits from expected type BufferedIOBase
     # https://shorturl.at/lk4om
     with xarray.open_dataset(fd, engine="h5netcdf") as ds:  # type: ignore
-        # Drop the existing 'Time' coordinate if present, to avoid conflict
+        # Dropp the existing 'Time' coordinate if present, to avoid conflict
         if "Time" in ds.coords:
             ds = ds.drop_vars("Time")
 
