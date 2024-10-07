@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-# Main function to divide inputs and labels by days
+# Main function to divide inputs and labels by day
 def divide_into_days(inputs, labels, input_steps_per_day=4, label_steps_per_day=8):
     total_days = inputs.shape[0] // input_steps_per_day
     day_inputs_list = []
