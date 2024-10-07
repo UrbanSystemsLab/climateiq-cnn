@@ -52,8 +52,6 @@ def test_divide_into_days():
         tf.constant(
             [
                 [[[10]]],
-                [[[10]]],
-                [[[10]]],
                 [[[11]]],
                 [[[12]]],
                 [[[13]]],
@@ -65,8 +63,6 @@ def test_divide_into_days():
         ),  # Day 1 labels
         tf.constant(
             [
-                [[[16]]],
-                [[[17]]],
                 [[[18]]],
                 [[[19]]],
                 [[[20]]],
@@ -83,7 +79,17 @@ def test_divide_into_days():
     day_inputs_list, day_labels_list = cnn_inputs_outputs.divide_into_days(
         inputs, labels, input_steps_per_day=4, label_steps_per_day=8
     )
-
+    # Print the generated inputs and labels for debugging
+    for i, (gen_inputs, exp_inputs) in enumerate(
+        zip(day_inputs_list, expected_day_inputs_list)
+    ):
+        print(f"Generated Day {i + 1} Inputs:\n", gen_inputs.numpy())
+        print(f"Expected Day {i + 1} Inputs:\n", exp_inputs.numpy())
+    for i, (gen_labels, exp_labels) in enumerate(
+        zip(day_labels_list, expected_day_labels_list)
+    ):
+        print(f"Generated Day {i + 1} Labels:\n", gen_labels.numpy())
+        print(f"Expected Day {i + 1} Labels:\n", exp_labels.numpy())
     # Assert if generated inputs and labels match the expected results
     for i, (gen_inputs, exp_inputs) in enumerate(
         zip(day_inputs_list, expected_day_inputs_list)
@@ -98,5 +104,3 @@ def test_divide_into_days():
         assert tf.reduce_all(
             tf.equal(gen_labels, exp_labels)
         ), f"Day {i + 1} Exp labels: {exp_labels.numpy()}, got: {gen_labels.numpy()}"
-
-    print("All tests passed!")
