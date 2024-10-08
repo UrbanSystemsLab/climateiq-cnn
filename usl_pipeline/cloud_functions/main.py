@@ -1042,9 +1042,7 @@ def _compute_wind_components(dataset: xarray.Dataset) -> xarray.Dataset:
     return dataset
 
 
-def _compute_solar_time_components(
-    dataset: xarray.Dataset, use_fake_data: bool = True
-) -> xarray.Dataset:
+def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
     """Compute solar time components (sine and cosine) for the dataset's longitudes.
 
     Args:
@@ -1059,25 +1057,14 @@ def _compute_solar_time_components(
         longitudes = dataset["XLONG_M"][0, :, :]  # Extract the longitudes
         times = dataset["Times"]  # Extract the time variable
 
-        # Handle different time formats
-        if use_fake_data:
-            # Convert Unix timestamps to datetime (assume seconds since Unix epoch)
-            times = xarray.DataArray(
-                [
-                    numpy.datetime64(int(t), "s")  # Convert Unix timestamp to seconds
-                    for t in times.values
-                ],
-                dims=["Time"],
-            )
-        else:
-            # Convert preformatted string-based times to nanosecond precision datetime
-            times = xarray.DataArray(
-                [
-                    numpy.datetime64("".join(t.astype(str)).replace("_", "T"), "ns")
-                    for t in times.values
-                ],
-                dims=["Time"],
-            )
+        # Convert preformatted string-based times to nanosecond precision datetime
+        times = xarray.DataArray(
+            [
+                numpy.datetime64("".join(t.astype(str)).replace("_", "T"), "ns")
+                for t in times.values
+            ],
+            dims=["Time"],
+        )
 
         # Extract hours and minutes in UTC
         utc_hours = times.dt.hour

@@ -662,7 +662,6 @@ def test_compute_solar_time_components(use_fake_data=True):
         ncfile.createDimension("south_north", 2)
 
         # Set fake time, longitude, and latitude data
-        # Store time as a Unix timestamp (seconds since 1970-01-01)
         times = ncfile.createVariable("Times", "f8", ("Time",))
         longitudes = ncfile.createVariable(
             "XLONG_M", "float32", ("Time", "south_north", "west_east")
@@ -689,6 +688,16 @@ def test_compute_solar_time_components(use_fake_data=True):
 
         # Open the in-memory NetCDF file with xarray
         ds = xarray.open_dataset(io.BytesIO(ncfile_bytes))
+
+        # Convert Unix timestamps to datetime for the fake dataset
+        times = xarray.DataArray(
+            [
+                numpy.datetime64(int(t), "s")  # Convert Unix timestamp to seconds
+                for t in ds["Times"].values
+            ],
+            dims=["Time"],
+        )
+        ds["Times"] = times  # Overwrite the time reading with fake data conversion
     else:
         # If not using fake data, read the real data from GCS
         storage_client = storage.Client()
