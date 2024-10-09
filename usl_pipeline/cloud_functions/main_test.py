@@ -651,70 +651,51 @@ def test_compute_wind_components():
     assert wspd.shape == (1, 2, 2, 2)
 
 
-def test_compute_solar_time_components(use_fake_data=True):
-    if use_fake_data:
-        # Create an in-memory NetCDF file with fake data
-        ncfile = netCDF4.Dataset(
-            "met_em.d03.2010-02-02_18:00:00.nc", mode="w", format="NETCDF4", memory=1
-        )
-        ncfile.createDimension("Time", 1)
-        ncfile.createDimension("west_east", 2)
-        ncfile.createDimension("south_north", 2)
+def test_compute_solar_time_components():
 
-        # Set fake time, longitude, and latitude data
-        times = ncfile.createVariable("Times", "f8", ("Time",))
-        longitudes = ncfile.createVariable(
-            "XLONG_M", "float32", ("Time", "south_north", "west_east")
-        )
-        latitudes = ncfile.createVariable(
-            "XLAT_M", "float32", ("Time", "south_north", "west_east")
-        )
+    # Create an in-memory NetCDF file with fake data
+    ncfile = netCDF4.Dataset(
+        "met_em.d03.2010-02-02_18:00:00.nc", mode="w", format="NETCDF4", memory=1
+    )
+    ncfile.createDimension("Time", 1)
+    ncfile.createDimension("west_east", 2)
+    ncfile.createDimension("south_north", 2)
 
-        # Use a Unix timestamp for "2010-02-02T18:00:00"
-        times[0] = (
-            numpy.datetime64("2010-02-02T18:00:00")
-            - numpy.datetime64("1970-01-01T00:00:00")
-        ) / numpy.timedelta64(1, "s")
-        longitudes[:] = numpy.array(
-            [[-74.00, -73.90], [-74.10, -73.80]], dtype=numpy.float32
-        )
-        latitudes[:] = numpy.array(
-            [[40.70, 40.70], [40.80, 40.80]], dtype=numpy.float32
-        )
+    # Set fake time, longitude, and latitude data
+    times = ncfile.createVariable("Times", "f8", ("Time",))
+    longitudes = ncfile.createVariable(
+        "XLONG_M", "float32", ("Time", "south_north", "west_east")
+    )
+    latitudes = ncfile.createVariable(
+        "XLAT_M", "float32", ("Time", "south_north", "west_east")
+    )
 
-        # Close the NetCDF file and retrieve its contents as bytes
-        memfile = ncfile.close()
-        ncfile_bytes = memfile.tobytes()
+    # Use a Unix timestamp for "2010-02-02T18:00:00"
+    times[0] = (
+        numpy.datetime64("2010-02-02T18:00:00")
+        - numpy.datetime64("1970-01-01T00:00:00")
+    ) / numpy.timedelta64(1, "s")
+    longitudes[:] = numpy.array(
+        [[-74.00, -73.90], [-74.10, -73.80]], dtype=numpy.float32
+    )
+    latitudes[:] = numpy.array([[40.70, 40.70], [40.80, 40.80]], dtype=numpy.float32)
 
-        # Open the in-memory NetCDF file with xarray
-        ds = xarray.open_dataset(io.BytesIO(ncfile_bytes))
+    # Close the NetCDF file and retrieve its contents as bytes
+    memfile = ncfile.close()
+    ncfile_bytes = memfile.tobytes()
 
-        # Convert Unix timestamps to datetime for the fake dataset
-        times = xarray.DataArray(
-            [
-                numpy.datetime64(int(t), "s")  # Convert Unix timestamp to seconds
-                for t in ds["Times"].values
-            ],
-            dims=["Time"],
-        )
-        ds["Times"] = times  # Overwrite the time reading with fake data conversion
-    else:
-        # If not using fake data, read the real data from GCS
-        storage_client = storage.Client()
-        bucket_name = "test-climateiq-study-area-chunks"
-        file_name = "Test_NYC_Heat/Test_Config_Group/met_em.d03.2010-06-25_00:00:00.nc"
+    # Open the in-memory NetCDF file with xarray
+    ds = xarray.open_dataset(io.BytesIO(ncfile_bytes))
 
-        # Get the bucket and the file from GCS
-        bucket = storage_client.bucket(bucket_name)
-        blob = bucket.blob(file_name)
-
-        # Download the file into memory
-        netcdf_bytes = io.BytesIO()
-        blob.download_to_file(netcdf_bytes)
-        netcdf_bytes.seek(0)  # Ensure the file pointer is at the start
-
-        # Open the NetCDF file with xarray
-        ds = xarray.open_dataset(netcdf_bytes)
+    # Convert Unix timestamps to datetime for the fake dataset
+    times = xarray.DataArray(
+        [
+            numpy.datetime64(int(t), "s")  # Convert Unix timestamp to seconds
+            for t in ds["Times"].values
+        ],
+        dims=["Time"],
+    )
+    ds["Times"] = times  # Overwrite the time reading with fake data conversion
 
     # Process the dataset with the _compute_solar_time_components function
     processed_ds = main._compute_solar_time_components(ds)
