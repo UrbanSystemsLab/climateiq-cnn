@@ -83,6 +83,7 @@ def load_atmo_prediction_dataset(
     spatial_file_name: str,
     lu_index_file_name: str,
     batch_size: int,
+    time_steps_per_day: int,
     storage_client: storage.Client,
 ):
     """Load Atmo prediction data from GCS and generate batches for prediction."""
