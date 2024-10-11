@@ -121,7 +121,7 @@ def test_atmo_dataset(mock_make_predictions, mock_create_dataset) -> None:
 
 
 @mock.patch("usl_models.atmo_ml.datasets.storage.Client")
-def test_load_prediction_dataset(mock_storage_client) -> None:
+def load_atmo_prediction_dataset(mock_storage_client) -> None:
     """Test loading and generating batches for predictions."""
     bucket_name = "test-bucket"
     spatiotemporal_file_names = [
