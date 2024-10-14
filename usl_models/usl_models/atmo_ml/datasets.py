@@ -77,7 +77,7 @@ def load_spatial_data_from_cloud(
     return tf.convert_to_tensor(spatial_data, dtype=tf.float32)
 
 
-def load_atmo_prediction_dataset(
+def load_prediction_dataset(
     bucket_name: str,
     spatiotemporal_file_names: list,
     spatial_file_name: str,
@@ -86,7 +86,20 @@ def load_atmo_prediction_dataset(
     time_steps_per_day: int,
     storage_client: storage.Client,
 ):
-    """Load Atmo prediction data from GCS and generate batches for prediction."""
+    """Load prediction data from GCS and generate batches for predictions.
+
+    Args:
+        bucket_name: Name of the GCS bucket.
+        spatiotemporal_file_names: List of GCS paths for spatiotemporal data.
+        spatial_file_name: GCS path for spatial data.
+        lu_index_file_name: GCS path for LU index.
+        batch_size: Batch size for prediction.
+        time_steps_per_day: Number of time steps per day for spatiotemporal data.
+        storage_client: The GCS client.
+
+    Yields:
+        A batch of prediction inputs.
+    """
     bucket = storage_client.bucket(bucket_name)
 
     # Load spatial and LU index data
