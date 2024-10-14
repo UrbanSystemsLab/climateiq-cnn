@@ -612,7 +612,7 @@ def test_compute_wind_components():
     ncfile.createDimension("south_north_stag", 3)
     ncfile.createDimension("num_metgrid_levels", 2)
 
-    # In WPS/WRF files, 'Times'->dimension and 'Time'->variable
+    # In WPS/WRF file, 'Times'->dimension and 'Time'->variable
     ncfile.createVariable("Times", "f8", ("Time",))
     uu = ncfile.createVariable(
         "UU", "float32", ("Time", "num_metgrid_levels", "south_north", "west_east_stag")
