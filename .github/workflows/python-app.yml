@@ -15,7 +15,7 @@ permissions:
 jobs:
   usl_lib:
     name: usl_lib CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       FIRESTORE_EMULATOR_HOST: "localhost:8085"
     steps:
@@ -56,7 +56,7 @@ jobs:
 
   study_area_uploader:
     name: Study Area Uploader CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python 3.11
@@ -88,7 +88,7 @@ jobs:
 
   cloud_functions:
     name: Cloud Funcations CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python 3.11
@@ -120,7 +120,7 @@ jobs:
 
   usl_models:
     name: USL Models CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       FIRESTORE_EMULATOR_HOST: "localhost:8085"
     steps:
