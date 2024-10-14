@@ -90,7 +90,7 @@ def load_prediction_dataset(
 
     Args:
         bucket_name: Name of the GCS bucket.
-        spatiotemporal_file_names: List of GCS paths for spatiotemporal data.
+        spatiotemporal_file_names: List of GCS paths for spatiotemporal.
         spatial_file_name: GCS path for spatial data.
         lu_index_file_name: GCS path for LU index.
         batch_size: Batch size for prediction.
