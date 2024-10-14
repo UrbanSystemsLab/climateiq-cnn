@@ -354,3 +354,73 @@ def test_model_checkpoint():
     new_weights = new_model._model.get_weights()
     for old, new in zip(old_weights, new_weights):
         np.testing.assert_array_equal(old, new)
+
+
+def test_model_with_processed_data():
+    """Test that the model can fit with processed input/output sequences."""
+    # Define basic parameters
+    batch_size = 16
+    epochs = 2
+    params = pytest_model_params()
+
+    # Create fake inputs for the dataset (Spatial, Spatiotemporal, LU Index, Labels)
+    spatial_input = tf.random.normal(
+        (
+            batch_size,
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            constants.num_spatial_features,
+        )
+    )
+    spatiotemporal_input = tf.random.normal(
+        (
+            batch_size,
+            constants.INPUT_TIME_STEPS,
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            constants.num_spatiotemporal_features,
+        )
+    )
+    lu_index_input = tf.random.uniform(
+        (batch_size, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+        minval=0,
+        maxval=constants.lu_index_vocab_size,
+        dtype=tf.int32,
+    )
+    labels = tf.random.normal(
+        (
+            batch_size,
+            constants.OUTPUT_TIME_STEPS,
+            constants.MAP_HEIGHT,
+            constants.MAP_WIDTH,
+            constants.OUTPUT_CHANNELS,
+        )
+    )
+
+    inputs = {
+        "spatial": spatial_input,
+        "spatiotemporal": spatiotemporal_input,
+        "lu_index": lu_index_input,
+    }
+
+    # Create a fake dataset
+    train_dataset = tf.data.Dataset.from_tensor_slices((inputs, labels)).batch(
+        batch_size
+    )
+    val_dataset = tf.data.Dataset.from_tensor_slices((inputs, labels)).batch(batch_size)
+
+    # Create model instance
+    model = atmo_model.AtmoModel(params)
+
+    # Call model.fit() to train with processed dataset
+    history = model.fit(
+        train_dataset=train_dataset,
+        val_dataset=val_dataset,
+        epochs=epochs,
+        steps_per_epoch=1,
+    )
+
+    # Verify that training ran for the expected number of epochs
+    assert (
+        len(history.history["loss"]) == epochs
+    ), f"Expected {epochs} epochs but got {len(history.history['loss'])}"
