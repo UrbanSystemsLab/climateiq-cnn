@@ -492,8 +492,19 @@ def _process_wrf_label_and_metadata(fd: IO[bytes]) -> Tuple[NDArray, FeatureMeta
             if var == "wspd_wdir10":
                 # TODO: Split wind dir to sin/cos components
                 wspd10, wdir10 = wrf.getvar(nc, "wspd_wdir10")
-                label_components.append(numpy.swapaxes(wspd10, 0, 1))
-                label_components.append(numpy.swapaxes(wdir10, 0, 1))
+                # Convert wind direction from degrees to radians
+                wdir10_rad = numpy.deg2rad(wdir10)
+                # Split wind direction into sin and cos components
+                wind_dir_sin = numpy.sin(wdir10_rad)
+                wind_dir_cos = numpy.cos(wdir10_rad)
+                # Append wind speed and sin/cos of wind direction as labels
+                label_components.append(numpy.swapaxes(wspd10, 0, 1))  # wind speed
+                label_components.append(
+                    numpy.swapaxes(wind_dir_sin, 0, 1)
+                )  # sin(wind_dir)
+                label_components.append(
+                    numpy.swapaxes(wind_dir_cos, 0, 1)
+                )  # cos(wind_dir)
             else:
                 label = wrf.getvar(nc, var)
                 # Ensure order of dimension axes are: (west_east, south_north)
