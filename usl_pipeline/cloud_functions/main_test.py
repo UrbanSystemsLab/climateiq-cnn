@@ -1230,9 +1230,11 @@ def test_build_wrf_label_matrix(
     # Mock out the values that wrf-python will derive and return
     rh2 = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
     t2 = [[10, 20, 30], [40, 50, 60], [70, 80, 90]]
+
+    # Mock wind speed and direction, with wind speed and direction (degrees)
     wspd_wdir10 = [
-        [[11, 11, 11], [11, 11, 11], [11, 11, 11]],
-        [[22, 22, 22], [22, 22, 22], [22, 22, 22]],
+        [[11, 11, 11], [11, 11, 11], [11, 11, 11]],  # wind speed
+        [[0, 90, 180], [270, 0, 90], [180, 270, 0]],  # wind direction
     ]
 
     mock_wrf_getvar.side_effect = [
@@ -1241,7 +1243,7 @@ def test_build_wrf_label_matrix(
         wspd_wdir10,
     ]
     mock_wrf_getvar.reset_mock()
-
+    # Call the main function to process the data
     main.build_wrf_label_matrix(
         functions_framework.CloudEvent(
             {"source": "test", "type": "event"},
@@ -1270,14 +1272,17 @@ def test_build_wrf_label_matrix(
     # Ensure we attempted to upload a serialized label matrix
     mock_label_blob.upload_from_file.assert_called_once_with(mock.ANY)
     uploaded_array = numpy.load(mock_label_blob.upload_from_file.call_args[0][0])
-    # Expected array should be all required vars extracted, lon/lat axis reordered, and
-    # stacked
+    # Calculate the expected sine and cosine of wind direction
+    wdir10_rad = numpy.deg2rad(wspd_wdir10[1])  # Convert to radians
+    wind_dir_sin = numpy.sin(wdir10_rad)  # Compute sine of direction
+    wind_dir_cos = numpy.cos(wdir10_rad)  # Compute cosine of direction
     expected_array = numpy.dstack(
         [
             numpy.swapaxes(rh2, 0, 1),
             numpy.swapaxes(t2, 0, 1),
-            numpy.swapaxes(wspd_wdir10[0], 0, 1),
-            numpy.swapaxes(wspd_wdir10[1], 0, 1),
+            numpy.swapaxes(wspd_wdir10[0], 0, 1),  # wind speed
+            numpy.swapaxes(wind_dir_sin, 0, 1),  # sine of wind direction
+            numpy.swapaxes(wind_dir_cos, 0, 1),  # cosine of wind direction
         ]
     )
     numpy.testing.assert_array_equal(uploaded_array, expected_array)
