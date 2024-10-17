@@ -26,7 +26,7 @@ def prepare_shape_file(
     polygon_masks: list[Tuple[geometry.Polygon, int]],
     soil_class_prop: str = "unused_one",
 ) -> None:
-    crs = "EPSG:32618"
+    crs = "EPSG:4326"
     schema = {"geometry": "Polygon", "properties": {soil_class_prop: "int"}}
     with fiona.open(
         file_path,
@@ -65,7 +65,7 @@ def prepare_elevation_data(
         width=5,
         height=5,
         count=1,
-        crs=rasterio.CRS.from_epsg(32618),
+        crs=rasterio.CRS.from_epsg(4326),
         # The lower-left corner in the following transform is (0, 0) and cell_size is 1.
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 5.0),
     ) as raster:
@@ -87,7 +87,7 @@ def test_transform_shape_file_no_polygon_masks():
             study_area_transformers.transform_shape_file(
                 buildings_input_file_path,
                 geo_data.BoundingBox(min_x=1, min_y=1, max_x=3, max_y=3),
-                "EPSG:32618",
+                "EPSG:4326",
             )
         )
 
@@ -114,7 +114,7 @@ def test_transform_shape_file_with_polygon_masks():
             study_area_transformers.transform_shape_file(
                 soil_classes_input_file_path,
                 None,
-                "EPSG:32618",
+                "EPSG:4326",
                 mask_value_feature_property=soil_class_prop,
             )
         )
@@ -198,7 +198,7 @@ def test_prepare_and_upload_study_area_files_no_boundaries_buildings_only():
             + '    "y_ll_corner": 0.0,\n'
             + '    "cell_size": 1.0,\n'
             + '    "nodata_value": 0.0,\n'
-            + '    "crs": "EPSG:32618"\n'
+            + '    "crs": "EPSG:4326"\n'
             + "}"
         )
         assert (
@@ -294,7 +294,7 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
             y_ll_corner=0.0,
             cell_size=1.0,
             nodata_value=0.0,
-            crs=rasterio.CRS({"init": "EPSG:32618"}),
+            crs=rasterio.CRS({"init": "EPSG:4326"}),
         )
         testing.assert_array_equal(
             elevation.data,
@@ -345,7 +345,7 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
             + '    "y_ll_corner": 0.0,\n'
             + '    "cell_size": 1.0,\n'
             + '    "nodata_value": 0.0,\n'
-            + '    "crs": "EPSG:32618"\n'
+            + '    "crs": "EPSG:4326"\n'
             + "}"
         )
         assert (
@@ -434,7 +434,7 @@ def test_prepare_and_upload_study_area_files_with_non_green_area_soil_class():
             y_ll_corner=0.0,
             cell_size=1.0,
             nodata_value=0.0,
-            crs=rasterio.CRS({"init": "EPSG:32618"}),
+            crs=rasterio.CRS({"init": "EPSG:4326"}),
         )
         testing.assert_array_equal(
             elevation.data,

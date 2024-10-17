@@ -38,7 +38,7 @@ def prepare_test_geotiff_elevation_file(
         width=width,
         height=height,
         count=1,
-        crs=rasterio.CRS.from_epsg(32618),
+        crs=rasterio.CRS.from_epsg(4326),
         transform=rasterio.Affine(
             cell_size,
             0.0,
@@ -124,7 +124,7 @@ def assert_check_tar(
         y_ll_corner=y_ll_corner,
         cell_size=1,
         nodata_value=-9999.0,
-        crs=rasterio.CRS.from_epsg(32618),
+        crs=rasterio.CRS.from_epsg(4326),
     )
     testing.assert_array_equal(observed_elevation.data, elevation_data)
     assert_polygon_masks_equal(observed_boundaries_polygons, boundaries_polygons)

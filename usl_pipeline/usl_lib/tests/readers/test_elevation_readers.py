@@ -23,7 +23,7 @@ def prepare_test_geotiff_elevation_memory_file(mem_file: rasterio.io.MemoryFile)
         width=3,
         height=2,
         count=1,
-        crs=rasterio.CRS.from_epsg(32618),
+        crs=rasterio.CRS.from_epsg(4326),
         transform=rasterio.Affine(2.0, 0.0, 100.0, 0.0, -2.0, 500.0),
     ) as raster:
         raster.write(tiff_array.astype(rasterio.float32), 1)
@@ -40,7 +40,7 @@ def test_load_elevation_from_geotiff_default_no_data():
             y_ll_corner=496.0,
             cell_size=2.0,
             nodata_value=0.0,
-            crs=rasterio.CRS({"init": "EPSG:32618"}),
+            crs=rasterio.CRS({"init": "EPSG:4326"}),
         )
         testing.assert_array_equal(
             elevation.data,
@@ -63,7 +63,7 @@ def test_load_elevation_from_geotiff_with_changed_no_data():
             y_ll_corner=496.0,
             cell_size=2.0,
             nodata_value=-9999.0,
-            crs=rasterio.CRS({"init": "EPSG:32618"}),
+            crs=rasterio.CRS({"init": "EPSG:4326"}),
         )
         testing.assert_array_equal(
             elevation.data,
@@ -186,7 +186,7 @@ def test_read_elevation_header_from_json():
         + '    "y_ll_corner": 20.0,\n'
         + '    "cell_size": 1.0,\n'
         + '    "nodata_value": -30.0,\n'
-        + '    "crs": "EPSG:32618"\n'
+        + '    "crs": "EPSG:4326"\n'
         + "}"
     ) as json_file:
         assert elevation_readers.read_header_from_json_file(
@@ -198,5 +198,5 @@ def test_read_elevation_header_from_json():
             y_ll_corner=20.0,
             cell_size=1.0,
             nodata_value=-30.0,
-            crs=rasterio.CRS({"init": "EPSG:32618"}),
+            crs=rasterio.CRS({"init": "EPSG:4326"}),
         )
