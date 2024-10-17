@@ -15,7 +15,7 @@ def test_read_polygons_from_shape_file_with_transformation():
     y = 129304
     input_points = [(x, y), (x + 1, y), (x, y + 1), (x, y)]
     source_crs = "EPSG:2263"
-    target_crs = "EPSG:32618"
+    target_crs = "EPSG:4326"
     with tempfile.TemporaryDirectory() as temp_dir:
         file_path = pathlib.Path(temp_dir) / "temp.shp"
         # Prepare temporary shape file
