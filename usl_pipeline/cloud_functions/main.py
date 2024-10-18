@@ -975,13 +975,12 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
         ds = _compute_custom_wps_variables(ds)
 
         # Apply feature engineering and build features matrix
-        features_components = []
-        for var_name in wps_data.ML_REQUIRED_VARS_REPO.keys():
-            var_config = wps_data.ML_REQUIRED_VARS_REPO[var_name]
+        features_components = [None] * len(wps_data.Variable)
+        for var in wps_data.Variable:
             feature = _process_wps_feature(
-                feature=ds.data_vars[var_name], var_config=var_config
+                feature=ds.data_vars[var.name], var_config=wps_data.ML_REQUIRED_VARS_REPO[var]
             )
-            features_components.append(feature)
+            features_components[var.value] = feature
 
         features_matrix = numpy.dstack(features_components)
 
