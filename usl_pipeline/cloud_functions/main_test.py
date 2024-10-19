@@ -376,7 +376,6 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     lon = ncfile.createVariable("lon", "float32", ("west_east",))
     # Create dataset entries for all variables in mock
     for var in wps_data.ML_REQUIRED_VARS_REPO.keys():
-        print(var)
         ncfile.createVariable(var.name, "float32", ("Time", "south_north", "west_east"))
     # Represents var in DS that we don't want to process
     not_required_var = ncfile.createVariable(
