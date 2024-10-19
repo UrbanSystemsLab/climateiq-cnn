@@ -4,6 +4,7 @@ import pathlib
 import tarfile
 import textwrap
 from unittest import mock
+from enum import Enum
 
 from google.api_core import exceptions
 from google.cloud import firestore
@@ -331,22 +332,24 @@ def test_build_feature_matrix_from_archive_elevation_file_missing():
         raise Exception("Expected error never happened")
 
 
+class TestVariable(Enum):
+    GHT = 0
+    RH = 1
+
+
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch("main.wps_data.Variable", TestVariable)
 @mock.patch.dict(
     main.wps_data.ML_REQUIRED_VARS_REPO,
     {
-        "GHT": {
-            "scaling": {
-                "type": wps_data.ScalingType.LOCAL,
-            }
-        },
-        "RH": {
-            "scaling": {
-                "type": wps_data.ScalingType.NONE,
-            }
-        },
+        TestVariable.GHT: wps_data.VariableConfig(
+            scaling=wps_data.ScalingConfig(type=wps_data.ScalingType.LOCAL)
+        ),
+        TestVariable.RH: wps_data.VariableConfig(
+            scaling=wps_data.ScalingConfig(type=wps_data.ScalingType.NONE)
+        ),
     },
     clear=True,
 )
@@ -373,7 +376,8 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     lon = ncfile.createVariable("lon", "float32", ("west_east",))
     # Create dataset entries for all variables in mock
     for var in wps_data.ML_REQUIRED_VARS_REPO.keys():
-        ncfile.createVariable(var, "float32", ("Time", "south_north", "west_east"))
+        print(var)
+        ncfile.createVariable(var.name, "float32", ("Time", "south_north", "west_east"))
     # Represents var in DS that we don't want to process
     not_required_var = ncfile.createVariable(
         "NOT_REQUIRED_VAR", "float32", ("Time", "south_north", "west_east")
@@ -475,19 +479,17 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     )
 
 
-@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
 def test_process_wps_feature_drop_time_axis():
     arr = numpy.array([[[1, 2], [3, 4]]], dtype=numpy.float32)  # shape=(1,2,2)
     xrdarr = xarray.DataArray(arr, name="RH", dims=("Time", "south_north", "west_east"))
 
     processed = main._process_wps_feature(
-        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO[wps_data.Variable.RH]
     )
 
     numpy.testing.assert_equal((2, 2), processed.shape)
 
 
-@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
 def test_process_wps_feature_reorder_spatial_dims():
     # Dims ordered here are representative of how they will be ordered in actual netcdf
     # file
@@ -496,31 +498,25 @@ def test_process_wps_feature_reorder_spatial_dims():
         arr, name="RH", dims=("Time", "num_metgrid_levels", "south_north", "west_east")
     )
 
-    processed = main._process_wps_feature(
-        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
-    )
+    processed = main._process_wps_feature(xrdarr, wps_data.VariableConfig())
 
     expected = [[10, 30], [20, 40]]
     numpy.testing.assert_array_equal(expected, processed)
 
 
-@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"RH": {}}, clear=True)
 def test_process_wps_feature_extract_fnl_spatial_dim():
     arr = numpy.array([[[[10, 1], [20, 2]], [[30, 3], [40, 4]]]], dtype=numpy.float32)
     xrdarr = xarray.DataArray(
         arr, name="RH", dims=("Time", "south_north", "west_east", "num_metgrid_levels")
     )
 
-    processed = main._process_wps_feature(
-        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
-    )
+    processed = main._process_wps_feature(xrdarr, wps_data.VariableConfig())
 
     expected = [[10, 20], [30, 40]]
     # Expected arr will also have lat/lon axis swapped
     numpy.testing.assert_array_equal(numpy.swapaxes(expected, 0, 1), processed)
 
 
-@mock.patch.dict(main.wps_data.ML_REQUIRED_VARS_REPO, {"GREENFRAC": {}}, clear=True)
 def test_process_wps_feature_extract_monthly_climate_map_dim():
     arr = numpy.array([[[[10, 1], [20, 2]], [[30, 3], [40, 4]]]], dtype=numpy.float32)
     xrdarr = xarray.DataArray(
@@ -530,9 +526,7 @@ def test_process_wps_feature_extract_monthly_climate_map_dim():
         coords={"Time": [b"2010-02-02_18:00:00"]},
     )
 
-    processed = main._process_wps_feature(
-        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("GREENFRAC")
-    )
+    processed = main._process_wps_feature(xrdarr, wps_data.VariableConfig())
 
     # Since dataset datetime is February (2), then the corresponding index to select
     # from z-dimension0012 will be 1
@@ -541,15 +535,6 @@ def test_process_wps_feature_extract_monthly_climate_map_dim():
     numpy.testing.assert_array_equal(numpy.swapaxes(expected, 0, 1), processed)
 
 
-@mock.patch.dict(
-    main.wps_data.ML_REQUIRED_VARS_REPO,
-    {
-        "RH": {
-            "unit": wps_data.Unit.PERCENTAGE,
-        },
-    },
-    clear=True,
-)
 def test_process_wps_feature_convert_percent_to_decimal():
     arr = numpy.array([[[32.45, 15.11], [73.74, 33.21]]], dtype=numpy.float32)
     xrdarr = xarray.DataArray(
@@ -563,7 +548,7 @@ def test_process_wps_feature_convert_percent_to_decimal():
     )
 
     processed = main._process_wps_feature(
-        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("RH")
+        xrdarr, wps_data.ML_REQUIRED_VARS_REPO[wps_data.Variable.RH]
     )
 
     expected = [[0.3245, 0.1511], [0.7374, 0.3321]]
@@ -571,19 +556,6 @@ def test_process_wps_feature_convert_percent_to_decimal():
     numpy.testing.assert_array_almost_equal(numpy.swapaxes(expected, 0, 1), processed)
 
 
-@mock.patch.dict(
-    main.wps_data.ML_REQUIRED_VARS_REPO,
-    {
-        "PRES": {
-            "scaling": {
-                "type": wps_data.ScalingType.GLOBAL,
-                "min": 98000,
-                "max": 121590,
-            }
-        },
-    },
-    clear=True,
-)
 def test_process_wps_feature_apply_minmax_scaler():
     arr = numpy.array([[[111222, 555555], [121590, 12]]], dtype=numpy.float32)
     xrdarr = xarray.DataArray(
@@ -593,7 +565,14 @@ def test_process_wps_feature_apply_minmax_scaler():
     )
 
     processed = main._process_wps_feature(
-        xrdarr, wps_data.ML_REQUIRED_VARS_REPO.get("PRES")
+        xrdarr,
+        wps_data.VariableConfig(
+            scaling=wps_data.ScalingConfig(
+                type=wps_data.ScalingType.GLOBAL,
+                min=98000,
+                max=121590,
+            )
+        ),
     )
 
     expected = [[0.56, 1], [1, 0]]

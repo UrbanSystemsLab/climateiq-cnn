@@ -976,7 +976,8 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
 
         # Apply feature engineering and build features matrix
         features_components = [None] * len(wps_data.Variable)
-        for var in wps_data.Variable:
+        print("len(wps_data.Variable)", len(wps_data.Variable))
+        for var in wps_data.ML_REQUIRED_VARS_REPO.keys():
             feature = _process_wps_feature(
                 feature=ds.data_vars[var.name],
                 var_config=wps_data.ML_REQUIRED_VARS_REPO[var],
@@ -1120,7 +1121,9 @@ def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
     return dataset
 
 
-def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray:
+def _process_wps_feature(
+    feature: xarray.DataArray, var_config: wps_data.VariableConfig
+) -> NDArray:
     """Performs a series of data transforms on a WPS variable.
 
     Args:

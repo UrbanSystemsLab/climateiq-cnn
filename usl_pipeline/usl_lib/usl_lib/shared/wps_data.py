@@ -71,7 +71,7 @@ class ScalingConfig(TypedDict, total=False):
     max: float
 
 
-class VariableConfig(TypedDict):
+class VariableConfig(TypedDict, total=False):
     unit: Unit
     scaling: ScalingConfig
 
