@@ -40,7 +40,7 @@ def test_load_elevation_from_geotiff_default_no_data():
             y_ll_corner=496.0,
             cell_size=2.0,
             nodata_value=0.0,
-            crs=rasterio.CRS({"init": "EPSG:4326"}),
+            crs=rasterio.CRS.from_epsg(4326),
         )
         testing.assert_array_equal(
             elevation.data,
@@ -49,7 +49,7 @@ def test_load_elevation_from_geotiff_default_no_data():
                 [3.0, 4.0, 5.0],
             ],
         )
-        assert not elevation.header.crs.is_geographic
+        assert elevation.header.crs.is_geographic
 
 
 def test_load_elevation_from_geotiff_with_changed_no_data():
