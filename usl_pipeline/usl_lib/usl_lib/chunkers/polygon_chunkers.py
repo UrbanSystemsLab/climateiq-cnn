@@ -126,12 +126,13 @@ def split_polygons_into_chunks(
             )
     return chunk_descriptors
 
+
 def chunk_polygons(
     elevation_header: geo_data.ElevationHeader,
     chunk_size: int,
     polygon_masks: Iterable[Tuple[geometry.Polygon, int]],
     chunk_additional_border_cells: int = 0,
-) -> list[chunkers_data.ChunkDescriptor]:
+) -> list[list[list[Tuple[geometry.Polygon, int]]]]:
     """Writes polygon chunk files based on source with polygons and chunk structure.
 
     Args:
@@ -142,7 +143,7 @@ def chunk_polygons(
             by in all 4 sides (up, down, left, right).
 
     Returns:
-        List of.
+        List of chunked polygons.
     """
     global_col_count = elevation_header.col_count
     global_row_count = elevation_header.row_count
@@ -152,7 +153,7 @@ def chunk_polygons(
     step = elevation_header.cell_size
     chunk_bboxes: list[list[geo_data.BoundingBox]] = []
     chunk_polygons: list[list[list[Tuple[geometry.Polygon, int]]]] = []
-    chunked_polygons = []
+    chunked_polygons: list[list[list[Tuple[geometry.Polygon, int]]]] = []
     for y_chunk_index in range(0, y_chunk_count):
         chunk_bboxes.append([])
         chunk_polygons.append([])
@@ -181,7 +182,6 @@ def chunk_polygons(
     for y_chunk_index in range(0, y_chunk_count):
         for x_chunk_index in range(0, x_chunk_count):
             polygons_for_chunk = chunk_polygons[y_chunk_index][x_chunk_index]
-            if len(polygons_for_chunk) >0:
+            if len(polygons_for_chunk) > 0:
                 chunked_polygons.extend(polygons_for_chunk)
     return chunked_polygons
-

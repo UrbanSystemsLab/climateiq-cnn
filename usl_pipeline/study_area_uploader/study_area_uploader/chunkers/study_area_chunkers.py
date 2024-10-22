@@ -19,6 +19,7 @@ from usl_lib.transformers import soil_classes_transformers
 from usl_lib.writers import elevation_writers
 import numpy as np
 
+
 def _chunk_polygons_if_present(
     elevation_header: geo_data.ElevationHeader,
     chunk_size: int,
@@ -183,6 +184,7 @@ def build_and_upload_chunks(
             f"{study_area_name}/{chunk_file_name}.tar"
         ).upload_from_file(tar_fd)
 
+
 def _add_chunk_to_dir_if_present(
     chunks_dir: pathlib.Path | None,
     chunk_dir_name: str,
@@ -193,14 +195,18 @@ def _add_chunk_to_dir_if_present(
 ):
     """Copy new entry to folder."""
     if chunks_dir is not None:
-        shutil.copy(str(chunks_dir / chunk_dir_name), destination_path.absolute().as_posix())
-        blob = study_area_chunk_bucket.blob(f"{study_area_name}/{chunk_dir_name}/{file_name}")
+        shutil.copy(str(chunks_dir / chunk_dir_name), 
+                    destination_path.absolute().as_posix())
+        blob_name = f"{study_area_name}/{chunk_dir_name}/{file_name}"
+        blob = study_area_chunk_bucket.blob(blob_name)
         blob.upload_from_filename(str(chunks_dir / chunk_dir_name))
 
-def check_threshold(chunk_elevation_data,chunk_size, nodata_value):
+
+def check_threshold(chunk_elevation_data, chunk_size, nodata_value):
     count = np.count_nonzero(chunk_elevation_data == nodata_value)
     total_count = chunk_size ** chunk_elevation_data.ndim
     return count/total_count
+
 
 def build_and_upload_chunks_citycat(
     study_area_name: str,
@@ -267,11 +273,13 @@ def build_and_upload_chunks_citycat(
                     header,
                     input_data.green_areas_polygons,
                     input_data.soil_classes_polygons,
-                    non_green_area_soil_classes={study_area_transformers.DEFAULT_NON_GREEN_AREA_SOIL_CLASS},
+                    non_green_area_soil_classes=
+                    {study_area_transformers.DEFAULT_NON_GREEN_AREA_SOIL_CLASS},
                 )
     )
     green_areas_transformed_chunks_dir = _chunk_polygons_if_present(
-        header, chunk_size, green_areas_polygons_transformed, work_dir, "green_areas_transformed",True
+        header, chunk_size, green_areas_polygons_transformed, work_dir, 
+        "green_areas_transformed", True
     )
 
     for elevation_chunk_descriptor in elevation_chunk_descriptors:
@@ -287,8 +295,9 @@ def build_and_upload_chunks_citycat(
                 band=input_elevation_band,
                 no_data_value=default_nodata_value,
             )
-        
-        null_ratio = check_threshold(chunk_elevation.data, chunk_size, default_nodata_value)
+        null_ratio = check_threshold(chunk_elevation.data, 
+                                     chunk_size, 
+                                     default_nodata_value)
         # Padding the chunk size to guarantee chunk_size defined by a caller for both
         # X and Y axis (padding is done by filling in NODATA values).
         if (
@@ -313,7 +322,8 @@ def build_and_upload_chunks_citycat(
         if null_ratio < 0.5 :
             elevation_asc_file_path = elevation_chunks_dir.joinpath(chunk_file_name)
             with open(elevation_asc_file_path, "wt") as output_file:
-                elevation_writers.write_to_esri_ascii_raster_file(chunk_elevation, output_file)
+                elevation_writers.write_to_esri_ascii_raster_file(chunk_elevation, 
+                                                                  output_file)
         
             chunk_output_dir = chunked_output_dir / chunk_file_name
             chunk_output_dir.mkdir(parents=True, exist_ok=True)
@@ -321,42 +331,48 @@ def build_and_upload_chunks_citycat(
             _add_chunk_to_dir_if_present(elevation_chunks_dir,
                                          chunk_file_name,
                                          file_names.CITYCAT_ELEVATION_ASC,
-                                         chunk_output_dir.joinpath(file_names.CITYCAT_ELEVATION_ASC),
+                                         chunk_output_dir.joinpath(
+                                             file_names.CITYCAT_ELEVATION_ASC),
                                          study_area_name,
                                          study_area_chunk_bucket
                                          )
             _add_chunk_to_dir_if_present(boundaries_chunks_dir,
                                          chunk_file_name,
                                          file_names.BOUNDARIES_TXT,
-                                         chunk_output_dir.joinpath(file_names.BOUNDARIES_TXT),
+                                         chunk_output_dir.joinpath(
+                                             file_names.BOUNDARIES_TXT),
                                          study_area_name,
                                          study_area_chunk_bucket
                                          )
             _add_chunk_to_dir_if_present(buildings_chunks_dir,
                                          chunk_file_name,
                                          file_names.BUILDINGS_TXT,
-                                         chunk_output_dir.joinpath(file_names.BUILDINGS_TXT),
+                                         chunk_output_dir.joinpath(
+                                             file_names.BUILDINGS_TXT),
                                          study_area_name,
                                          study_area_chunk_bucket
                                          )
             _add_chunk_to_dir_if_present(green_areas_chunks_dir,
                                          chunk_file_name,
                                          file_names.GREEN_AREAS_TXT,
-                                         chunk_output_dir.joinpath(file_names.GREEN_AREAS_TXT),
+                                         chunk_output_dir.joinpath(
+                                             file_names.GREEN_AREAS_TXT),
                                          study_area_name,
                                          study_area_chunk_bucket
                                          )
             _add_chunk_to_dir_if_present(soil_classes_chunks_dir,
                                          chunk_file_name,
                                          file_names.SOIL_CLASSES_TXT,
-                                         chunk_output_dir.joinpath(file_names.SOIL_CLASSES_TXT),
+                                         chunk_output_dir.joinpath(
+                                             file_names.SOIL_CLASSES_TXT),
                                          study_area_name,
                                          study_area_chunk_bucket
                                          )
             _add_chunk_to_dir_if_present(green_areas_transformed_chunks_dir,
                                          chunk_file_name,
                                          file_names.CITYCAT_SPATIAL_GREEN_AREAS_TXT,
-                                         chunk_output_dir.joinpath(file_names.CITYCAT_SPATIAL_GREEN_AREAS_TXT),
+                                         chunk_output_dir.joinpath(
+                                             file_names.CITYCAT_SPATIAL_GREEN_AREAS_TXT),
                                          study_area_name,
                                          study_area_chunk_bucket
                                          )
