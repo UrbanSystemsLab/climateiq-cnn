@@ -22,7 +22,7 @@ def test_happy_path(
     mock_prepare_and_upload_study_area_files,
     mock_prepare_and_upload_citycat_input_files,
     mock_build_and_upload_chunks_citycat,
-    mock_build_and_upload_chunks
+    mock_build_and_upload_chunks,
 ):
     """Ensure study area files are uploaded, metadata is stored and chunks are made."""
     study_area_name = "TestStudyArea"
@@ -57,7 +57,7 @@ def test_happy_path(
         citycat_bucket_mock,
         citycat_chunked_bucket_mock,
         chunk_bucket_mock,
-        feature_bucket_mock
+        feature_bucket_mock,
     ]
     mock_storage_client.reset_mock()
 
