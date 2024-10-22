@@ -7,6 +7,7 @@ from usl_lib.storage import cloud_storage
 
 
 @mock.patch.object(main.study_area_chunkers, "build_and_upload_chunks")
+@mock.patch.object(main.study_area_chunkers, "build_and_upload_chunks_citycat")
 @mock.patch.object(
     main.study_area_transformers, "prepare_and_upload_citycat_input_files"
 )
@@ -20,7 +21,8 @@ def test_happy_path(
     mock_parse_args_func,
     mock_prepare_and_upload_study_area_files,
     mock_prepare_and_upload_citycat_input_files,
-    mock_build_and_upload_chunks,
+    mock_build_and_upload_chunks_citycat,
+    mock_build_and_upload_chunks
 ):
     """Ensure study area files are uploaded, metadata is stored and chunks are made."""
     study_area_name = "TestStudyArea"
@@ -49,11 +51,13 @@ def test_happy_path(
     citycat_bucket_mock = mock.MagicMock()
     chunk_bucket_mock = mock.MagicMock()
     feature_bucket_mock = mock.MagicMock()
+    citycat_chunked_bucket_mock = mock.MagicMock()
     mock_storage_client().bucket.side_effect = [
         study_area_bucket_mock,
         citycat_bucket_mock,
+        citycat_chunked_bucket_mock,
         chunk_bucket_mock,
-        feature_bucket_mock,
+        feature_bucket_mock
     ]
     mock_storage_client.reset_mock()
 
@@ -81,6 +85,7 @@ def test_happy_path(
         [
             mock.call().bucket(cloud_storage.STUDY_AREA_BUCKET),
             mock.call().bucket(cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET),
+            mock.call().bucket(cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET_CHUNKED),
             mock.call().bucket(cloud_storage.STUDY_AREA_CHUNKS_BUCKET),
             mock.call().bucket(cloud_storage.FEATURE_CHUNKS_BUCKET),
         ]
@@ -110,6 +115,15 @@ def test_happy_path(
         mock.ANY,
         citycat_bucket_mock,
         elevation_geotiff_band=1,
+    )
+
+    mock_build_and_upload_chunks_citycat.assert_called_once_with(
+        study_area_name,
+        prepared_inputs,
+        mock.ANY,
+        citycat_chunked_bucket_mock,
+        1000,
+        input_elevation_band=1,
     )
 
     mock_build_and_upload_chunks.assert_called_once_with(
