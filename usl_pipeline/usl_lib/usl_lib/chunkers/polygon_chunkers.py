@@ -1,5 +1,5 @@
 import pathlib
-from typing import Iterable, Tuple
+from typing import Any, Iterable, Tuple
 
 from shapely import geometry
 
@@ -132,7 +132,7 @@ def chunk_polygons(
     chunk_size: int,
     polygon_masks: Iterable[Tuple[geometry.Polygon, int]],
     chunk_additional_border_cells: int = 0,
-) -> list[list[list[Tuple[geometry.Polygon, int]]]]:
+) -> list[tuple[Any, int]]:
     """Writes polygon chunk files based on source with polygons and chunk structure.
 
     Args:
@@ -153,7 +153,7 @@ def chunk_polygons(
     step = elevation_header.cell_size
     chunk_bboxes: list[list[geo_data.BoundingBox]] = []
     chunk_polygons: list[list[list[Tuple[geometry.Polygon, int]]]] = []
-    chunked_polygons: list[list[list[Tuple[geometry.Polygon, int]]]] = []
+    chunked_polygons = []
     for y_chunk_index in range(0, y_chunk_count):
         chunk_bboxes.append([])
         chunk_polygons.append([])
