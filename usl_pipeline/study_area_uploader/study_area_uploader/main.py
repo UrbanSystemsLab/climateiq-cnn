@@ -41,6 +41,9 @@ def main() -> None:
         citycat_bucket = storage_client.bucket(
             cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET
         )
+        citycat_bucket_chunked = storage_client.bucket(
+            cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET_CHUNKED
+        )
         if not _check_and_delete_storage_files_with_prefix(
             citycat_bucket, study_area_file_prefix, overwrite
         ):
@@ -84,6 +87,14 @@ def main() -> None:
                 citycat_bucket,
                 elevation_geotiff_band=args.elevation_geotiff_band,
             )
+            study_area_chunkers.build_and_upload_chunks_citycat(
+                args.name,
+                prepared_inputs,
+                work_dir,
+                citycat_bucket_chunked,
+                1000,
+                input_elevation_band=args.elevation_geotiff_band,
+            )
 
         # Wait till study area metadata is registered by cloud_function triggered by
         # elevation file storing event in study_area_bucket.
@@ -106,7 +117,7 @@ def main() -> None:
         study_area_chunkers.build_and_upload_chunks(
             args.name,
             prepared_inputs,
-            work_dir,
+            pathlib.Path(),
             chunk_bucket,
             1000,
             input_elevation_band=args.elevation_geotiff_band,

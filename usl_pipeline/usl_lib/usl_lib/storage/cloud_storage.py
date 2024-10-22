@@ -10,6 +10,9 @@ FEATURE_CHUNKS_BUCKET = (
 FLOOD_SIMULATION_INPUT_BUCKET = (
     os.environ.get("BUCKET_PREFIX", "") + "climateiq-flood-simulation-input"
 )
+FLOOD_SIMULATION_INPUT_BUCKET_CHUNKED = (
+    os.environ.get("BUCKET_PREFIX", "") + "climateiq-flood-simulation-input-chunked"
+)
 FLOOD_SIMULATION_CONFIG_BUCKET = (
     os.environ.get("BUCKET_PREFIX", "") + "climateiq-flood-simulation-config"
 )
