@@ -852,7 +852,7 @@ def test_build_and_upload_study_area_chunk(
     lat_vals = [40, 45]
     long_vals = [-79, -80]
     cell_size = 500
-    source_crs = "EPSG:32618"
+    source_crs = "EPSG:4326"
 
     # Create an in-memory netcdf file and grab its bytes
     ncfile = netCDF4.Dataset(
@@ -1021,7 +1021,7 @@ def test_build_and_upload_study_area_chunk_handles_subfolders(
     lat_vals = [40, 45]
     long_vals = [-79, -80]
     cell_size = 500
-    source_crs = "EPSG:32618"
+    source_crs = "EPSG:4326"
 
     # Create an in-memory netcdf file and grab its bytes
     ncfile = netCDF4.Dataset(
@@ -1124,7 +1124,7 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
             "y_ll_corner": 2.0,
             "cell_size": 1.0,
             "nodata_value": 0.0,
-            "crs": "EPSG:32618"
+            "crs": "EPSG:4326"
             }
             """
         )
@@ -1179,7 +1179,7 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
                     "x_ll_corner": 0.0,
                     "y_ll_corner": 2.0,
                     "cell_size": 1.0,
-                    "crs": "EPSG:32618",
+                    "crs": "EPSG:4326",
                     "state": metastore.StudyAreaState.INIT,
                 }
             ),

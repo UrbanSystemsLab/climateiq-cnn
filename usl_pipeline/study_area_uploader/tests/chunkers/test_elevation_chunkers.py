@@ -28,7 +28,7 @@ def prepare_test_geotiff_elevation_file(file_path: str) -> None:
         width=3,
         height=3,
         count=1,
-        crs=rasterio.CRS.from_epsg(32618),
+        crs=rasterio.CRS.from_epsg(4326),
         transform=rasterio.Affine(2.0, 0.0, 10.0, 0.0, -2.0, 20.0),
     ) as raster:
         raster.write(tiff_array.astype(rasterio.float32), 1)
@@ -91,7 +91,7 @@ def test_split_geotiff_into_chunks() -> None:
                     y_ll_corner=16.0,
                     cell_size=2.0,
                     nodata_value=0.0,
-                    crs=rasterio.CRS({"init": "EPSG:32618"}),
+                    crs=rasterio.CRS({"init": "EPSG:4326"}),
                 ),
                 [[0.0, 1.0], [3.0, 4.0]],
             )
@@ -108,7 +108,7 @@ def test_split_geotiff_into_chunks() -> None:
                     y_ll_corner=16.0,
                     cell_size=2.0,
                     nodata_value=0.0,
-                    crs=rasterio.CRS({"init": "EPSG:32618"}),
+                    crs=rasterio.CRS({"init": "EPSG:4326"}),
                 ),
                 [[2.0], [5.0]],
             )
@@ -125,7 +125,7 @@ def test_split_geotiff_into_chunks() -> None:
                     y_ll_corner=14.0,
                     cell_size=2.0,
                     nodata_value=0.0,
-                    crs=rasterio.CRS({"init": "EPSG:32618"}),
+                    crs=rasterio.CRS({"init": "EPSG:4326"}),
                 ),
                 [[6.0, 7.0]],
             )
@@ -142,7 +142,7 @@ def test_split_geotiff_into_chunks() -> None:
                     y_ll_corner=14.0,
                     cell_size=2.0,
                     nodata_value=0.0,
-                    crs=rasterio.CRS({"init": "EPSG:32618"}),
+                    crs=rasterio.CRS({"init": "EPSG:4326"}),
                 ),
                 [[8.0]],
             )
