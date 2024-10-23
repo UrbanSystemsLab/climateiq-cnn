@@ -5,15 +5,17 @@ New variables should be added to the end of the list.
 """
 
 from typing import TypedDict
-from enum import Enum
+from enum import Enum, unique
 
 
+@unique
 class ScalingType(Enum):
     NONE = 1
     GLOBAL = 2
     LOCAL = 3
 
 
+@unique
 class Unit(Enum):
     NONE = 1
     PASCALS = 2
@@ -24,7 +26,28 @@ class Unit(Enum):
     METERSPERSEC = 7
 
 
-class Variable(Enum):
+class ScalingConfig(TypedDict, total=False):
+    type: ScalingType
+    min: float
+    max: float
+
+
+class VarConfig(TypedDict, total=False):
+    unit: Unit
+    scaling: ScalingConfig
+
+
+class VarType(Enum):
+    """WPS Variable type"""
+
+    SPATIOTEMPORAL = "spatiotemporal"
+    SPATIAL = "spatial"
+    LU_INDEX = "lu_index"
+
+
+class Var(Enum):
+    """WPS Variables used by the ML model."""
+
     PRES = 0
     GHT = 1
     RH = 2
@@ -65,20 +88,56 @@ class Variable(Enum):
     SOLAR_TIME_COS = 37
 
 
-class ScalingConfig(TypedDict, total=False):
-    type: ScalingType
-    min: float
-    max: float
+# Spatiotemporal variables used by the ML model (dimension H X W X T)
+ML_REQUIRED_VARS: dict[VarType, list[Var]] = {
+    VarType.SPATIOTEMPORAL: [
+        Var.PRES,
+        Var.GHT,
+        Var.RH,
+        Var.TT,
+        Var.LANDUSEF,
+        Var.ALBEDO12M,
+        Var.GREENFRAC,
+        Var.WDIR_SIN,
+        Var.WDIR_COS,
+        Var.LAI12M,
+        Var.SOLAR_TIME_SIN,
+        Var.SOLAR_TIME_COS,
+    ],
+    VarType.SPATIAL: [
+        Var.HGT_M,
+        Var.WSPD,
+        Var.ST000010,
+        Var.SM000010,
+        Var.BUILD_HEIGHT,
+        Var.HGT_DIST_5m,
+        Var.HGT_DIST_10m,
+        Var.HGT_DIST_15m,
+        Var.HGT_DIST_20m,
+        Var.HGT_DIST_25m,
+        Var.HGT_DIST_30m,
+        Var.HGT_DIST_35m,
+        Var.HGT_DIST_40m,
+        Var.HGT_DIST_45m,
+        Var.HGT_DIST_50m,
+        Var.HGT_DIST_55m,
+        Var.HGT_DIST_60m,
+        Var.HGT_DIST_65m,
+        Var.HGT_DIST_70m,
+        Var.HGT_DIST_75m,
+        Var.AW_BUILD_HEIGHT,
+        Var.STDH_URB2D,
+        Var.BUILDING_AREA_FRACTION,
+        Var.BUILD_SURF_RATIO,
+        Var.FRC_URB2D,
+    ],
+    VarType.LU_INDEX: [Var.LU_INDEX],
+}
 
-
-class VariableConfig(TypedDict, total=False):
-    unit: Unit
-    scaling: ScalingConfig
-
-
-ML_REQUIRED_VARS_REPO = {
+# Configs for each variable.
+VAR_CONFIGS: dict[Var, VarConfig] = {
     # Surface pressure FNL level 0
-    Variable.PRES: VariableConfig(
+    Var.PRES: VarConfig(
         unit=Unit.PASCALS,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -87,7 +146,7 @@ ML_REQUIRED_VARS_REPO = {
         ),
     ),
     # Geopotential height FNL level 0
-    Variable.GHT: VariableConfig(
+    Var.GHT: VarConfig(
         unit=Unit.METERS,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -96,14 +155,14 @@ ML_REQUIRED_VARS_REPO = {
         ),
     ),
     # Relative humidity FNL level 0
-    Variable.RH: VariableConfig(
+    Var.RH: VarConfig(
         unit=Unit.PERCENTAGE,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
         ),
     ),
     # Temperature FNL level 0
-    Variable.TT: VariableConfig(
+    Var.TT: VarConfig(
         unit=Unit.KELVIN,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -112,35 +171,35 @@ ML_REQUIRED_VARS_REPO = {
         ),
     ),
     # LANDUSEF is a percentage of each LU_INDEX category (61)
-    Variable.LANDUSEF: VariableConfig(
+    Var.LANDUSEF: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
         ),
     ),
     # LU_INDEX is 61 cat. LCZ data 1 feature
-    Variable.LU_INDEX: VariableConfig(
+    Var.LU_INDEX: VarConfig(
         unit=Unit.NONE,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
         ),
     ),
     # Monthly Climatology MODIS surface albedo
-    Variable.ALBEDO12M: VariableConfig(
+    Var.ALBEDO12M: VarConfig(
         unit=Unit.PERCENTAGE,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
         ),
     ),
     # Monthly Climatology MODIS green fraction (MODIS FPAR)
-    Variable.GREENFRAC: VariableConfig(
+    Var.GREENFRAC: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
         ),
     ),
     # GMTED2010 30-arc-second topography height
-    Variable.HGT_M: VariableConfig(
+    Var.HGT_M: VarConfig(
         unit=Unit.METERS,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -149,7 +208,7 @@ ML_REQUIRED_VARS_REPO = {
         ),
     ),
     # [Derived] FNL level 0 (~10m) Wind Speed from UU and VV
-    Variable.WSPD: VariableConfig(
+    Var.WSPD: VarConfig(
         unit=Unit.METERSPERSEC,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -159,7 +218,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # [Derived] FNL level 0 (~10m) Wind Direction (Cyclic feature) from UU and VV
     #  Sine Component of WDIR10
-    Variable.WDIR_SIN: VariableConfig(
+    Var.WDIR_SIN: VarConfig(
         unit=Unit.NONE,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -169,7 +228,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # [Derived] FNL level 0 (~10m) Wind Direction (Cyclic feature) from UU and VV
     # Cosine Component of WDIR10
-    Variable.WDIR_COS: VariableConfig(
+    Var.WDIR_COS: VarConfig(
         unit=Unit.NONE,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -178,7 +237,7 @@ ML_REQUIRED_VARS_REPO = {
         ),
     ),
     # Monthly Climatology MODIS Leaf Area Index
-    Variable.LAI12M: VariableConfig(
+    Var.LAI12M: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -188,7 +247,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Soil Temp layer 0-10cm below ground (WPS Initial Condition)
     # THIS IS FOR SUMMER!!! (-10C to 60C)
-    Variable.ST000010: VariableConfig(
+    Var.ST000010: VarConfig(
         unit=Unit.KELVIN,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -197,7 +256,7 @@ ML_REQUIRED_VARS_REPO = {
         ),
     ),
     # Soil Moisture layer 0-10cm below ground (WPS Initial Condition)
-    Variable.SM000010: VariableConfig(
+    Var.SM000010: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -205,7 +264,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP1 mean building height
-    Variable.BUILD_HEIGHT: VariableConfig(
+    Var.BUILD_HEIGHT: VarConfig(
         unit=Unit.METERS,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -215,7 +274,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 0-5m frequency bin
-    Variable.HGT_DIST_5m: VariableConfig(
+    Var.HGT_DIST_5m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -223,7 +282,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 5-10m frequency bin
-    Variable.HGT_DIST_10m: VariableConfig(
+    Var.HGT_DIST_10m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -231,7 +290,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 10-15m frequency bin
-    Variable.HGT_DIST_15m: VariableConfig(
+    Var.HGT_DIST_15m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -239,7 +298,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 15-20m frequency bin
-    Variable.HGT_DIST_20m: VariableConfig(
+    Var.HGT_DIST_20m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -247,7 +306,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 20-25m frequency bin
-    Variable.HGT_DIST_25m: VariableConfig(
+    Var.HGT_DIST_25m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -255,7 +314,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 25-30m frequency bin
-    Variable.HGT_DIST_30m: VariableConfig(
+    Var.HGT_DIST_30m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -263,7 +322,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 30-35m frequency bin
-    Variable.HGT_DIST_35m: VariableConfig(
+    Var.HGT_DIST_35m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -271,7 +330,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 35-40m frequency bin
-    Variable.HGT_DIST_40m: VariableConfig(
+    Var.HGT_DIST_40m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -279,7 +338,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 40-45m frequency bin
-    Variable.HGT_DIST_45m: VariableConfig(
+    Var.HGT_DIST_45m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -287,7 +346,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 45-50m frequency bin
-    Variable.HGT_DIST_50m: VariableConfig(
+    Var.HGT_DIST_50m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -295,7 +354,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 50-55m frequency bin
-    Variable.HGT_DIST_55m: VariableConfig(
+    Var.HGT_DIST_55m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -303,7 +362,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 55-60m frequency bin
-    Variable.HGT_DIST_60m: VariableConfig(
+    Var.HGT_DIST_60m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -311,7 +370,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 60-65m frequency bin
-    Variable.HGT_DIST_65m: VariableConfig(
+    Var.HGT_DIST_65m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -319,7 +378,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 65-70m frequency bin
-    Variable.HGT_DIST_70m: VariableConfig(
+    Var.HGT_DIST_70m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -327,7 +386,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 70-75m frequency bin
-    Variable.HGT_DIST_75m: VariableConfig(
+    Var.HGT_DIST_75m: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -335,7 +394,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP3 Area weighted mean building height
-    Variable.AW_BUILD_HEIGHT: VariableConfig(
+    Var.AW_BUILD_HEIGHT: VarConfig(
         unit=Unit.METERS,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -345,7 +404,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP4 Standard deviation of building height
-    Variable.STDH_URB2D: VariableConfig(
+    Var.STDH_URB2D: VarConfig(
         unit=Unit.METERS,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -355,7 +414,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP5 Plan area fraction
-    Variable.BUILDING_AREA_FRACTION: VariableConfig(
+    Var.BUILDING_AREA_FRACTION: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -363,7 +422,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP6 Building surface to plan area ratio. Update for Very Dense Cities
-    Variable.BUILD_SURF_RATIO: VariableConfig(
+    Var.BUILD_SURF_RATIO: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -373,7 +432,7 @@ ML_REQUIRED_VARS_REPO = {
     ),
     # Custom UCPs for cities.
     # UCP7 Urban fraction
-    Variable.FRC_URB2D: VariableConfig(
+    Var.FRC_URB2D: VarConfig(
         unit=Unit.FRACTION,
         scaling=ScalingConfig(
             type=ScalingType.NONE,
@@ -382,7 +441,7 @@ ML_REQUIRED_VARS_REPO = {
     # [Derived] Solar Time from UTC (Cyclic feature)
     # in Minutes of Day (MIN)
     # Sine Component of Solar Time
-    Variable.SOLAR_TIME_SIN: VariableConfig(
+    Var.SOLAR_TIME_SIN: VarConfig(
         unit=Unit.NONE,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,
@@ -393,7 +452,7 @@ ML_REQUIRED_VARS_REPO = {
     # [Derived] Solar Time from UTC (Cyclic feature)
     # in Minutes of Day (MIN)
     # Cosine Component of Solar Time
-    Variable.SOLAR_TIME_COS: VariableConfig(
+    Var.SOLAR_TIME_COS: VarConfig(
         unit=Unit.NONE,
         scaling=ScalingConfig(
             type=ScalingType.GLOBAL,

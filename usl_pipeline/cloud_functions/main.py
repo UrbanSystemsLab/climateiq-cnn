@@ -622,13 +622,14 @@ def _build_feature_matrix(
     bucket = storage_client.bucket(bucket_name)
     chunk_blob = bucket.blob(chunk_path)
 
-    feature_file_name = pathlib.PurePosixPath(chunk_path).with_suffix(".npy")
-    feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
-
     with chunk_blob.open("rb") as chunk:
         study_area_name, chunk_name = _parse_chunk_path(chunk_path)
         # Flood (CityCat)
         if chunk_path.endswith(".tar"):
+            feature_file_name = pathlib.PurePosixPath(chunk_path).with_suffix(".npy")
+            feature_blob = storage_client.bucket(output_bucket).blob(
+                str(feature_file_name)
+            )
             chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
                 firestore.Client(), study_area_name, chunk_name
             )
@@ -674,9 +675,18 @@ def _build_feature_matrix(
 
         # Heat (WRF) - treat one WPS outout file as one chunk
         elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_path):
-            feature_matrix, metadata = _build_wps_feature_matrix(chunk)
-            _write_as_npy(feature_blob, feature_matrix)
-            _write_wps_chunk_metastore_entry(chunk_blob, feature_blob, metadata)
+            feature_matrices, metadata = _build_wps_feature_matrices(chunk)
+            # Write a separate file for each variable type
+            # (spatial, spatiotemporal, lu_index).
+            for var_type, feature_matrix in feature_matrices.items():
+                feature_file_name = (
+                    pathlib.PurePosixPath(chunk_path).with_suffix("") / var_type.value
+                ).with_suffix(".npy")
+                feature_blob = storage_client.bucket(output_bucket).blob(
+                    str(feature_file_name)
+                )
+                _write_as_npy(feature_blob, feature_matrix)
+                _write_wps_chunk_metastore_entry(chunk_blob, feature_blob, metadata)
         else:
             raise ValueError(f"Unexpected file {chunk_path}")
 
@@ -959,9 +969,12 @@ def _build_flood_feature_matrix_from_archive(
     return None, FeatureMetadata(), None
 
 
-def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+def _build_wps_feature_matrices(
+    fd: IO[bytes],
+) -> Tuple[dict[wps_data.VarType, NDArray], FeatureMetadata]:
     # Ignore type checker error - BytesIO inherits from expected type BufferedIOBase
     # https://shorturl.at/lk4om
+    matrices = {}
     with xarray.open_dataset(fd, engine="h5netcdf") as ds:  # type: ignore
         # Dropp the existing 'Time' coordinate if present, to avoid conflict
         if "Time" in ds.coords:
@@ -974,21 +987,23 @@ def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
         # Derive non-native variables and assign to dataset
         ds = _compute_custom_wps_variables(ds)
 
-        # Apply feature engineering and build features matrix
-        features_components = [numpy.array([])] * len(wps_data.Variable)
-        for var in wps_data.ML_REQUIRED_VARS_REPO.keys():
-            feature = _process_wps_feature(
-                feature=ds.data_vars[var.name],
-                var_config=wps_data.ML_REQUIRED_VARS_REPO[var],
-            )
-            features_components[var.value] = feature
+        for var_type, vars in wps_data.ML_REQUIRED_VARS.items():
+            features_components = [numpy.array([])] * len(wps_data.Var)
 
-        features_matrix = numpy.dstack(features_components)
+            # Apply feature engineering and build features matrix
+            for var in vars:
+                feature = _process_wps_feature(
+                    feature=ds.data_vars[var.name],
+                    var_config=wps_data.VAR_CONFIGS[var],
+                )
+                features_components[var.value] = feature
+
+            matrices[var_type] = numpy.dstack(features_components)
 
         # Get snapshot time
         snapshot_time = ds.Times.values[0].astype(str)
 
-    return features_matrix, FeatureMetadata(
+    return matrices, FeatureMetadata(
         time=datetime.datetime.fromisoformat(snapshot_time)
     )
 
@@ -1121,7 +1136,7 @@ def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
 
 
 def _process_wps_feature(
-    feature: xarray.DataArray, var_config: wps_data.VariableConfig
+    feature: xarray.DataArray, var_config: wps_data.VarConfig
 ) -> NDArray:
     """Performs a series of data transforms on a WPS variable.
 

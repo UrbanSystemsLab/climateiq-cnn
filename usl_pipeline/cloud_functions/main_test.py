@@ -332,7 +332,7 @@ def test_build_feature_matrix_from_archive_elevation_file_missing():
         raise Exception("Expected error never happened")
 
 
-class TestVariable(Enum):
+class TestVar(Enum):
     GHT = 0
     RH = 1
 
@@ -340,14 +340,19 @@ class TestVariable(Enum):
 @mock.patch.object(main.error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
-@mock.patch("main.wps_data.Variable", TestVariable)
+@mock.patch("main.wps_data.Var", TestVar)
 @mock.patch.dict(
-    main.wps_data.ML_REQUIRED_VARS_REPO,
+    main.wps_data.ML_REQUIRED_VARS,
+    {wps_data.VarType.SPATIOTEMPORAL: [TestVar.GHT, TestVar.RH]},
+    clear=True,
+)
+@mock.patch.dict(
+    main.wps_data.VAR_CONFIGS,
     {
-        TestVariable.GHT: wps_data.VariableConfig(
+        TestVar.GHT: wps_data.VarConfig(
             scaling=wps_data.ScalingConfig(type=wps_data.ScalingType.LOCAL)
         ),
-        TestVariable.RH: wps_data.VariableConfig(
+        TestVar.RH: wps_data.VarConfig(
             scaling=wps_data.ScalingConfig(type=wps_data.ScalingType.NONE)
         ),
     },
@@ -375,7 +380,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     lat = ncfile.createVariable("lat", "float32", ("south_north",))
     lon = ncfile.createVariable("lon", "float32", ("west_east",))
     # Create dataset entries for all variables in mock
-    for var in wps_data.ML_REQUIRED_VARS_REPO.keys():
+    for var in wps_data.ML_REQUIRED_VARS[wps_data.VarType.SPATIOTEMPORAL]:
         ncfile.createVariable(var.name, "float32", ("Time", "south_north", "west_east"))
     # Represents var in DS that we don't want to process
     not_required_var = ncfile.createVariable(
@@ -401,7 +406,9 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
 
     # Create a mock blob for feature matrix we will upload.
     mock_feature_blob = mock.MagicMock()
-    mock_feature_blob.name = "study_area/met_em.d03.2010-02-02_18:00:00.npy"
+    mock_feature_blob.name = (
+        "study_area/met_em.d03.2010-02-02_18:00:00/spatiotemporal.npy"
+    )
     mock_feature_blob.bucket.name = "climateiq-study-area-feature-chunks"
 
     # Return the mock blobs.
@@ -428,7 +435,9 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
             mock.call().bucket("bucket"),
             mock.call().bucket().blob("study_area/met_em.d03.2010-02-02_18:00:00.nc"),
             mock.call().bucket("climateiq-study-area-feature-chunks"),
-            mock.call().bucket().blob("study_area/met_em.d03.2010-02-02_18:00:00.npy"),
+            mock.call()
+            .bucket()
+            .blob("study_area/met_em.d03.2010-02-02_18:00:00/spatiotemporal.npy"),
         ]
     )
 
@@ -467,7 +476,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
                     ),
                     "feature_matrix_path": (
                         "gs://climateiq-study-area-feature-chunks/study_area/"
-                        "met_em.d03.2010-02-02_18:00:00.npy"
+                        "met_em.d03.2010-02-02_18:00:00/spatiotemporal.npy"
                     ),
                     "time": datetime.datetime(2010, 2, 2, 18, 0, 0),
                     "error": firestore.DELETE_FIELD,
@@ -482,9 +491,7 @@ def test_process_wps_feature_drop_time_axis():
     arr = numpy.array([[[1, 2], [3, 4]]], dtype=numpy.float32)  # shape=(1,2,2)
     xrdarr = xarray.DataArray(arr, name="RH", dims=("Time", "south_north", "west_east"))
 
-    processed = main._process_wps_feature(
-        xrdarr, wps_data.ML_REQUIRED_VARS_REPO[wps_data.Variable.RH]
-    )
+    processed = main._process_wps_feature(xrdarr, wps_data.VAR_CONFIGS[wps_data.Var.RH])
 
     numpy.testing.assert_equal((2, 2), processed.shape)
 
@@ -497,7 +504,7 @@ def test_process_wps_feature_reorder_spatial_dims():
         arr, name="RH", dims=("Time", "num_metgrid_levels", "south_north", "west_east")
     )
 
-    processed = main._process_wps_feature(xrdarr, wps_data.VariableConfig())
+    processed = main._process_wps_feature(xrdarr, wps_data.VarConfig())
 
     expected = [[10, 30], [20, 40]]
     numpy.testing.assert_array_equal(expected, processed)
@@ -509,7 +516,7 @@ def test_process_wps_feature_extract_fnl_spatial_dim():
         arr, name="RH", dims=("Time", "south_north", "west_east", "num_metgrid_levels")
     )
 
-    processed = main._process_wps_feature(xrdarr, wps_data.VariableConfig())
+    processed = main._process_wps_feature(xrdarr, wps_data.VarConfig())
 
     expected = [[10, 20], [30, 40]]
     # Expected arr will also have lat/lon axis swapped
@@ -525,7 +532,7 @@ def test_process_wps_feature_extract_monthly_climate_map_dim():
         coords={"Time": [b"2010-02-02_18:00:00"]},
     )
 
-    processed = main._process_wps_feature(xrdarr, wps_data.VariableConfig())
+    processed = main._process_wps_feature(xrdarr, wps_data.VarConfig())
 
     # Since dataset datetime is February (2), then the corresponding index to select
     # from z-dimension0012 will be 1
@@ -546,9 +553,7 @@ def test_process_wps_feature_convert_percent_to_decimal():
         ),
     )
 
-    processed = main._process_wps_feature(
-        xrdarr, wps_data.ML_REQUIRED_VARS_REPO[wps_data.Variable.RH]
-    )
+    processed = main._process_wps_feature(xrdarr, wps_data.VAR_CONFIGS[wps_data.Var.RH])
 
     expected = [[0.3245, 0.1511], [0.7374, 0.3321]]
     # Expected arr will also have lat/lon axis swapped
@@ -565,7 +570,7 @@ def test_process_wps_feature_apply_minmax_scaler():
 
     processed = main._process_wps_feature(
         xrdarr,
-        wps_data.VariableConfig(
+        wps_data.VarConfig(
             scaling=wps_data.ScalingConfig(
                 type=wps_data.ScalingType.GLOBAL,
                 min=98000,
