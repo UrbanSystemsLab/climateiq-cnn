@@ -679,9 +679,10 @@ def _build_feature_matrix(
             # Write a separate file for each variable type
             # (spatial, spatiotemporal, lu_index).
             for var_type, feature_matrix in feature_matrices.items():
-                feature_file_name = (
-                    pathlib.PurePosixPath(chunk_path).with_suffix("") / var_type.value
-                ).with_suffix(".npy")
+                feature_folder_name = pathlib.PurePosixPath(chunk_path).with_suffix("")
+                feature_file_name = (feature_folder_name / var_type.value).with_suffix(
+                    ".npy"
+                )
                 feature_blob = storage_client.bucket(output_bucket).blob(
                     str(feature_file_name)
                 )
@@ -988,15 +989,14 @@ def _build_wps_feature_matrices(
         ds = _compute_custom_wps_variables(ds)
 
         for var_type, vars in wps_data.ML_REQUIRED_VARS.items():
-            features_components = [numpy.array([])] * len(wps_data.Var)
+            features_components = [numpy.array([])] * len(vars)
 
             # Apply feature engineering and build features matrix
-            for var in vars:
-                feature = _process_wps_feature(
+            for i, var in enumerate(vars):
+                features_components[i] = _process_wps_feature(
                     feature=ds.data_vars[var.name],
                     var_config=wps_data.VAR_CONFIGS[var],
                 )
-                features_components[var.value] = feature
 
             matrices[var_type] = numpy.dstack(features_components)
 
