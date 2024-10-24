@@ -103,7 +103,6 @@ jobs:
         # Copy wheels folder to current directory for requirements install
         cp -r usl_pipeline/cloud_functions/wheels .
         pip install -r usl_pipeline/cloud_functions/requirements.txt
-        cp -r usl_pipeline/usl_lib/usl_lib usl_pipeline/cloud_functions
         pip install black~=24.0 flake8~=7.0 flake8-docstrings~=1.7 pytest~=8.0 mypy~=1.9
     - name: Lint with flake8
       run: |
