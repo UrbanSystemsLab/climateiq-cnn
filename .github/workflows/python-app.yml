@@ -87,7 +87,7 @@ jobs:
         mypy usl_pipeline/study_area_uploader
 
   cloud_functions:
-    name: Cloud Funcations CI
+    name: Cloud Functions CI
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v3
