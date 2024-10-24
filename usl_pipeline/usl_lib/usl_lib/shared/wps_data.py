@@ -10,6 +10,8 @@ from enum import Enum, unique
 
 @unique
 class ScalingType(Enum):
+    """WPS variable scaling type."""
+
     NONE = 1
     GLOBAL = 2
     LOCAL = 3
@@ -17,6 +19,8 @@ class ScalingType(Enum):
 
 @unique
 class Unit(Enum):
+    """WPS variable unit type."""
+
     NONE = 1
     PASCALS = 2
     METERS = 3
@@ -27,18 +31,22 @@ class Unit(Enum):
 
 
 class ScalingConfig(TypedDict, total=False):
+    """WPS variable scaling config."""
+
     type: ScalingType
     min: float
     max: float
 
 
 class VarConfig(TypedDict, total=False):
+    """WPS variable config."""
+
     unit: Unit
     scaling: ScalingConfig
 
 
 class VarType(Enum):
-    """WPS Variable type"""
+    """WPS variable type."""
 
     SPATIOTEMPORAL = "spatiotemporal"
     SPATIAL = "spatial"
@@ -46,7 +54,7 @@ class VarType(Enum):
 
 
 class Var(Enum):
-    """WPS Variables used by the ML model."""
+    """WPS variables used by the ML model."""
 
     PRES = 0
     GHT = 1
