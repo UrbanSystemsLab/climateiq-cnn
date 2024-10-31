@@ -3,7 +3,7 @@ import io
 import pytest
 from unittest import mock
 from google.cloud import storage  # type: ignore
-from usl_models.atmo_ml.datasets import create_atmo_dataset
+from usl_models.atmo_ml.datasets import create_atmo_dataset, load_prediction_dataset
 from usl_models.atmo_ml import constants
 
 
@@ -83,39 +83,42 @@ def test_create_atmo_dataset(mock_storage_client, mock_firestore_client):
         firestore_client=mock_firestore_client(),
     )
 
-    # Check dataset shapes
-    for data in train_dataset.take(1):
-        inputs, labels = data
-        assert inputs["spatiotemporal"].shape == (
-            batch_size,
-            time_steps_per_day,
-            constants.MAP_HEIGHT,
-            constants.MAP_WIDTH,
-            constants.num_spatiotemporal_features,
-        )
-        assert inputs["spatial"].shape == (
-            batch_size,
-            constants.MAP_HEIGHT,
-            constants.MAP_WIDTH,
-            constants.num_spatial_features,
-        )
-        assert inputs["lu_index"].shape == (
-            batch_size,
-            constants.MAP_HEIGHT * constants.MAP_WIDTH,
-        )
-        assert labels.shape == (
-            batch_size,
-            time_steps_per_day,
-            constants.MAP_HEIGHT,
-            constants.MAP_WIDTH,
-            1,
-        )
+    # Check dataset contents and shapes
+    for dataset in [train_dataset, val_dataset, test_dataset]:
+        assert dataset is not None, "Dataset should not be None"
+        for data in dataset.take(1):
+            inputs, labels = data
+            assert "spatiotemporal" in inputs
+            assert "spatial" in inputs
+            assert "lu_index" in inputs
+            assert inputs["spatiotemporal"].shape == (
+                batch_size,
+                time_steps_per_day,
+                constants.MAP_HEIGHT,
+                constants.MAP_WIDTH,
+                constants.num_spatiotemporal_features,
+            )
+            assert inputs["spatial"].shape == (
+                batch_size,
+                constants.MAP_HEIGHT,
+                constants.MAP_WIDTH,
+                constants.num_spatial_features,
+            )
+            assert inputs["lu_index"].shape == (
+                batch_size,
+                constants.MAP_HEIGHT * constants.MAP_WIDTH,
+            )
+            assert labels.shape == (
+                batch_size,
+                time_steps_per_day,
+                constants.MAP_HEIGHT,
+                constants.MAP_WIDTH,
+                1,
+            )
 
 
 def test_load_prediction_dataset(mock_storage_client, mock_firestore_client):
     """Test loading prediction dataset from GCS."""
-    from usl_models.atmo_ml.datasets import load_prediction_dataset
-
     sim_names = ["simulation_1", "simulation_2"]
     batch_size = 2
 
@@ -159,8 +162,11 @@ def test_load_prediction_dataset(mock_storage_client, mock_firestore_client):
         firestore_client=mock_firestore_client(),
     )
 
-    # Check prediction dataset
+    # Check prediction dataset contents and shapes
     for inputs in dataset.take(1):
+        assert "spatiotemporal" in inputs
+        assert "spatial" in inputs
+        assert "lu_index" in inputs
         assert inputs["spatiotemporal"].shape == (
             batch_size,
             constants.TIME_STEPS_PER_DAY,

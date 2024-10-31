@@ -26,28 +26,86 @@ def load_data_from_cloud(
 
 def load_spatiotemporal_data_from_cloud(
     bucket_name: str,
-    file_name: str,
+    folder_name: str,
     storage_client: storage.Client,
     firestore_client: firestore.Client = None,
 ) -> tf.Tensor:
-    """Load spatiotemporal data from Google Cloud Storage with Firestore logging."""
-    data = load_data_from_cloud(
-        bucket_name, file_name, storage_client, firestore_client
+    """Load all spatiotemporal files from a specified folder in Google Cloud Storage.
+
+    Args:
+        bucket_name (str): Name of the Google Cloud Storage bucket.
+        folder_name (str): Name of the folder containing time step numpy files.
+        storage_client (storage.Client): Google Cloud Storage client instance.
+        firestore_client (firestore.Client, optional): Firestore client for logging,
+            if needed.
+
+    Returns:
+        tf.Tensor: A tensor containing spatiotemporal data across all time steps.
+    """
+    bucket = storage_client.bucket(bucket_name)
+    blobs = bucket.list_blobs(prefix=folder_name)
+
+    # Initialize an empty list to store the data for each time step
+    time_step_data = []
+
+    for blob in blobs:
+        if blob.name.endswith(".npy"):  # Only process .npy files
+            # Use the existing load_data_from_cloud function for each file
+            np_data = load_data_from_cloud(
+                bucket_name=bucket_name,
+                file_name=blob.name,
+                storage_client=storage_client,
+                firestore_client=firestore_client,
+            )
+            time_step_data.append(np_data)
+
+    # Stack all time steps along a new axis to create a tensor
+    spatiotemporal_data = tf.convert_to_tensor(
+        np.stack(time_step_data), dtype=tf.float32
     )
-    return tf.convert_to_tensor(data, dtype=tf.float32)
+    return spatiotemporal_data
 
 
 def load_labels_from_cloud(
     bucket_name: str,
-    file_name: str,
+    folder_name: str,
     storage_client: storage.Client,
     firestore_client: firestore.Client = None,
 ) -> tf.Tensor:
-    """Load labels from Google Cloud Storage with Firestore logging."""
-    labels = load_data_from_cloud(
-        bucket_name, file_name, storage_client, firestore_client
-    )
-    return tf.convert_to_tensor(labels, dtype=tf.float32)
+    """Load all label files from a specified folder in GCS.
+
+    Combine the label data into a single tensor.
+
+    Args:
+        bucket_name (str): Name of the Google Cloud Storage bucket.
+        folder_name (str): Name of the folder containing label numpy files.
+        storage_client (storage.Client): Google Cloud Storage client instance.
+        firestore_client (firestore.Client, optional): Firestore client for logging,
+            if needed.
+
+    Returns:
+        tf.Tensor: A tensor containing label data across all time steps.
+    """
+    bucket = storage_client.bucket(bucket_name)
+    blobs = bucket.list_blobs(prefix=folder_name)
+
+    # Initialize an empty list to store the label data for each time step
+    label_data = []
+
+    for blob in blobs:
+        if blob.name.endswith(".npy"):  # Only process .npy files
+            # Use the existing load_data_from_cloud function for each file
+            np_labels = load_data_from_cloud(
+                bucket_name=bucket_name,
+                file_name=blob.name,
+                storage_client=storage_client,
+                firestore_client=firestore_client,
+            )
+            label_data.append(np_labels)
+
+    # Stack all label data along a new axis to create a tensor
+    labels_tensor = tf.convert_to_tensor(np.stack(label_data), dtype=tf.float32)
+    return labels_tensor
 
 
 def load_lu_index_from_cloud(
