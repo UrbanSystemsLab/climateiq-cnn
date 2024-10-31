@@ -676,18 +676,35 @@ def _build_feature_matrix(
         # Heat (WRF) - treat one WPS outout file as one chunk
         elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_path):
             feature_matrices, metadata = _build_wps_feature_matrices(chunk)
+            feature_folder_base = pathlib.PurePosixPath("Test_Config_Group")
+            # Extract the file name from the chunk_path to use it as the base name
+            base_filename = pathlib.PurePosixPath(chunk_path).stem
+
             # Write a separate file for each variable type
             # (spatial, spatiotemporal, lu_index).
             for var_type, feature_matrix in feature_matrices.items():
-                feature_folder_name = pathlib.PurePosixPath(chunk_path).with_suffix("")
-                feature_file_name = (feature_folder_name / var_type.value).with_suffix(
-                    ".npy"
-                )
-                feature_blob = storage_client.bucket(output_bucket).blob(
-                    str(feature_file_name)
-                )
-                _write_as_npy(feature_blob, feature_matrix)
-                _write_wps_chunk_metastore_entry(chunk_blob, feature_blob, metadata)
+                # Determine the correct sub-folder based on variable type
+                if var_type.value == "spatial":
+                    feature_folder_name = feature_folder_base / "spatial"
+                elif var_type.value == "spatiotemporal":
+                    feature_folder_name = feature_folder_base / "spatiotemporal"
+                elif var_type.value == "lu_index":
+                    feature_folder_name = feature_folder_base / "lu_index"
+                else:
+                    raise ValueError(f"Unexpected variable type: {var_type.value}")
+
+            # Create file name using the extracted base filename
+            feature_file_name = (feature_folder_name / base_filename).with_suffix(
+                ".npy"
+            )
+            # Create a blob in the specified bucket and path
+            feature_blob = storage_client.bucket(output_bucket).blob(
+                str(feature_file_name)
+            )
+            # Write the feature matrix to the blob
+            _write_as_npy(feature_blob, feature_matrix)
+            # Write metadata entry for the chunk
+            _write_wps_chunk_metastore_entry(chunk_blob, feature_blob, metadata)
         else:
             raise ValueError(f"Unexpected file {chunk_path}")
 

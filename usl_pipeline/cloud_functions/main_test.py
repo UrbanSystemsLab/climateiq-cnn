@@ -407,7 +407,7 @@ def test_build_feature_matrix_wrf(mock_storage_client, mock_firestore_client, _)
     # Create a mock blob for feature matrix we will upload.
     mock_feature_blob = mock.MagicMock()
     mock_feature_blob.name = (
-        "study_area/met_em.d03.2010-02-02_18:00:00/spatiotemporal.npy"
+        "study_area/spatiotemporal/met_em.d03.2010-02-02_18:00:00.npy"
     )
     mock_feature_blob.bucket.name = "climateiq-study-area-feature-chunks"
 
