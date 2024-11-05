@@ -679,10 +679,11 @@ def _build_feature_matrix(
             # Write a separate file for each variable type
             # (spatial, spatiotemporal, lu_index).
             for var_type, feature_matrix in feature_matrices.items():
-                feature_folder_name = pathlib.PurePosixPath(chunk_path).with_suffix("")
-                feature_file_name = (feature_folder_name / var_type.value).with_suffix(
-                    ".npy"
-                )
+                feature_path = pathlib.PurePosixPath(chunk_path)
+                feature_path_parent = feature_path.parent
+                feature_file_name = (
+                    feature_path_parent / var_type.value / feature_path.name
+                ).with_suffix(".npy")
                 feature_blob = storage_client.bucket(output_bucket).blob(
                     str(feature_file_name)
                 )
