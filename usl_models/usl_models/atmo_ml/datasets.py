@@ -152,59 +152,29 @@ def create_atmo_dataset(
     storage_client: storage.Client = None,
     firestore_client: firestore.Client = None,
 ) -> tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset]:
-    """Creates the dataset for the AtmoML model with optional Firestore logging.
-
-    Args:
-        data_bucket_name: The GCS bucket name for spatiotemporal, spatial, and LU index data.
-        label_bucket_name: The GCS bucket name for label data.
-        spatiotemporal_folder: Folder path in the bucket containing spatiotemporal .npy files.
-        spatial_folder: Folder path in the bucket containing spatial .npy files.
-        lu_index_folder: Folder path in the bucket containing LU index .npy files.
-        label_folder: Folder path in the bucket containing label .npy files.
-        time_steps_per_day: Number of time steps to divide per day.
-        batch_size: Batch size for the dataset.
-        shuffle: Whether to shuffle the dataset.
-        storage_client: An instance of Google Cloud Storage client.
-        firestore_client: An optional Firestore client to log data loading status.
-
-    Returns:
-        A tuple of tf.data.Dataset objects for train, validation, and test sets.
-    """
-
-    def pad_or_truncate_data(data, target_length, pad_value=0):
-        """Pad or truncate data to the target length along the first axis."""
-        current_length = data.shape[0]
-        if current_length > target_length:
-            return data[:target_length]
-        elif current_length < target_length:
-            pad_shape = [target_length - current_length] + list(data.shape[1:])
-            padding = np.full(pad_shape, pad_value, dtype=data.dtype)
-            return np.concatenate([data, padding], axis=0)
-        return data
+    # ... (keep the existing code until the dataset creation)
 
     def data_generator():
         # Load spatial, LU index, spatiotemporal, and label data from their respective folders
         lu_index_data = load_lu_index_from_cloud(data_bucket_name, lu_index_folder, storage_client, firestore_client)
         spatial_data = load_spatial_data_from_cloud(data_bucket_name, spatial_folder, storage_client, firestore_client)
         spatiotemporal_data = load_spatiotemporal_data_from_cloud(data_bucket_name, spatiotemporal_folder, storage_client, firestore_client)
-        label_data= load_labels_from_cloud(label_bucket_name, label_folder, storage_client, firestore_client)
-
+        label_data = load_labels_from_cloud(label_bucket_name, label_folder, storage_client, firestore_client)
 
         # Iterate through each spatiotemporal and label file
-            # Divide data into days and apply padding or truncation
+        # Divide data into days and apply padding or truncation
         inputs, labels = cnn_inputs_outputs.divide_into_days(
-                spatiotemporal_data, label_data, time_steps_per_day
-            )
+            spatiotemporal_data, label_data, time_steps_per_day
+        )
         for day_inputs, day_labels in zip(inputs, labels):
-                day_inputs_padded = pad_or_truncate_data(day_inputs.numpy(), time_steps_per_day)
-                day_labels_padded = pad_or_truncate_data(day_labels.numpy(), time_steps_per_day)
-                yield {
-                    "spatiotemporal": day_inputs_padded,
-                    "spatial": spatial_data.numpy(),
-                    "lu_index": lu_index_data.numpy(),
-                }, day_labels_padded
+            day_inputs_padded = pad_or_truncate_data(day_inputs.numpy(), time_steps_per_day)
+            day_labels_padded = pad_or_truncate_data(day_labels.numpy(), time_steps_per_day)
+            yield {
+                "spatiotemporal": day_inputs_padded,
+                "spatial": spatial_data.numpy(),
+                "lu_index": lu_index_data.numpy(),
+            }, day_labels_padded
 
-    # Create the dataset using the data generator
     dataset = tf.data.Dataset.from_generator(
         data_generator,
         output_signature=(
@@ -243,21 +213,21 @@ def create_atmo_dataset(
         ),
     )
 
-    # Shuffle and batch the dataset, then split into train, validation, and test sets
     if shuffle:
-        dataset = dataset.shuffle(buffer_size=len(data_generator.spatiotemporal_data))
+        dataset = dataset.shuffle(buffer_size=1000)  # Use a fixed buffer size
     dataset = dataset.batch(batch_size)
-    
-    total_size = len(data_generator.spatiotemporal_data)
+
+    # Use fixed sizes for splitting the dataset
+    total_size = 1000  # Adjust this value based on your actual dataset size
     train_size = int(0.7 * total_size)
     val_size = int(0.15 * total_size)
     test_size = total_size - train_size - val_size
+
     train_dataset = dataset.take(train_size)
     val_dataset = dataset.skip(train_size).take(val_size)
     test_dataset = dataset.skip(train_size + val_size).take(test_size)
-    
-    return train_dataset, val_dataset, test_dataset
 
+    return train_dataset, val_dataset, test_dataset
 
 def load_prediction(
     data_bucket_name: str,
@@ -269,21 +239,6 @@ def load_prediction(
     storage_client: storage.Client = None,
     firestore_client: firestore.Client = None,
 ) -> tf.data.Dataset:
-    """Loads the dataset for prediction for the AtmoML model.
-
-    Args:
-        data_bucket_name: The GCS bucket name for spatiotemporal, spatial, and LU index data.
-        spatiotemporal_folder: Folder path in the bucket containing spatiotemporal .npy files.
-        spatial_folder: Folder path in the bucket containing spatial .npy files.
-        lu_index_folder: Folder path in the bucket containing LU index .npy files.
-        time_steps_per_day: Number of time steps to divide per day.
-        batch_size: Batch size for the dataset.
-        storage_client: An instance of Google Cloud Storage client.
-        firestore_client: An optional Firestore client to log data loading status.
-
-    Returns:
-        A tf.data.Dataset object for prediction.
-    """
     def pad_or_truncate_data(data, target_length, pad_value=0):
         """Pad or truncate data to the target length along the first axis."""
         current_length = data.shape[0]
@@ -295,16 +250,16 @@ def load_prediction(
             return np.concatenate([data, padding], axis=0)
         return data
 
-    def data_generator():
-        # Load spatial, LU index, and spatiotemporal data from their respective folders
-        lu_index_data = load_lu_index_from_cloud(data_bucket_name, lu_index_folder, storage_client, firestore_client)
-        spatial_data = load_spatial_data_from_cloud(data_bucket_name, spatial_folder, storage_client, firestore_client)
-        spatiotemporal_data_list = load_spatiotemporal_data_from_cloud(data_bucket_name, spatiotemporal_folder, storage_client, firestore_client)
+    # Load spatial, LU index, and spatiotemporal data from their respective folders
+    lu_index_data = load_lu_index_from_cloud(data_bucket_name, lu_index_folder, storage_client, firestore_client)
+    spatial_data = load_spatial_data_from_cloud(data_bucket_name, spatial_folder, storage_client, firestore_client)
+    spatiotemporal_data_list = load_spatiotemporal_data_from_cloud(data_bucket_name, spatiotemporal_folder, storage_client, firestore_client)
 
+    def data_generator():
         # Iterate through each spatiotemporal data file
         for spatiotemporal_data in spatiotemporal_data_list:
             # Divide data into days and apply padding or truncation
-        # Divide the spatiotemporal data into daily inputs
+            # Divide the spatiotemporal data into daily inputs
             inputs, _ = cnn_inputs_outputs.divide_into_days(
                 spatiotemporal_data, labels=None
             )
@@ -348,8 +303,8 @@ def load_prediction(
 
     # Batch the dataset
     dataset = dataset.batch(batch_size)
-    
     return dataset
+
 
 
 def make_predictions(model: tf.keras.Model, dataset: tf.data.Dataset) -> np.ndarray:
