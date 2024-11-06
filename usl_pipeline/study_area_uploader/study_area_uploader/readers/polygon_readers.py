@@ -1,7 +1,6 @@
 from enum import StrEnum
 import pathlib
 from typing import Iterable, Tuple
-
 import fiona
 import fiona.crs
 import pyproj

@@ -3,7 +3,7 @@
 ELEVATION_TIF = "elevation.tif"
 HEADER_JSON = "header.json"
 BOUNDARIES_TXT = "boundaries.txt"
-BUILDINGS_TXT = "buildings.txt"
+BUILDINGS_TXT = "Buildings.txt"
 GREEN_AREAS_TXT = "green_areas.txt"
 SOIL_CLASSES_TXT = "soil_classes.txt"
 

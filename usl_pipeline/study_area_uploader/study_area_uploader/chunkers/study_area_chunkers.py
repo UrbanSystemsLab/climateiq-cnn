@@ -325,7 +325,7 @@ def build_and_upload_chunks_citycat(
                 - y_pad * chunk_elevation.header.cell_size
             )
 
-        if null_ratio < 0.5:
+        if null_ratio < 0.9:
             elevation_asc_file_path = elevation_chunks_dir.joinpath(chunk_file_name)
             with open(elevation_asc_file_path, "wt") as output_file:
                 elevation_writers.write_to_esri_ascii_raster_file(
@@ -358,27 +358,34 @@ def build_and_upload_chunks_citycat(
                 study_area_name,
                 study_area_chunk_bucket,
             )
+            # _add_chunk_to_dir_if_present(
+            #     green_areas_chunks_dir,
+            #     chunk_file_name,
+            #     file_names.GREEN_AREAS_TXT,
+            #     chunk_output_dir.joinpath(file_names.GREEN_AREAS_TXT),
+            #     study_area_name,
+            #     study_area_chunk_bucket,
+            # )
+            # _add_chunk_to_dir_if_present(
+            #     soil_classes_chunks_dir,
+            #     chunk_file_name,
+            #     file_names.SOIL_CLASSES_TXT,
+            #     chunk_output_dir.joinpath(file_names.SOIL_CLASSES_TXT),
+            #     study_area_name,
+            #     study_area_chunk_bucket,
+            # )
+            green_areas_file_name = (
+                file_names.CITYCAT_SPATIAL_GREEN_AREAS_TXT
+                if soil_classes_chunks_dir
+                else file_names.GREEN_AREAS_TXT
+            )
+
+            # Add the appropriate green areas file
             _add_chunk_to_dir_if_present(
                 green_areas_chunks_dir,
                 chunk_file_name,
-                file_names.GREEN_AREAS_TXT,
-                chunk_output_dir.joinpath(file_names.GREEN_AREAS_TXT),
-                study_area_name,
-                study_area_chunk_bucket,
-            )
-            _add_chunk_to_dir_if_present(
-                soil_classes_chunks_dir,
-                chunk_file_name,
-                file_names.SOIL_CLASSES_TXT,
-                chunk_output_dir.joinpath(file_names.SOIL_CLASSES_TXT),
-                study_area_name,
-                study_area_chunk_bucket,
-            )
-            _add_chunk_to_dir_if_present(
-                green_areas_transformed_chunks_dir,
-                chunk_file_name,
-                file_names.CITYCAT_SPATIAL_GREEN_AREAS_TXT,
-                chunk_output_dir.joinpath(file_names.CITYCAT_SPATIAL_GREEN_AREAS_TXT),
+                green_areas_file_name,
+                chunk_output_dir.joinpath(green_areas_file_name),
                 study_area_name,
                 study_area_chunk_bucket,
             )

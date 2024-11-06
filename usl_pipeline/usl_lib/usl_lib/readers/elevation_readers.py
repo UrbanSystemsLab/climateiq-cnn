@@ -51,7 +51,7 @@ def read_from_geotiff(
     file: typing.BinaryIO,
     header_only: bool = False,
     band: int = 1,
-    no_data_value: float | None = None,
+    no_data_value: float | None = -9999.0,
 ) -> geo_data.Elevation:
     """Loading elevation raster data from GeoTIFF file/stream.
 
