@@ -151,17 +151,6 @@ def create_atmo_dataset(
     firestore_client: firestore.Client = None,
 ) -> tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset]:
 
-    def pad_or_truncate_data(data, target_length, pad_value=0):
-        """Pad or truncate data to the target length along the first axis."""
-        current_length = data.shape[0]
-        if current_length > target_length:
-            return data[:target_length]
-        elif current_length < target_length:
-            pad_shape = [target_length - current_length] + list(data.shape[1:])
-            padding = np.full(pad_shape, pad_value, dtype=data.dtype)
-            return np.concatenate([data, padding], axis=0)
-        return data
-
     def data_generator():
         # Load spatial, LU index, spatiotemporal, and label from their folders
         lu_index_data = load_lu_index_from_cloud(
@@ -235,17 +224,12 @@ def create_atmo_dataset(
 
     if shuffle:
         dataset = dataset.shuffle(buffer_size=1000)  # Use a fixed buffer size
+
     dataset = dataset.batch(batch_size)
 
-    # Use fixed sizes for splitting the dataset
-    total_size = 1000  # Adjust this value based on your actual dataset size
-    train_size = int(0.7 * total_size)
-    val_size = int(0.15 * total_size)
-    test_size = total_size - train_size - val_size
-
-    train_dataset = dataset.take(train_size)
-    val_dataset = dataset.skip(train_size).take(val_size)
-    test_dataset = dataset.skip(train_size + val_size).take(test_size)
+    train_dataset, val_dataset, test_dataset = split_dataset(
+        dataset, train_frac=0.7, val_frac=0.15, test_frac=0.15
+    )
 
     return train_dataset, val_dataset, test_dataset
 
@@ -260,16 +244,6 @@ def load_prediction(
     storage_client: storage.Client = None,
     firestore_client: firestore.Client = None,
 ) -> tf.data.Dataset:
-    def pad_or_truncate_data(data, target_length, pad_value=0):
-        """Pad or truncate data to the target length along the first axis."""
-        current_length = data.shape[0]
-        if current_length > target_length:
-            return data[:target_length]
-        elif current_length < target_length:
-            pad_shape = [target_length - current_length] + list(data.shape[1:])
-            padding = np.full(pad_shape, pad_value, dtype=data.dtype)
-            return np.concatenate([data, padding], axis=0)
-        return data
 
     # Load spatial, LU index, and spatiotemporal data from their respective folders
     lu_index_data = load_lu_index_from_cloud(
@@ -348,3 +322,41 @@ def make_predictions(model: tf.keras.Model, dataset: tf.data.Dataset) -> np.ndar
     """
     predictions = model.predict(dataset)
     return predictions
+
+
+# Pad or truncate data to a target length along the first axis.
+def pad_or_truncate_data(data, target_length, pad_value=0):
+    """Pad or truncate data to the target length along the first axis."""
+    current_length = data.shape[0]
+    if current_length > target_length:
+        return data[:target_length]
+    elif current_length < target_length:
+        pad_shape = [target_length - current_length] + list(data.shape[1:])
+        padding = np.full(pad_shape, pad_value, dtype=data.dtype)
+        return np.concatenate([data, padding], axis=0)
+    return data
+
+
+def split_dataset(dataset, train_frac=0.7, val_frac=0.15, test_frac=0.15):
+    """Splits a tf.data.Dataset into training, validation, and test sets.
+
+    Args:
+        dataset (tf.data.Dataset): The dataset to split.
+        train_frac (float): Fraction of the dataset to use for training.
+        val_frac (float): Fraction of the dataset to use for validation.
+        test_frac (float): Fraction of the dataset to use for testing.
+
+    Returns:
+        train, validation, and test data.
+    """
+    assert train_frac + val_frac + test_frac == 1, "Fractions must sum to 1."
+
+    total_size = sum(1 for _ in dataset)  # Calculate the total dataset size
+    train_size = int(train_frac * total_size)
+    val_size = int(val_frac * total_size)
+
+    train_dataset = dataset.take(train_size)
+    val_dataset = dataset.skip(train_size).take(val_size)
+    test_dataset = dataset.skip(train_size + val_size)
+
+    return train_dataset, val_dataset, test_dataset

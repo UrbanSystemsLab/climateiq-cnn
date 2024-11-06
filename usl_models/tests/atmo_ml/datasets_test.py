@@ -31,7 +31,7 @@ class TestAtmoMLDataset(unittest.TestCase):
         for i, blob in enumerate(mock_spatiotemporal_blobs):
             spatiotemporal_data = np.random.rand(6, 200, 200, 9).astype(
                 np.float32
-            )  # 6 time steps
+            )  # 6 time steps per inputs
             spatiotemporal_data_bytes = io.BytesIO()
             np.save(spatiotemporal_data_bytes, spatiotemporal_data, allow_pickle=True)
             spatiotemporal_data_bytes.seek(0)
