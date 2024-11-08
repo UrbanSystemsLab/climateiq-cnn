@@ -70,7 +70,6 @@ class Var(Enum):
     LAI12M = 11
     ST000010 = 12
     SM000010 = 13
-    # BUILD_HEIGHT = 14
     HGT_DIST_5m = 14
     HGT_DIST_10m = 15
     HGT_DIST_15m = 16
@@ -89,10 +88,11 @@ class Var(Enum):
     AW_BUILD_HEIGHT = 29
     STDH_URB2D = 30
     BUILDING_AREA_FRACTION = 31
-    # BUILD_SURF_RATIO = 33
     FRC_URB2D = 32
     SOLAR_TIME_SIN = 33
     SOLAR_TIME_COS = 34
+    # BUILD_HEIGHT = 35
+    # BUILD_SURF_RATIO = 36
 
 
 # Spatiotemporal variables used by the ML model (dimension H X W X T)
@@ -115,7 +115,6 @@ ML_REQUIRED_VARS: dict[VarType, list[Var]] = {
         Var.HGT_M,
         Var.ST000010,
         Var.SM000010,
-        # Var.BUILD_HEIGHT,
         Var.HGT_DIST_5m,
         Var.HGT_DIST_10m,
         Var.HGT_DIST_15m,
@@ -134,8 +133,9 @@ ML_REQUIRED_VARS: dict[VarType, list[Var]] = {
         Var.AW_BUILD_HEIGHT,
         Var.STDH_URB2D,
         Var.BUILDING_AREA_FRACTION,
-        # Var.BUILD_SURF_RATIO,
         Var.FRC_URB2D,
+        # Var.BUILD_HEIGHT,
+        # Var.BUILD_SURF_RATIO,
     ],
     VarType.LU_INDEX: [Var.LU_INDEX],
 }
