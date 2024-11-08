@@ -177,12 +177,12 @@ VAR_CONFIGS: dict[Var, VarConfig] = {
         ),
     ),
     # LANDUSEF is a percentage of each LU_INDEX category (61)
-    Var.LANDUSEF: VarConfig(
-        unit=Unit.FRACTION,
-        scaling=ScalingConfig(
-            type=ScalingType.NONE,
-        ),
-    ),
+    # Var.LANDUSEF: VarConfig(
+    #     unit=Unit.FRACTION,
+    #     scaling=ScalingConfig(
+    #         type=ScalingType.NONE,
+    #     ),
+    # ),
     # LU_INDEX is 61 cat. LCZ data 1 feature
     Var.LU_INDEX: VarConfig(
         unit=Unit.NONE,
@@ -270,14 +270,14 @@ VAR_CONFIGS: dict[Var, VarConfig] = {
     ),
     # Custom UCPs for cities.
     # UCP1 mean building height
-    Var.BUILD_HEIGHT: VarConfig(
-        unit=Unit.METERS,
-        scaling=ScalingConfig(
-            type=ScalingType.GLOBAL,
-            min=0,
-            max=150,
-        ),
-    ),
+    # Var.BUILD_HEIGHT: VarConfig(
+    #     unit=Unit.METERS,
+    #     scaling=ScalingConfig(
+    #         type=ScalingType.GLOBAL,
+    #         min=0,
+    #         max=150,
+    #     ),
+    # ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 0-5m frequency bin
     Var.HGT_DIST_5m: VarConfig(
@@ -428,14 +428,14 @@ VAR_CONFIGS: dict[Var, VarConfig] = {
     ),
     # Custom UCPs for cities.
     # UCP6 Building surface to plan area ratio. Update for Very Dense Cities
-    Var.BUILD_SURF_RATIO: VarConfig(
-        unit=Unit.FRACTION,
-        scaling=ScalingConfig(
-            type=ScalingType.NONE,
-            min=0,
-            max=200,
-        ),
-    ),
+    # Var.BUILD_SURF_RATIO: VarConfig(
+    #     unit=Unit.FRACTION,
+    #     scaling=ScalingConfig(
+    #         type=ScalingType.NONE,
+    #         min=0,
+    #         max=200,
+    #     ),
+    # ),
     # Custom UCPs for cities.
     # UCP7 Urban fraction
     Var.FRC_URB2D: VarConfig(
