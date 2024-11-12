@@ -60,40 +60,39 @@ class Var(Enum):
     GHT = 1
     RH = 2
     TT = 3
-    LANDUSEF = 4
-    LU_INDEX = 5
-    ALBEDO12M = 6
-    GREENFRAC = 7
-    HGT_M = 8
-    WSPD = 9
-    WDIR_SIN = 10
-    WDIR_COS = 11
-    LAI12M = 12
-    ST000010 = 13
-    SM000010 = 14
-    BUILD_HEIGHT = 15
-    HGT_DIST_5m = 16
-    HGT_DIST_10m = 17
-    HGT_DIST_15m = 18
-    HGT_DIST_20m = 19
-    HGT_DIST_25m = 20
-    HGT_DIST_30m = 21
-    HGT_DIST_35m = 22
-    HGT_DIST_40m = 23
-    HGT_DIST_45m = 24
-    HGT_DIST_50m = 25
-    HGT_DIST_55m = 26
-    HGT_DIST_60m = 27
-    HGT_DIST_65m = 28
-    HGT_DIST_70m = 29
-    HGT_DIST_75m = 30
-    AW_BUILD_HEIGHT = 31
-    STDH_URB2D = 32
-    BUILDING_AREA_FRACTION = 33
+    LU_INDEX = 4
+    ALBEDO12M = 5
+    GREENFRAC = 6
+    HGT_M = 7
+    WSPD = 8
+    WDIR_SIN = 9
+    WDIR_COS = 10
+    LAI12M = 11
+    ST000010 = 12
+    SM000010 = 13
+    HGT_DIST_5m = 14
+    HGT_DIST_10m = 15
+    HGT_DIST_15m = 16
+    HGT_DIST_20m = 17
+    HGT_DIST_25m = 18
+    HGT_DIST_30m = 19
+    HGT_DIST_35m = 20
+    HGT_DIST_40m = 21
+    HGT_DIST_45m = 22
+    HGT_DIST_50m = 23
+    HGT_DIST_55m = 24
+    HGT_DIST_60m = 25
+    HGT_DIST_65m = 26
+    HGT_DIST_70m = 27
+    HGT_DIST_75m = 28
+    AW_BUILD_HEIGHT = 29
+    BUILDING_AREA_FRACTION = 30
+    FRC_URB2D = 31
+    SOLAR_TIME_SIN = 32
+    SOLAR_TIME_COS = 33
     BUILD_SURF_RATIO = 34
-    FRC_URB2D = 35
-    SOLAR_TIME_SIN = 36
-    SOLAR_TIME_COS = 37
+    # BUILD_HEIGHT = 35
+    # STDH_URB2D = 36
 
 
 # Spatiotemporal variables used by the ML model (dimension H X W X T)
@@ -103,7 +102,7 @@ ML_REQUIRED_VARS: dict[VarType, list[Var]] = {
         Var.GHT,
         Var.RH,
         Var.TT,
-        Var.LANDUSEF,
+        Var.WSPD,
         Var.ALBEDO12M,
         Var.GREENFRAC,
         Var.WDIR_SIN,
@@ -114,10 +113,8 @@ ML_REQUIRED_VARS: dict[VarType, list[Var]] = {
     ],
     VarType.SPATIAL: [
         Var.HGT_M,
-        Var.WSPD,
         Var.ST000010,
         Var.SM000010,
-        Var.BUILD_HEIGHT,
         Var.HGT_DIST_5m,
         Var.HGT_DIST_10m,
         Var.HGT_DIST_15m,
@@ -134,10 +131,11 @@ ML_REQUIRED_VARS: dict[VarType, list[Var]] = {
         Var.HGT_DIST_70m,
         Var.HGT_DIST_75m,
         Var.AW_BUILD_HEIGHT,
-        Var.STDH_URB2D,
         Var.BUILDING_AREA_FRACTION,
-        Var.BUILD_SURF_RATIO,
         Var.FRC_URB2D,
+        Var.BUILD_SURF_RATIO,
+        # Var.BUILD_HEIGHT,
+        # Var.STDH_URB2D,
     ],
     VarType.LU_INDEX: [Var.LU_INDEX],
 }
@@ -179,12 +177,12 @@ VAR_CONFIGS: dict[Var, VarConfig] = {
         ),
     ),
     # LANDUSEF is a percentage of each LU_INDEX category (61)
-    Var.LANDUSEF: VarConfig(
-        unit=Unit.FRACTION,
-        scaling=ScalingConfig(
-            type=ScalingType.NONE,
-        ),
-    ),
+    # Var.LANDUSEF: VarConfig(
+    #     unit=Unit.FRACTION,
+    #     scaling=ScalingConfig(
+    #         type=ScalingType.NONE,
+    #     ),
+    # ),
     # LU_INDEX is 61 cat. LCZ data 1 feature
     Var.LU_INDEX: VarConfig(
         unit=Unit.NONE,
@@ -272,14 +270,14 @@ VAR_CONFIGS: dict[Var, VarConfig] = {
     ),
     # Custom UCPs for cities.
     # UCP1 mean building height
-    Var.BUILD_HEIGHT: VarConfig(
-        unit=Unit.METERS,
-        scaling=ScalingConfig(
-            type=ScalingType.GLOBAL,
-            min=0,
-            max=150,
-        ),
-    ),
+    # Var.BUILD_HEIGHT: VarConfig(
+    #     unit=Unit.METERS,
+    #     scaling=ScalingConfig(
+    #         type=ScalingType.GLOBAL,
+    #         min=0,
+    #         max=150,
+    #     ),
+    # ),
     # Custom UCPs for cities.
     # UCP2 Distribution of building heights 0-5m frequency bin
     Var.HGT_DIST_5m: VarConfig(
@@ -412,14 +410,14 @@ VAR_CONFIGS: dict[Var, VarConfig] = {
     ),
     # Custom UCPs for cities.
     # UCP4 Standard deviation of building height
-    Var.STDH_URB2D: VarConfig(
-        unit=Unit.METERS,
-        scaling=ScalingConfig(
-            type=ScalingType.GLOBAL,
-            min=0,
-            max=200,
-        ),
-    ),
+    # Var.STDH_URB2D: VarConfig(
+    #     unit=Unit.METERS,
+    #     scaling=ScalingConfig(
+    #         type=ScalingType.GLOBAL,
+    #         min=0,
+    #         max=200,
+    #     ),
+    # ),
     # Custom UCPs for cities.
     # UCP5 Plan area fraction
     Var.BUILDING_AREA_FRACTION: VarConfig(
