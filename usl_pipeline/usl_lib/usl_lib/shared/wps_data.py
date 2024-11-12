@@ -86,13 +86,13 @@ class Var(Enum):
     HGT_DIST_70m = 27
     HGT_DIST_75m = 28
     AW_BUILD_HEIGHT = 29
-    STDH_URB2D = 30
-    BUILDING_AREA_FRACTION = 31
-    FRC_URB2D = 32
-    SOLAR_TIME_SIN = 33
-    SOLAR_TIME_COS = 34
+    BUILDING_AREA_FRACTION = 30
+    FRC_URB2D = 31
+    SOLAR_TIME_SIN = 32
+    SOLAR_TIME_COS = 33
+    BUILD_SURF_RATIO = 34
     # BUILD_HEIGHT = 35
-    # BUILD_SURF_RATIO = 36
+    # STDH_URB2D = 36
 
 
 # Spatiotemporal variables used by the ML model (dimension H X W X T)
@@ -131,11 +131,11 @@ ML_REQUIRED_VARS: dict[VarType, list[Var]] = {
         Var.HGT_DIST_70m,
         Var.HGT_DIST_75m,
         Var.AW_BUILD_HEIGHT,
-        Var.STDH_URB2D,
         Var.BUILDING_AREA_FRACTION,
         Var.FRC_URB2D,
+        Var.BUILD_SURF_RATIO,
         # Var.BUILD_HEIGHT,
-        # Var.BUILD_SURF_RATIO,
+        # Var.STDH_URB2D,
     ],
     VarType.LU_INDEX: [Var.LU_INDEX],
 }
@@ -410,14 +410,14 @@ VAR_CONFIGS: dict[Var, VarConfig] = {
     ),
     # Custom UCPs for cities.
     # UCP4 Standard deviation of building height
-    Var.STDH_URB2D: VarConfig(
-        unit=Unit.METERS,
-        scaling=ScalingConfig(
-            type=ScalingType.GLOBAL,
-            min=0,
-            max=200,
-        ),
-    ),
+    # Var.STDH_URB2D: VarConfig(
+    #     unit=Unit.METERS,
+    #     scaling=ScalingConfig(
+    #         type=ScalingType.GLOBAL,
+    #         min=0,
+    #         max=200,
+    #     ),
+    # ),
     # Custom UCPs for cities.
     # UCP5 Plan area fraction
     Var.BUILDING_AREA_FRACTION: VarConfig(
@@ -428,14 +428,14 @@ VAR_CONFIGS: dict[Var, VarConfig] = {
     ),
     # Custom UCPs for cities.
     # UCP6 Building surface to plan area ratio. Update for Very Dense Cities
-    # Var.BUILD_SURF_RATIO: VarConfig(
-    #     unit=Unit.FRACTION,
-    #     scaling=ScalingConfig(
-    #         type=ScalingType.NONE,
-    #         min=0,
-    #         max=200,
-    #     ),
-    # ),
+    Var.BUILD_SURF_RATIO: VarConfig(
+        unit=Unit.FRACTION,
+        scaling=ScalingConfig(
+            type=ScalingType.NONE,
+            min=0,
+            max=200,
+        ),
+    ),
     # Custom UCPs for cities.
     # UCP7 Urban fraction
     Var.FRC_URB2D: VarConfig(
