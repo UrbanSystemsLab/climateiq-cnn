@@ -31,19 +31,16 @@ class TestAtmoMLDataset(unittest.TestCase):
         ]
 
         # Configure Firestore to return these URLs
-        mock_firestore_client.collection.return_value \
-            .document.return_value \
-            .get.return_value \
-            .to_dict.side_effect = [
-                {"url": mock_spatial_url},
-                {"url": mock_spatiotemporal_urls[0]},
-                {"url": mock_spatiotemporal_urls[1]},
-                {"url": mock_spatiotemporal_urls[2]},
-                {"url": mock_lu_index_url},
-                {"url": mock_label_urls[0]},
-                {"url": mock_label_urls[1]},
-                {"url": mock_label_urls[2]},
-            ]
+        mock_firestore_client.collection.return_value.document.return_value.get.return_value.to_dict.side_effect = [  # noqa: E501
+            {"url": mock_spatial_url},
+            {"url": mock_spatiotemporal_urls[0]},
+            {"url": mock_spatiotemporal_urls[1]},
+            {"url": mock_spatiotemporal_urls[2]},
+            {"url": mock_lu_index_url},
+            {"url": mock_label_urls[0]},
+            {"url": mock_label_urls[1]},
+            {"url": mock_label_urls[2]},
+        ]
 
         # Simulate spatial data blob
         mock_spatial_blob = MagicMock()
