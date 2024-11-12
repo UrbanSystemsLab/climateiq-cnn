@@ -10,12 +10,40 @@ from usl_models.atmo_ml.datasets import create_atmo_dataset, load_labels_from_cl
 class TestAtmoMLDataset(unittest.TestCase):
     @mock.patch("google.cloud.storage.Client")
     @mock.patch("google.cloud.firestore.Client")
-    def test_create_atmo_dataset(self, mock_firestore_client, mock_storage_client):
-        """Test creating AtmoML dataset from GCS."""
+    def test_create_atmo_dataset_structure(
+        self, mock_firestore_client, mock_storage_client
+    ):
+        """Test creating AtmoML dataset from GCS with expected structure and shapes."""
         # Set up mock bucket and blobs
         mock_storage_client_instance = mock_storage_client.return_value
         mock_bucket = MagicMock()
         mock_storage_client_instance.bucket.return_value = mock_bucket
+
+        # Define mock URLs for each data type
+        mock_spatial_url = "gs://test-data-bucket/spatial/mock_spatial_data.npy"
+        mock_spatiotemporal_urls = [
+            f"gs://test-data-bucket/spatiotemporal/mock_spatiotemporal_data_{i}.npy"
+            for i in range(3)
+        ]
+        mock_lu_index_url = "gs://test-data-bucket/lu_index/mock_lu_index_data.npy"
+        mock_label_urls = [
+            f"gs://test-label-bucket/labels/mock_label_data_{i}.npy" for i in range(3)
+        ]
+
+        # Configure Firestore to return these URLs
+        mock_firestore_client.collection.return_value \
+            .document.return_value \
+            .get.return_value \
+            .to_dict.side_effect = [
+                {"url": mock_spatial_url},
+                {"url": mock_spatiotemporal_urls[0]},
+                {"url": mock_spatiotemporal_urls[1]},
+                {"url": mock_spatiotemporal_urls[2]},
+                {"url": mock_lu_index_url},
+                {"url": mock_label_urls[0]},
+                {"url": mock_label_urls[1]},
+                {"url": mock_label_urls[2]},
+            ]
 
         # Simulate spatial data blob
         mock_spatial_blob = MagicMock()
@@ -29,9 +57,7 @@ class TestAtmoMLDataset(unittest.TestCase):
         # Simulate spatiotemporal data blobs (6 time steps)
         mock_spatiotemporal_blobs = [MagicMock() for _ in range(3)]
         for i, blob in enumerate(mock_spatiotemporal_blobs):
-            spatiotemporal_data = np.random.rand(6, 200, 200, 9).astype(
-                np.float32
-            )  # 6 time steps per inputs
+            spatiotemporal_data = np.random.rand(6, 200, 200, 9).astype(np.float32)
             spatiotemporal_data_bytes = io.BytesIO()
             np.save(spatiotemporal_data_bytes, spatiotemporal_data, allow_pickle=True)
             spatiotemporal_data_bytes.seek(0)
@@ -51,9 +77,7 @@ class TestAtmoMLDataset(unittest.TestCase):
         # Simulate label data blobs (8 time steps)
         mock_label_blobs = [MagicMock() for _ in range(3)]
         for i, blob in enumerate(mock_label_blobs):
-            label_data = np.random.rand(8, 200, 200, 1).astype(
-                np.float32
-            )  # 8 time steps
+            label_data = np.random.rand(8, 200, 200, 1).astype(np.float32)
             label_data_bytes = io.BytesIO()
             np.save(label_data_bytes, label_data, allow_pickle=True)
             label_data_bytes.seek(0)
@@ -74,7 +98,7 @@ class TestAtmoMLDataset(unittest.TestCase):
         spatial_folder = "spatial"
         lu_index_folder = "lu_index"
         label_folder = "labels"
-        time_steps_per_day = 6  # Adjust as needed for spatiotemporal input
+        time_steps_per_day = 6
         batch_size = 2
 
         # Call the function under test
@@ -103,61 +127,58 @@ class TestAtmoMLDataset(unittest.TestCase):
             self.assertIn("lu_index", inputs)
             self.assertEqual(
                 inputs["spatiotemporal"].shape, (batch_size, 6, 200, 200, 9)
-            )  # 6 time steps
+            )
             self.assertEqual(inputs["spatial"].shape, (batch_size, 200, 200, 17))
             self.assertEqual(inputs["lu_index"].shape, (batch_size, 200 * 200))
-            self.assertEqual(labels.shape, (batch_size, 8, 200, 200, 1))  # 8 time steps
+            self.assertEqual(labels.shape, (batch_size, 8, 200, 200, 1))
 
+    @mock.patch("google.cloud.storage.Client")
+    @mock.patch("google.cloud.firestore.Client")
+    def test_load_labels_from_cloud(self, mock_firestore_client, mock_storage_client):
+        """Test loading labels from GCS and verifying correct data structure."""
+        # Set up mock storage client instance and bucket
+        mock_storage_client_instance = mock_storage_client.return_value
+        mock_bucket = MagicMock()
+        mock_storage_client_instance.bucket.return_value = mock_bucket
 
-@mock.patch("google.cloud.storage.Client")
-@mock.patch("google.cloud.firestore.Client")
-def test_load_labels_from_cloud(mock_firestore_client, mock_storage_client):
-    """Test loading labels from GCS and verifying correct data structure and content."""
-    # Set up mock storage client instance and bucket
-    mock_storage_client_instance = mock_storage_client.return_value
-    mock_bucket = MagicMock()
-    mock_storage_client_instance.bucket.return_value = mock_bucket
+        # Simulate label data blobs with random data
+        num_time_steps = 8
+        height, width, channels = 200, 200, 1
+        num_blobs = 3  # Number of label blobs to simulate
+        mock_label_blobs = [MagicMock() for _ in range(num_blobs)]
 
-    # Simulate label data blobs with random data
-    num_time_steps = 6
-    height, width, channels = 200, 200, 1
-    num_blobs = 3  # Number of label blobs to simulate
-    mock_label_blobs = [MagicMock() for _ in range(num_blobs)]
+        for i, blob in enumerate(mock_label_blobs):
+            label_data = np.random.rand(num_time_steps, height, width, channels).astype(
+                np.float32
+            )
+            label_data_bytes = io.BytesIO()
+            np.save(label_data_bytes, label_data, allow_pickle=True)
+            label_data_bytes.seek(0)
+            blob.download_as_bytes.return_value = label_data_bytes.getvalue()
 
-    for i, blob in enumerate(mock_label_blobs):
-        label_data = np.random.rand(num_time_steps, height, width, channels).astype(
-            np.float32
+        # Mock blob listing behavior to simulate folder structure
+        mock_bucket.list_blobs.return_value = mock_label_blobs
+
+        # Define bucket name and folder path for labels
+        label_bucket_name = "test-label-bucket"
+        label_folder = "labels"
+
+        # Call the function under test
+        labels_tensor = load_labels_from_cloud(
+            bucket_name=label_bucket_name,
+            folder_name=label_folder,
+            storage_client=mock_storage_client_instance,
+            firestore_client=mock_firestore_client,
         )
-        label_data_bytes = io.BytesIO()
-        np.save(label_data_bytes, label_data, allow_pickle=True)
-        label_data_bytes.seek(0)
-        blob.download_as_bytes.return_value = label_data_bytes.getvalue()
 
-    # Mock blob listing behavior to simulate folder structure
-    mock_bucket.list_blobs.return_value = mock_label_blobs
+        # Validate the type and shape of the returned tensor
+        expected_shape = (num_blobs, num_time_steps, height, width, channels)
+        self.assertIsInstance(labels_tensor, tf.Tensor)
+        self.assertEqual(labels_tensor.shape, expected_shape)
 
-    # Define bucket name and folder path for labels
-    label_bucket_name = "test-label-bucket"
-    label_folder = "labels"
-
-    # Call the function under test
-    labels_tensor = load_labels_from_cloud(
-        bucket_name=label_bucket_name,
-        folder_name=label_folder,
-        storage_client=mock_storage_client_instance,
-        firestore_client=mock_firestore_client,
-    )
-
-    # Validate the type and shape of the returned tensor
-    expected_shape = (num_blobs, num_time_steps, height, width, channels)
-    assert isinstance(labels_tensor, tf.Tensor)
-    assert (
-        labels_tensor.shape == expected_shape
-    ), f"Expected shape {expected_shape}, but got {labels_tensor.shape}"
-
-    # Verify that the data within the tensor is as expected (basic data integrity check)
-    for i in range(num_blobs):
-        np.testing.assert_array_almost_equal(
-            labels_tensor[i].numpy(),
-            np.load(io.BytesIO(mock_label_blobs[i].download_as_bytes())),
-        )
+        # Verify that the data within the tensor is as expected
+        for i in range(num_blobs):
+            np.testing.assert_array_almost_equal(
+                labels_tensor[i].numpy(),
+                np.load(io.BytesIO(mock_label_blobs[i].download_as_bytes())),
+            )
