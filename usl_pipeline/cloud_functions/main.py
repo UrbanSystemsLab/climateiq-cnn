@@ -444,7 +444,7 @@ def build_wrf_label_matrix_http(request: flask.Request) -> flask.Response:
         request_json["name"],
         cloud_storage.LABEL_CHUNKS_BUCKET,
     )
-    return flask.jsonify({"message", "Label matrix built."})
+    return flask.jsonify({"message": "Label matrix built."})
 
 
 def _build_wrf_label_matrix(
