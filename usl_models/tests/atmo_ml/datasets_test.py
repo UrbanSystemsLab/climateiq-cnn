@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 import tensorflow as tf
 from unittest.mock import MagicMock
-from usl_models.atmo_ml.datasets import create_atmo_dataset, load_labels_from_cloud
+from usl_models.atmo_ml.dataset import create_atmo_dataset, load_labels_from_cloud
 
 
 def create_mock_blob(data, dtype=np.float32, allow_pickle=True):

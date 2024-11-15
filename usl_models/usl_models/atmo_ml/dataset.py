@@ -39,7 +39,8 @@ def load_data_from_cloud(
         return all_data  # Return a list of numpy arrays
     else:
         # Load a single file
-        blob = bucket.blob(path)
+        blobs = bucket.list_blobs(prefix=path)
+        blob = next(blobs)
         downloaded_data = blob.download_as_bytes()
         return np.load(io.BytesIO(downloaded_data))
 
@@ -137,52 +138,61 @@ def load_spatial_data_from_cloud(
     return tf.convert_to_tensor(spatial_data, dtype=tf.float32)
 
 
-def create_atmo_dataset(
+def load_dataset(
     data_bucket_name: str,
     label_bucket_name: str,
-    spatiotemporal_folder: str,
-    spatial_folder: str,
-    lu_index_folder: str,
-    label_folder: str,
+    sim_names: list[str],
     time_steps_per_day: int,
     batch_size: int = 4,
     shuffle: bool = True,
     storage_client: storage.Client = None,
     firestore_client: firestore.Client = None,
-) -> tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset]:
+) -> tf.data.Dataset:
+    firestore_client = firestore_client or firestore.Client()
+    storage_client = storage_client or storage.Client()
 
     def data_generator():
-        # Load spatial, LU index, spatiotemporal, and label from their folders
-        lu_index_data = load_lu_index_from_cloud(
-            data_bucket_name, lu_index_folder, storage_client, firestore_client
-        )
-        spatial_data = load_spatial_data_from_cloud(
-            data_bucket_name, spatial_folder, storage_client, firestore_client
-        )
-        spatiotemporal_data = load_spatiotemporal_data_from_cloud(
-            data_bucket_name, spatiotemporal_folder, storage_client, firestore_client
-        )
-        label_data = load_labels_from_cloud(
-            label_bucket_name, label_folder, storage_client, firestore_client
-        )
+        for sim_name in sim_names:
 
-        # Iterate through each spatiotemporal and label file
-        # Divide data into days and apply padding or truncation
-        inputs, labels = cnn_inputs_outputs.divide_into_days(
-            spatiotemporal_data, label_data, time_steps_per_day
-        )
-        for day_inputs, day_labels in zip(inputs, labels):
-            day_inputs_padded = pad_or_truncate_data(
-                day_inputs.numpy(), time_steps_per_day
+            spatiotemporal_folder = f"{sim_name}/spatiotemporal"
+            spatial_folder = f"{sim_name}/spatial"
+            lu_index_folder = f"{sim_name}/lu_index"
+            label_folder = sim_name
+
+            # Load spatial, LU index, spatiotemporal, and label from their folders
+            lu_index_data = load_lu_index_from_cloud(
+                data_bucket_name, lu_index_folder, storage_client, firestore_client
             )
-            day_labels_padded = pad_or_truncate_data(
-                day_labels.numpy(), time_steps_per_day
+            spatial_data = load_spatial_data_from_cloud(
+                data_bucket_name, spatial_folder, storage_client, firestore_client
             )
-            yield {
-                "spatiotemporal": day_inputs_padded,
-                "spatial": spatial_data.numpy(),
-                "lu_index": lu_index_data.numpy(),
-            }, day_labels_padded
+            spatiotemporal_data = load_spatiotemporal_data_from_cloud(
+                data_bucket_name,
+                spatiotemporal_folder,
+                storage_client,
+                firestore_client,
+            )
+            label_data = load_labels_from_cloud(
+                label_bucket_name, label_folder, storage_client, firestore_client
+            )
+
+            # Iterate through each spatiotemporal and label file
+            # Divide data into days and apply padding or truncation
+            inputs, labels = cnn_inputs_outputs.divide_into_days(
+                spatiotemporal_data, label_data, time_steps_per_day
+            )
+            for day_inputs, day_labels in zip(inputs, labels):
+                day_inputs_padded = pad_or_truncate_data(
+                    day_inputs.numpy(), time_steps_per_day
+                )
+                day_labels_padded = pad_or_truncate_data(
+                    day_labels.numpy(), time_steps_per_day
+                )
+                yield {
+                    "spatiotemporal": day_inputs_padded,
+                    "spatial": spatial_data.numpy(),
+                    "lu_index": lu_index_data.numpy(),
+                }, day_labels_padded
 
     dataset = tf.data.Dataset.from_generator(
         data_generator,
@@ -226,12 +236,7 @@ def create_atmo_dataset(
         dataset = dataset.shuffle(buffer_size=1000)  # Use a fixed buffer size
 
     dataset = dataset.batch(batch_size)
-
-    train_dataset, val_dataset, test_dataset = split_dataset(
-        dataset, train_frac=0.7, val_frac=0.15, test_frac=0.15
-    )
-
-    return train_dataset, val_dataset, test_dataset
+    return dataset
 
 
 def load_prediction(
