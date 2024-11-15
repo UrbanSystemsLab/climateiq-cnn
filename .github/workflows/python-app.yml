@@ -15,7 +15,7 @@ permissions:
 jobs:
   usl_lib:
     name: usl_lib CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       FIRESTORE_EMULATOR_HOST: "localhost:8085"
     steps:
@@ -56,7 +56,7 @@ jobs:
 
   study_area_uploader:
     name: Study Area Uploader CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python 3.11
@@ -88,7 +88,7 @@ jobs:
 
   cloud_functions:
     name: Cloud Funcations CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python 3.11
@@ -103,7 +103,6 @@ jobs:
         # Copy wheels folder to current directory for requirements install
         cp -r usl_pipeline/cloud_functions/wheels .
         pip install -r usl_pipeline/cloud_functions/requirements.txt
-        cp -r usl_pipeline/usl_lib/usl_lib usl_pipeline/cloud_functions
         pip install black~=24.0 flake8~=7.0 flake8-docstrings~=1.7 pytest~=8.0 mypy~=1.9
     - name: Lint with flake8
       run: |
@@ -120,7 +119,7 @@ jobs:
 
   usl_models:
     name: USL Models CI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       FIRESTORE_EMULATOR_HOST: "localhost:8085"
     steps:

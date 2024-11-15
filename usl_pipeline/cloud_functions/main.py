@@ -9,7 +9,6 @@ import tarfile
 import time
 import traceback
 from typing import BinaryIO, Callable, IO, TextIO, Tuple
-
 from google.api_core import exceptions
 from google.cloud import error_reporting
 from google.cloud import firestore
@@ -40,6 +39,7 @@ from usl_lib.transformers import feature_raster_transformers
 # of time between when an event is triggered and when the cloud
 # function actually runs, which can be a bit of time if there are a
 # lot of triggers.
+# Added
 _MAX_RETRY_SECONDS = 60 * 60
 
 # The vector is long enough to express rainfall every five minutes for up to three days.
@@ -444,7 +444,7 @@ def build_wrf_label_matrix_http(request: flask.Request) -> flask.Response:
         request_json["name"],
         cloud_storage.LABEL_CHUNKS_BUCKET,
     )
-    return flask.jsonify({"message", "Label matrix built."})
+    return flask.jsonify({"message": "Label matrix built."})
 
 
 def _build_wrf_label_matrix(
@@ -492,8 +492,19 @@ def _process_wrf_label_and_metadata(fd: IO[bytes]) -> Tuple[NDArray, FeatureMeta
             if var == "wspd_wdir10":
                 # TODO: Split wind dir to sin/cos components
                 wspd10, wdir10 = wrf.getvar(nc, "wspd_wdir10")
-                label_components.append(numpy.swapaxes(wspd10, 0, 1))
-                label_components.append(numpy.swapaxes(wdir10, 0, 1))
+                # Convert wind direction from degrees to radians
+                wdir10_rad = numpy.deg2rad(wdir10)
+                # Split wind direction into sin and cos components
+                wind_dir_sin = numpy.sin(wdir10_rad)
+                wind_dir_cos = numpy.cos(wdir10_rad)
+                # Append wind speed and sin/cos of wind direction as labels
+                label_components.append(numpy.swapaxes(wspd10, 0, 1))  # wind speed
+                label_components.append(
+                    numpy.swapaxes(wind_dir_sin, 0, 1)
+                )  # sin(wind_dir)
+                label_components.append(
+                    numpy.swapaxes(wind_dir_cos, 0, 1)
+                )  # cos(wind_dir)
             else:
                 label = wrf.getvar(nc, var)
                 # Ensure order of dimension axes are: (west_east, south_north)
@@ -611,13 +622,14 @@ def _build_feature_matrix(
     bucket = storage_client.bucket(bucket_name)
     chunk_blob = bucket.blob(chunk_path)
 
-    feature_file_name = pathlib.PurePosixPath(chunk_path).with_suffix(".npy")
-    feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
-
     with chunk_blob.open("rb") as chunk:
         study_area_name, chunk_name = _parse_chunk_path(chunk_path)
         # Flood (CityCat)
         if chunk_path.endswith(".tar"):
+            feature_file_name = pathlib.PurePosixPath(chunk_path).with_suffix(".npy")
+            feature_blob = storage_client.bucket(output_bucket).blob(
+                str(feature_file_name)
+            )
             chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
                 firestore.Client(), study_area_name, chunk_name
             )
@@ -663,9 +675,20 @@ def _build_feature_matrix(
 
         # Heat (WRF) - treat one WPS outout file as one chunk
         elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_path):
-            feature_matrix, metadata = _build_wps_feature_matrix(chunk)
-            _write_as_npy(feature_blob, feature_matrix)
-            _write_wps_chunk_metastore_entry(chunk_blob, feature_blob, metadata)
+            feature_matrices, metadata = _build_wps_feature_matrices(chunk)
+            # Write a separate file for each variable type
+            # (spatial, spatiotemporal, lu_index).
+            for var_type, feature_matrix in feature_matrices.items():
+                feature_path = pathlib.PurePosixPath(chunk_path)
+                feature_path_parent = feature_path.parent
+                feature_file_name = (
+                    feature_path_parent / var_type.value / feature_path.name
+                ).with_suffix(".npy")
+                feature_blob = storage_client.bucket(output_bucket).blob(
+                    str(feature_file_name)
+                )
+                _write_as_npy(feature_blob, feature_matrix)
+                _write_wps_chunk_metastore_entry(chunk_blob, feature_blob, metadata)
         else:
             raise ValueError(f"Unexpected file {chunk_path}")
 
@@ -948,28 +971,40 @@ def _build_flood_feature_matrix_from_archive(
     return None, FeatureMetadata(), None
 
 
-def _build_wps_feature_matrix(fd: IO[bytes]) -> Tuple[NDArray, FeatureMetadata]:
+def _build_wps_feature_matrices(
+    fd: IO[bytes],
+) -> Tuple[dict[wps_data.VarType, NDArray], FeatureMetadata]:
     # Ignore type checker error - BytesIO inherits from expected type BufferedIOBase
     # https://shorturl.at/lk4om
+    matrices = {}
     with xarray.open_dataset(fd, engine="h5netcdf") as ds:  # type: ignore
-        # Assign Time coordinates so datetime is associated with each data array
-        ds = ds.assign_coords(Time=ds.Times)
+        # Dropp the existing 'Time' coordinate if present, to avoid conflict
+        if "Time" in ds.coords:
+            ds = ds.drop_vars("Time")
+
+        # Assign the 'Time' coordinate
+        if "Times" in ds:
+            ds = ds.assign_coords(Time=ds.Times)
+
         # Derive non-native variables and assign to dataset
         ds = _compute_custom_wps_variables(ds)
 
-        # Apply feature engineering and build features matrix
-        features_components = []
-        for var_name in wps_data.ML_REQUIRED_VARS_REPO.keys():
-            var_config = wps_data.ML_REQUIRED_VARS_REPO[var_name]
-            feature = _process_wps_feature(
-                feature=ds.data_vars[var_name], var_config=var_config
-            )
-            features_components.append(feature)
+        for var_type, vars in wps_data.ML_REQUIRED_VARS.items():
+            features_components = [numpy.array([])] * len(vars)
 
-        features_matrix = numpy.dstack(features_components)
-        snapshot_time = ds.Times.values[0].decode("utf-8")
+            # Apply feature engineering and build features matrix
+            for i, var in enumerate(vars):
+                features_components[i] = _process_wps_feature(
+                    feature=ds.data_vars[var.name],
+                    var_config=wps_data.VAR_CONFIGS[var],
+                )
 
-    return features_matrix, FeatureMetadata(
+            matrices[var_type] = numpy.dstack(features_components)
+
+        # Get snapshot time
+        snapshot_time = ds.Times.values[0].astype(str)
+
+    return matrices, FeatureMetadata(
         time=datetime.datetime.fromisoformat(snapshot_time)
     )
 
@@ -995,24 +1030,15 @@ def _compute_wind_components(dataset: xarray.Dataset) -> xarray.Dataset:
     # WDIR_SIN (wind direction_sine component) at FNL level 0 (~10m)
     # WDIR_COS (wind direction_cosine component) at FNL level 0 (~10m)
     if all(var in dataset.keys() for var in ["UU", "VV"]):
-        # Derive wind components from UU and VV: WSPD, WDIR
         uu = dataset.data_vars["UU"]
         vv = dataset.data_vars["VV"]
-
-        # Interpolate UU and VV to the common 200x200 grid
         uu_centered = (uu[:, :, :, :-1] + uu[:, :, :, 1:]) / 2
         vv_centered = (vv[:, :, :-1, :] + vv[:, :, 1:, :]) / 2
-
-        # Compute wind speed
         wind_speed = numpy.sqrt(uu_centered.values**2 + vv_centered.values**2)
-
-        # compute wind direction 0 deg is x-axis
-        # 270 is subtracted to align direction to true North
         wind_direction = (
             270 - numpy.degrees(numpy.arctan2(vv_centered.values, uu_centered.values))
         ) % 360
 
-        # Define functions to compute sine and cosine components of wind direction
         def _direction_to_sine(degrees):
             radians = (degrees / 360.0) * 2 * numpy.pi
             return numpy.sin(radians)
@@ -1021,13 +1047,11 @@ def _compute_wind_components(dataset: xarray.Dataset) -> xarray.Dataset:
             radians = (degrees / 360.0) * 2 * numpy.pi
             return numpy.cos(radians)
 
-        # Compute sine and cosine components of wind direction
         wind_direction_sin = _direction_to_sine(wind_direction)
         wind_direction_cos = _direction_to_cosine(wind_direction)
 
         new_dims = ["Time", "num_metgrid_levels", "south_north", "west_east"]
 
-        # Assign new variables to dataset
         dataset = dataset.assign(
             WSPD=xarray.DataArray(wind_speed, coords=vv_centered.coords, dims=new_dims)
         )
@@ -1046,58 +1070,44 @@ def _compute_wind_components(dataset: xarray.Dataset) -> xarray.Dataset:
 
 
 def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
-    # Solar Time Computation for every Longitude of the City
-    # Solar Time Sine and Cosine Derivation from there
-    if all(var in dataset.keys() for var in ["XLONG_M", "XLAT_M", "Times"]):
-        # Extract longitude, latitude, and time variables from dataset
-        longitudes = dataset["XLONG_M"][0, :, :]
-        latitudes = dataset["XLAT_M"][0, :, :]
-        times = dataset["Times"]
+    """Compute solar time components (sine and cosine) for the dataset's longitudes.
 
-        # Convert time variable to datetime objects
+    Args:
+    - dataset: The xarray dataset containing longitude, latitude, and time information.
+    - use_gcp_time: A boolean flag indicating whether the Times are in Unix time format.
+
+    Returns:
+    - The dataset with added solar time sine and cosine components.
+    """
+    # Solar Time Computation for every Longitude of the City
+    if all(var in dataset.keys() for var in ["XLONG_M", "XLAT_M", "Times"]):
+        longitudes = dataset["XLONG_M"][0, :, :]  # Extract the longitudes
+        times = dataset["Times"]  # Extract the time variable
+
+        # Convert preformatted string-based times to nanosecond precision datetime
         times = xarray.DataArray(
             [
-                # Check if the value is a Unix timestamp (numeric type)
-                (
-                    numpy.datetime64(
-                        datetime.datetime.utcfromtimestamp(t).strftime(
-                            "%Y-%m-%dT%H:%M:%S"
-                        )
-                    )
-                    if isinstance(t, (int, float))
-                    else numpy.datetime64("".join(t.astype(str)).replace("_", "T"))
-                )
+                numpy.datetime64("".join(t.astype(str)).replace("_", "T"), "ns")
                 for t in times.values
-            ]
+            ],
+            dims=["Time"],
         )
 
-        print("Debug - Converted Times:", times)
-
-        # Extract hours and minutes from the datetime objects separately
-        utc_hours = times.dt.hour  # Extract the hour component
-        utc_minutes = times.dt.minute  # Extract the minute component
-
-        # Convert to fractional hours (hours + minutes/60)
+        # Extract hours and minutes in UTC
+        utc_hours = times.dt.hour
+        utc_minutes = times.dt.minute
         utc_hours_minutes = utc_hours + utc_minutes / 60.0
 
-        print("Debug - UTC Hours and Minutes (in fraction):", utc_hours_minutes)
-
-        # Define the function to calculate solar time
+        # Function to calculate solar time from UTC and longitude
         def calculate_solar_time(utc_time, longitude):
-            solar_time = (utc_time + longitude / 15) % 24
-            return solar_time
+            return (utc_time + longitude / 15) % 24
 
-        # Vectorized solar time calculation using xarray apply_ufunc
+        # Calculate solar times for all longitudes
         solar_times = xarray.apply_ufunc(
-            calculate_solar_time,
-            xarray.DataArray(utc_hours_minutes, dims=["Time"]),
-            longitudes,
-            vectorize=True,
+            calculate_solar_time, utc_hours_minutes, longitudes, vectorize=True
         )
 
-        print("Debug - Calculated Solar Times:", solar_times)
-
-        # Convert time in hours to sine and cosine components
+        # Functions to convert solar time to sine and cosine values
         def time_to_sine(hours):
             radians = (hours / 24.0) * 2 * numpy.pi
             return numpy.sin(radians)
@@ -1106,32 +1116,29 @@ def _compute_solar_time_components(dataset: xarray.Dataset) -> xarray.Dataset:
             radians = (hours / 24.0) * 2 * numpy.pi
             return numpy.cos(radians)
 
-        # Compute sine and cosine components of solar time
+        # Apply sine and cosine transformations
         solar_time_sin = xarray.apply_ufunc(time_to_sine, solar_times, vectorize=True)
         solar_time_cos = xarray.apply_ufunc(time_to_cosine, solar_times, vectorize=True)
 
-        print("Debug - Solar Time Sine:", solar_time_sin)
-        print("Debug - Solar Time Cosine:", solar_time_cos)
-
-        # Match the dimensionality and coordinate structure
+        # Assign new variables for sine and cosine of solar time
         new_dims = ["Time", "south_north", "west_east"]
-
-        # Assign new variables to dataset
         dataset = dataset.assign(
             SOLAR_TIME_SIN=xarray.DataArray(
-                solar_time_sin, coords=latitudes.coords, dims=new_dims
+                solar_time_sin, coords=dataset["XLAT_M"].coords, dims=new_dims
             )
         )
         dataset = dataset.assign(
             SOLAR_TIME_COS=xarray.DataArray(
-                solar_time_cos, coords=latitudes.coords, dims=new_dims
+                solar_time_cos, coords=dataset["XLAT_M"].coords, dims=new_dims
             )
         )
 
     return dataset
 
 
-def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray:
+def _process_wps_feature(
+    feature: xarray.DataArray, var_config: wps_data.VarConfig
+) -> NDArray:
     """Performs a series of data transforms on a WPS variable.
 
     Args:
@@ -1146,33 +1153,21 @@ def _process_wps_feature(feature: xarray.DataArray, var_config: dict) -> NDArray
       for each variable defined in: https://shorturl.at/W6nzY
     """
     snapshot_time = feature.coords.get("Time")
-    # Ensure order of dimension axes are: (west_east, south_north, <other spatial dims>)
-    # to stay consistent with rest of data pipeline
     feature = feature.transpose("west_east", "south_north", ...)
-
-    # FNL-derived var - extract to only first level
     if "num_metgrid_levels" in feature.dims:
         feature = feature.isel(num_metgrid_levels=0)
-
-    # Monthly climatology var - extract to only the month of the file's datestamp
     if "z-dimension0012" in feature.dims and snapshot_time:
         snapshot_datetime = datetime.datetime.strptime(
             snapshot_time.values[0].decode(), "%Y-%m-%d_%H:%M:%S"
         )
         feature = feature.isel({"z-dimension0012": snapshot_datetime.month - 1})
-
-    # At this point, we can remove the Time axis from current feature DataArray
-    # since we no longer need it for processing or in the feature matrix for ML
-    # model. xarray.DataArry.isel() will return new DataArray with axis dropped.
     feature = feature.isel(Time=0)
 
     feature_values = feature.values
 
-    # Convert percentage-based units to decimal
     if var_config.get("unit") == wps_data.Unit.PERCENTAGE:
         feature_values = _convert_to_decimal(feature_values)
 
-    # If var config requires global scaling, normalize feature values
     scaling_config = var_config.get("scaling")
     if (
         scaling_config is not None

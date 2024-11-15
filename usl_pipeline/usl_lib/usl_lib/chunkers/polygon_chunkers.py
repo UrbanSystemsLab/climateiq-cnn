@@ -1,5 +1,5 @@
 import pathlib
-from typing import Iterable, Tuple
+from typing import Any, Iterable, Tuple
 
 from shapely import geometry
 
@@ -125,3 +125,63 @@ def split_polygons_into_chunks(
                 )
             )
     return chunk_descriptors
+
+
+def chunk_polygons(
+    elevation_header: geo_data.ElevationHeader,
+    chunk_size: int,
+    polygon_masks: Iterable[Tuple[geometry.Polygon, int]],
+    chunk_additional_border_cells: int = 0,
+) -> list[tuple[Any, int]]:
+    """Writes polygon chunk files based on source with polygons and chunk structure.
+
+    Args:
+        elevation_header: Information about cell grid projection to coordinate system.
+        chunk_size: Size of each chunk in cells.
+        polygon_masks: Source of polygons with associated mask values.
+        chunk_additional_border_cells: Number of cells that the chunk area is extended
+            by in all 4 sides (up, down, left, right).
+
+    Returns:
+        List of chunked polygons.
+    """
+    global_col_count = elevation_header.col_count
+    global_row_count = elevation_header.row_count
+    x_chunk_count = (global_col_count + chunk_size - 1) // chunk_size
+    y_chunk_count = (global_row_count + chunk_size - 1) // chunk_size
+
+    step = elevation_header.cell_size
+    chunk_bboxes: list[list[geo_data.BoundingBox]] = []
+    chunk_polygons: list[list[list[Tuple[geometry.Polygon, int]]]] = []
+    chunked_polygons = []
+    for y_chunk_index in range(0, y_chunk_count):
+        chunk_bboxes.append([])
+        chunk_polygons.append([])
+        for x_chunk_index in range(0, x_chunk_count):
+            bbox = _get_chunk_bounding_box(
+                elevation_header, chunk_size, y_chunk_index, x_chunk_index
+            )
+            chunk_bboxes[y_chunk_index].append(
+                geo_data.BoundingBox(
+                    bbox.min_x - step - chunk_additional_border_cells,
+                    bbox.min_y - step - chunk_additional_border_cells,
+                    bbox.max_x + step + chunk_additional_border_cells,
+                    bbox.max_y + step + chunk_additional_border_cells,
+                )
+            )
+            chunk_polygons[y_chunk_index].append([])
+
+    for polygon_mask in polygon_masks:
+        pol_bbox = geo_data.BoundingBox.from_tuple(polygon_mask[0].bounds)
+        for y_chunk_index in range(0, y_chunk_count):
+            for x_chunk_index in range(0, x_chunk_count):
+                chunk_bbox = chunk_bboxes[y_chunk_index][x_chunk_index]
+                if chunk_bbox.intersects(pol_bbox):
+                    chunk_polygons[y_chunk_index][x_chunk_index].append(polygon_mask)
+
+    for y_chunk_index in range(0, y_chunk_count):
+        for x_chunk_index in range(0, x_chunk_count):
+            polygons_for_chunk = chunk_polygons[y_chunk_index][x_chunk_index]
+            if len(polygons_for_chunk) > 0:
+                chunked_polygons.extend(polygons_for_chunk)
+    return chunked_polygons

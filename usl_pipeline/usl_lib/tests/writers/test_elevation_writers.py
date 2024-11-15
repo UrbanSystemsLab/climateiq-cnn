@@ -68,7 +68,7 @@ def test_write_elevation_header_to_json():
         y_ll_corner=20.0,
         cell_size=1.0,
         nodata_value=-30.0,
-        crs=rasterio.CRS({"init": "EPSG:32618"}),
+        crs=rasterio.CRS({"init": "EPSG:4326"}),
     )
     buffer = StringIO()
     elevation_writers.write_header_to_json_file(header, buffer)
@@ -80,6 +80,6 @@ def test_write_elevation_header_to_json():
         + '    "y_ll_corner": 20.0,\n'
         + '    "cell_size": 1.0,\n'
         + '    "nodata_value": -30.0,\n'
-        + '    "crs": "EPSG:32618"\n'
+        + '    "crs": "EPSG:4326"\n'
         + "}"
     )

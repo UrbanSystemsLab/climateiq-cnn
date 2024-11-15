@@ -31,7 +31,7 @@ def prepare_test_geotiff_elevation_file(
         width=width,
         height=height,
         count=1,
-        crs=rasterio.CRS.from_epsg(32618),
+        crs=rasterio.CRS.from_epsg(4326),
         transform=rasterio.Affine(
             cell_size,
             0.0,
@@ -92,7 +92,7 @@ def test_crop_geotiff_to_sub_area():
                 y_ll_corner=24.0,
                 cell_size=2.0,
                 nodata_value=0.0,
-                crs=rasterio.CRS.from_epsg(32618),
+                crs=rasterio.CRS.from_epsg(4326),
             ),
             [[6.0, 7.0], [11.0, 12.0]],
         )
@@ -107,7 +107,7 @@ def test_crop_geotiff_to_sub_area():
                 y_ll_corner=24.0,
                 cell_size=2.0,
                 nodata_value=0.0,
-                crs=rasterio.CRS.from_epsg(32618),
+                crs=rasterio.CRS.from_epsg(4326),
             ),
             [[12.0]],
         )
@@ -122,7 +122,7 @@ def test_crop_geotiff_to_sub_area():
                 y_ll_corner=22.0,
                 cell_size=2.0,
                 nodata_value=0.0,
-                crs=rasterio.CRS.from_epsg(32618),
+                crs=rasterio.CRS.from_epsg(4326),
             ),
             [[6.0, 7.0, 8.0], [11.0, 12.0, 13], [16.0, 17.0, 18.0]],
             border_cell_count=1,
