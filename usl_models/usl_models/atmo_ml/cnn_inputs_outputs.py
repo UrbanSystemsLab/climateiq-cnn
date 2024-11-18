@@ -7,7 +7,7 @@ def divide_into_days(inputs, labels=None, input_steps_per_day=4, label_steps_per
     Args:
         inputs (tf.Tensor): Input time series data.
         labels (tf.Tensor, optional): Label time series data.
-        input_steps_per_day (int): Number of input steps per day. Defaults to 4.
+    input_steps_per_day (int): Number of input steps per day. Defaults to 4.
         label_steps_per_day (int): Number of label steps per day. Defaults to 8.
 
     Returns:
@@ -28,9 +28,10 @@ def divide_into_days(inputs, labels=None, input_steps_per_day=4, label_steps_per
         day_inputs_list.append(day_inputs)
         if labels is not None:
             day_labels_list.append(day_labels)
-        tf.print(f"Day {day_idx + 1} inputs shape:", tf.shape(day_inputs))
+        # tf.print(f"Day {day_idx + 1} inputs shape:", tf.shape(day_inputs))
         if labels is not None:
-            tf.print(f"Day {day_idx + 1} labels shape:", tf.shape(day_labels))
+            pass
+            # tf.print(f"Day {day_idx + 1} labels shape:", tf.shape(day_labels))
     return day_inputs_list, day_labels_list if labels is not None else None
 
 

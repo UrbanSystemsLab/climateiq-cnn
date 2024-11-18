@@ -68,7 +68,11 @@ class TestAtmoMLDataset(unittest.TestCase):
             for _ in range(3)
         ]
         mock_lu_index_blob = create_mock_blob(
-            np.random.randint(0, 10, size=(200 * 200,)).astype(np.int32)
+            np.random.randint(
+                0,
+                10,
+                size=(200, 200),
+            ).astype(np.int32)
         )
         mock_bucket.blob.return_value = mock_lu_index_blob
 
@@ -123,7 +127,7 @@ class TestAtmoMLDataset(unittest.TestCase):
                 inputs["spatiotemporal"].shape, (batch_size, 6, 200, 200, 9)
             )
             self.assertEqual(inputs["spatial"].shape, (batch_size, 200, 200, 17))
-            self.assertEqual(inputs["lu_index"].shape, (batch_size, 200 * 200))
+            self.assertEqual(inputs["lu_index"].shape, (batch_size, 200, 200))
             self.assertEqual(labels.shape, (batch_size, 8, 200, 200, 1))
 
     @mock.patch("google.cloud.storage.Client")
@@ -138,9 +142,10 @@ class TestAtmoMLDataset(unittest.TestCase):
         # Simulate label data blobs
         num_time_steps = 8
         height, width, channels = 200, 200, 1
+        num_blobs = 3
         mock_label_blobs = [
             create_mock_blob(np.random.rand(num_time_steps, height, width, channels))
-            for _ in range(3)
+            for _ in range(num_blobs)
         ]
 
         # Mock bucket behavior
@@ -157,5 +162,5 @@ class TestAtmoMLDataset(unittest.TestCase):
         # Verify the tensor structure
         self.assertIsInstance(labels_tensor, tf.Tensor)
         self.assertEqual(
-            labels_tensor.shape, (3, num_time_steps, height, width, channels)
+            labels_tensor.shape, (num_blobs, num_time_steps, height, width, channels)
         )

@@ -1,25 +1,27 @@
+import functools
+import io
+
 import tensorflow as tf
 import numpy as np
-import io
-from google.cloud import storage, firestore  # type: ignore
+from google.cloud import storage  # type: ignore
 from usl_models.atmo_ml import constants, cnn_inputs_outputs
 
 
-# Load data from Google Cloud Storage with Firestore logging
+# Load data from Google Cloud Storage
+@functools.lru_cache(maxsize=256)
 def load_data_from_cloud(
     bucket_name: str,
     path: str,
     storage_client: storage.Client,
-    firestore_client: firestore.Client = None,
     is_folder: bool = False,
+    max_blobs: int = 15,
 ):
-    """Load data from Google Cloud Storage, with optional Firestore logging.
+    """Load data from Google Cloud Storage.
 
     Args:
         bucket_name (str): Name of the Google Cloud Storage bucket.
         path (str): Path to the file or folder in the bucket.
         storage_client (storage.Client): Google Cloud Storage client instance.
-        firestore_client (firestore.Client, optional): Firestore client for logging.
         is_folder (bool): If True, load all .npy files in the folder.
 
     Returns:
@@ -31,7 +33,13 @@ def load_data_from_cloud(
         # List all blobs within the folder
         blobs = bucket.list_blobs(prefix=path)
         all_data = []
+        blob_count = 0
         for blob in blobs:
+            blob_count += 1
+            if blob_count > max_blobs:
+                break
+
+            print(blob.name)
             if blob.name.endswith(".npy"):  # Ensure only .npy files are processed
                 downloaded_data = blob.download_as_bytes()
                 np_data = np.load(io.BytesIO(downloaded_data))
@@ -49,7 +57,6 @@ def load_spatiotemporal_data_from_cloud(
     bucket_name: str,
     folder_name: str,
     storage_client: storage.Client,
-    firestore_client: firestore.Client = None,
 ) -> tf.Tensor:
     """Load all spatiotemporal files from a specified folder in Google Cloud Storage.
 
@@ -57,7 +64,6 @@ def load_spatiotemporal_data_from_cloud(
         bucket_name (str): Name of the Google Cloud Storage bucket.
         folder_name (str): Name of the folder containing time step numpy files.
         storage_client (storage.Client): Google Cloud Storage client instance.
-        firestore_client (firestore.Client, optional): Firestore client for logging.
 
     Returns:
         tf.Tensor: A tensor containing spatiotemporal data across all time steps.
@@ -67,7 +73,6 @@ def load_spatiotemporal_data_from_cloud(
         bucket_name=bucket_name,
         path=folder_name,
         storage_client=storage_client,
-        firestore_client=firestore_client,
         is_folder=True,
     )
 
@@ -82,7 +87,6 @@ def load_labels_from_cloud(
     bucket_name: str,
     folder_name: str,
     storage_client: storage.Client,
-    firestore_client: firestore.Client = None,
 ) -> tf.Tensor:
     """Load all label files from a specified folder in GCS.
 
@@ -92,8 +96,6 @@ def load_labels_from_cloud(
         bucket_name (str): Name of the Google Cloud Storage bucket.
         folder_name (str): Name of the folder containing label numpy files.
         storage_client (storage.Client): Google Cloud Storage client instance.
-        firestore_client (firestore.Client, optional): Firestore client for logging,
-            if needed.
 
     Returns:
         tf.Tensor: A tensor containing label data across all time steps.
@@ -103,7 +105,6 @@ def load_labels_from_cloud(
         bucket_name=bucket_name,
         path=folder_name,
         storage_client=storage_client,
-        firestore_client=firestore_client,
         is_folder=True,
     )
 
@@ -116,25 +117,19 @@ def load_lu_index_from_cloud(
     bucket_name: str,
     folder_name: str,
     storage_client: storage.Client,
-    firestore_client: firestore.Client = None,
 ) -> tf.Tensor:
-    """Load land use index from Google Cloud Storage with Firestore logging."""
-    lu_index_data = load_data_from_cloud(
-        bucket_name, folder_name, storage_client, firestore_client
-    )
-    return tf.convert_to_tensor(lu_index_data, dtype=tf.int32)
+    """Load land use index from Google Cloud Storage."""
+    lu_index_data = load_data_from_cloud(bucket_name, folder_name, storage_client)
+    return tf.convert_to_tensor(lu_index_data, dtype=tf.float32)
 
 
 def load_spatial_data_from_cloud(
     bucket_name: str,
     folder_name: str,
     storage_client: storage.Client,
-    firestore_client: firestore.Client = None,
 ) -> tf.Tensor:
-    """Load spatial data from Google Cloud Storage with Firestore logging."""
-    spatial_data = load_data_from_cloud(
-        bucket_name, folder_name, storage_client, firestore_client
-    )
+    """Load spatial data from Google Cloud Storage."""
+    spatial_data = load_data_from_cloud(bucket_name, folder_name, storage_client)
     return tf.convert_to_tensor(spatial_data, dtype=tf.float32)
 
 
@@ -143,13 +138,20 @@ def load_dataset(
     label_bucket_name: str,
     sim_names: list[str],
     time_steps_per_day: int,
-    batch_size: int = 4,
     shuffle: bool = True,
     storage_client: storage.Client = None,
-    firestore_client: firestore.Client = None,
 ) -> tf.data.Dataset:
-    firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
+
+    # Early validation
+    assert storage_client.bucket(
+        label_bucket_name
+    ).exists(), f"Bucket does not exist: {label_bucket_name}"
+    assert storage_client.bucket(
+        data_bucket_name
+    ).exists(), f"Bucket does not exist: {data_bucket_name}"
+
+    label_timesteps = 2 * (time_steps_per_day - 2)
 
     def data_generator():
         for sim_name in sim_names:
@@ -161,19 +163,19 @@ def load_dataset(
 
             # Load spatial, LU index, spatiotemporal, and label from their folders
             lu_index_data = load_lu_index_from_cloud(
-                data_bucket_name, lu_index_folder, storage_client, firestore_client
+                data_bucket_name, lu_index_folder, storage_client
             )
             spatial_data = load_spatial_data_from_cloud(
-                data_bucket_name, spatial_folder, storage_client, firestore_client
+                data_bucket_name, spatial_folder, storage_client
             )
             spatiotemporal_data = load_spatiotemporal_data_from_cloud(
                 data_bucket_name,
                 spatiotemporal_folder,
                 storage_client,
-                firestore_client,
             )
+            print("spatiotemporal_data", spatiotemporal_data.shape)
             label_data = load_labels_from_cloud(
-                label_bucket_name, label_folder, storage_client, firestore_client
+                label_bucket_name, label_folder, storage_client
             )
 
             # Iterate through each spatiotemporal and label file
@@ -183,15 +185,15 @@ def load_dataset(
             )
             for day_inputs, day_labels in zip(inputs, labels):
                 day_inputs_padded = pad_or_truncate_data(
-                    day_inputs.numpy(), time_steps_per_day
+                    day_inputs.numpy(), label_timesteps
                 )
                 day_labels_padded = pad_or_truncate_data(
-                    day_labels.numpy(), time_steps_per_day
+                    day_labels.numpy(), label_timesteps
                 )
                 yield {
                     "spatiotemporal": day_inputs_padded,
                     "spatial": spatial_data.numpy(),
-                    "lu_index": lu_index_data.numpy(),
+                    "lu_index": lu_index_data.numpy().reshape(200, 200),
                 }, day_labels_padded
 
     dataset = tf.data.Dataset.from_generator(
@@ -203,7 +205,7 @@ def load_dataset(
                         time_steps_per_day,
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
-                        constants.num_spatiotemporal_features,
+                        constants.NUM_SPATIOTEMPORAL_FEATURES,
                     ),
                     dtype=tf.float32,
                 ),
@@ -211,21 +213,26 @@ def load_dataset(
                     shape=(
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
-                        constants.num_spatial_features,
+                        constants.NUM_SAPTIAL_FEATURES,
                     ),
                     dtype=tf.float32,
                 ),
                 "lu_index": tf.TensorSpec(
-                    shape=(constants.MAP_HEIGHT * constants.MAP_WIDTH,),
-                    dtype=tf.int32,
+                    shape=(
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                    ),
+                    dtype=tf.float32,
                 ),
             },
             tf.TensorSpec(
                 shape=(
-                    time_steps_per_day,
+                    # Inputs have an extra 2 timesteps from the previous day.
+                    # Output has double the resolution.
+                    label_timesteps,
                     constants.MAP_HEIGHT,
                     constants.MAP_WIDTH,
-                    1,
+                    constants.OUTPUT_CHANNELS,
                 ),
                 dtype=tf.float32,
             ),
@@ -235,7 +242,6 @@ def load_dataset(
     if shuffle:
         dataset = dataset.shuffle(buffer_size=1000)  # Use a fixed buffer size
 
-    dataset = dataset.batch(batch_size)
     return dataset
 
 
@@ -247,18 +253,17 @@ def load_prediction(
     time_steps_per_day: int,
     batch_size: int = 4,
     storage_client: storage.Client = None,
-    firestore_client: firestore.Client = None,
 ) -> tf.data.Dataset:
 
     # Load spatial, LU index, and spatiotemporal data from their respective folders
     lu_index_data = load_lu_index_from_cloud(
-        data_bucket_name, lu_index_folder, storage_client, firestore_client
+        data_bucket_name, lu_index_folder, storage_client
     )
     spatial_data = load_spatial_data_from_cloud(
-        data_bucket_name, spatial_folder, storage_client, firestore_client
+        data_bucket_name, spatial_folder, storage_client
     )
     spatiotemporal_data_list = load_spatiotemporal_data_from_cloud(
-        data_bucket_name, spatiotemporal_folder, storage_client, firestore_client
+        data_bucket_name, spatiotemporal_folder, storage_client
     )
 
     def data_generator():
@@ -289,7 +294,7 @@ def load_prediction(
                         time_steps_per_day,
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
-                        constants.num_spatiotemporal_features,
+                        constants.NUM_SPATIOTEMPORAL_FEATURES,
                     ),
                     dtype=tf.float32,
                 ),
@@ -297,13 +302,16 @@ def load_prediction(
                     shape=(
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
-                        constants.num_spatial_features,
+                        constants.NUM_SAPTIAL_FEATURES,
                     ),
                     dtype=tf.float32,
                 ),
                 "lu_index": tf.TensorSpec(
-                    shape=(constants.MAP_HEIGHT * constants.MAP_WIDTH,),
-                    dtype=tf.int32,
+                    shape=(
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                    ),
+                    dtype=tf.float32,
                 ),
             },
         ),
