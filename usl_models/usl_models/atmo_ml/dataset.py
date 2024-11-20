@@ -14,7 +14,7 @@ def load_data_from_cloud(
     path: str,
     storage_client: storage.Client,
     is_folder: bool = False,
-    max_blobs: int = 15,
+    max_blobs: int = 30,
 ):
     """Load data from Google Cloud Storage.
 
@@ -39,7 +39,6 @@ def load_data_from_cloud(
             if blob_count > max_blobs:
                 break
 
-            print(blob.name)
             if blob.name.endswith(".npy"):  # Ensure only .npy files are processed
                 downloaded_data = blob.download_as_bytes()
                 np_data = np.load(io.BytesIO(downloaded_data))
@@ -173,7 +172,6 @@ def load_dataset(
                 spatiotemporal_folder,
                 storage_client,
             )
-            print("spatiotemporal_data", spatiotemporal_data.shape)
             label_data = load_labels_from_cloud(
                 label_bucket_name, label_folder, storage_client
             )
@@ -185,7 +183,7 @@ def load_dataset(
             )
             for day_inputs, day_labels in zip(inputs, labels):
                 day_inputs_padded = pad_or_truncate_data(
-                    day_inputs.numpy(), label_timesteps
+                    day_inputs.numpy(), time_steps_per_day
                 )
                 day_labels_padded = pad_or_truncate_data(
                     day_labels.numpy(), label_timesteps
