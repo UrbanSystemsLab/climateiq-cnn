@@ -33,7 +33,7 @@ class TestAtmoMLDataset(unittest.TestCase):
         #     f"gs://test-data-bucket/sim1/spatiotemporal/mock_spatiotemporal_data_{i}.npy"
         #     for i in range(3)
         # ]
-        # mock_lu_index_url = "gs://test-data-bucket/sim1/lu_index/mock_lu_index_data.npy"
+        # mockluindexurl = "gs://test-data-bucket/sim1/lu_index/mock_lu_index_data.npy"
         # mock_label_urls = [
         #     f"gs://test-label-bucket/sim1/mock_label_data_{i}.npy" for i in range(3)
         # ]
