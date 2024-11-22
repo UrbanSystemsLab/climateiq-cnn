@@ -28,17 +28,17 @@ class TestAtmoMLDataset(unittest.TestCase):
         mock_storage_client_instance.bucket.return_value = mock_bucket
 
         # Define mock URLs
-        mock_spatial_url = "gs://test-data-bucket/sim1/spatial/mock_spatial_data.npy"
-        mock_spatiotemporal_urls = [
-            f"gs://test-data-bucket/sim1/spatiotemporal/mock_spatiotemporal_data_{i}.npy"
-            for i in range(3)
-        ]
-        mock_lu_index_url = "gs://test-data-bucket/sim1/lu_index/mock_lu_index_data.npy"
-        mock_label_urls = [
-            f"gs://test-label-bucket/sim1/mock_label_data_{i}.npy" for i in range(3)
-        ]
+        # mock_spatial_url = "gs://test-data-bucket/sim1/spatial/mock_spatial_data.npy"
+        # mock_spatiotemporal_urls = [
+        #     f"gs://test-data-bucket/sim1/spatiotemporal/mock_spatiotemporal_data_{i}.npy"
+        #     for i in range(3)
+        # ]
+        # mock_lu_index_url = "gs://test-data-bucket/sim1/lu_index/mock_lu_index_data.npy"
+        # mock_label_urls = [
+        #     f"gs://test-label-bucket/sim1/mock_label_data_{i}.npy" for i in range(3)
+        # ]
 
-        # Simulate mock blobs for datasets
+        # Simulate mock blobs for different datasets
         mock_spatial_blob = create_mock_blob(
             np.random.rand(200, 200, 17).astype(np.float32)
         )
