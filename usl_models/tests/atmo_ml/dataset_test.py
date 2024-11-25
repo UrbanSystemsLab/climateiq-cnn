@@ -4,8 +4,11 @@ import numpy as np
 import unittest
 from unittest import mock
 import tensorflow as tf
+import pprint
 from unittest.mock import MagicMock
+import usl_models.testing
 from usl_models.atmo_ml import dataset
+from usl_models.atmo_ml import constants
 
 
 def create_mock_blob(data, dtype=np.float32, allow_pickle=True):
@@ -18,7 +21,7 @@ def create_mock_blob(data, dtype=np.float32, allow_pickle=True):
     return blob
 
 
-class TestAtmoMLDataset(unittest.TestCase):
+class TestAtmoMLDataset(usl_models.testing.TestCase):
     @mock.patch("google.cloud.storage.Client")
     def test_load_dataset_structure(self, mock_storage_client):
         """Test creating AtmoML dataset from GCS with expected structure and shapes."""
@@ -27,83 +30,78 @@ class TestAtmoMLDataset(unittest.TestCase):
         mock_bucket = MagicMock()
         mock_storage_client_instance.bucket.return_value = mock_bucket
 
-        # Define mock URLs
-        mock_spatial_url = "gs://test-data-bucket/sim1/spatial/mock_spatial_data.npy"
-        mock_spatiotemporal_urls = [
-            f"gs://test-data-bucket/sim1/spatiotemporal/mock_spatiotemporal_data_{i}.npy"
-            for i in range(3)
-        ]
-        mock_lu_index_url = "gs://test-data-bucket/sim1/lu_index/mock_lu_index_data.npy"
-        mock_label_urls = [
-            f"gs://test-label-bucket/sim1/mock_label_data_{i}.npy" for i in range(3)
-        ]
+        num_days = 4
+        timesteps_per_day = 6
+        num_timesteps = num_days * timesteps_per_day
+        batch_size = 2
+
+        B = batch_size
+        H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
+        F_S = constants.NUM_SAPTIAL_FEATURES
+        F_ST = constants.NUM_SPATIOTEMPORAL_FEATURES
+        C = constants.OUTPUT_CHANNELS
+        T_I, T_O = constants.INPUT_TIME_STEPS, constants.OUTPUT_TIME_STEPS
 
         # Simulate mock blobs for datasets
         mock_spatial_blob = create_mock_blob(
-            np.random.rand(200, 200, 17).astype(np.float32)
+            np.random.rand(H, W, F_S).astype(np.float32)
         )
-        mock_bucket.list_blobs.return_value = [mock_spatial_blob]
+        mock_spatiotemporal_tensor = np.random.rand(H, W, F_ST).astype(np.float32)
         mock_spatiotemporal_blobs = [
-            create_mock_blob(np.random.rand(6, 200, 200, 9).astype(np.float32))
-            for _ in range(3)
+            create_mock_blob(mock_spatiotemporal_tensor) for _ in range(num_timesteps)
         ]
         mock_lu_index_blob = create_mock_blob(
             np.random.randint(
-                0,
-                10,
-                size=(200, 200),
+                low=0,
+                high=10,
+                size=(H, W),
             ).astype(np.int32)
         )
-        mock_bucket.list_blobs.return_value = [mock_lu_index_blob]
-
         mock_label_blobs = [
-            create_mock_blob(np.random.rand(8, 200, 200, 1).astype(np.float32))
-            for _ in range(3)
+            create_mock_blob(np.random.rand(H, W, C).astype(np.float32))
+            for _ in range(num_timesteps)
         ]
 
         # Mock blob listing behavior to simulate folder structure
         mock_bucket.list_blobs.side_effect = lambda prefix: {
-            "spatial": [mock_spatial_blob],
-            "spatiotemporal": mock_spatiotemporal_blobs,
-            "lu_index": [mock_lu_index_blob],
-            "labels": mock_label_blobs,
-        }.get(prefix, [])
+            "sim1/spatial": [mock_spatial_blob],
+            "sim1/spatiotemporal": mock_spatiotemporal_blobs,
+            "sim1/lu_index": [mock_lu_index_blob],
+            "sim1": mock_label_blobs,
+        }[prefix]
 
         # Define bucket names and folder paths
         data_bucket_name = "test-data-bucket"
         label_bucket_name = "test-label-bucket"
-        time_steps_per_day = 6
-        batch_size = 2
 
         # Call the function under test
         ds = dataset.load_dataset(
             data_bucket_name=data_bucket_name,
             label_bucket_name=label_bucket_name,
             sim_names=["sim1"],
-            time_steps_per_day=time_steps_per_day,
+            timesteps_per_day=timesteps_per_day,
             storage_client=mock_storage_client_instance,
         )
         ds = ds.batch(batch_size=batch_size)
-        train_dataset, val_dataset, test_dataset = dataset.split_dataset(
-            ds, train_frac=0.7, val_frac=0.15, test_frac=0.15
+
+        inputs, labels = zip(*ds)
+        num_batches = num_days // batch_size
+        self.assertShapesRecursive(
+            list(inputs),
+            [
+                {
+                    "spatiotemporal": (B, T_I, H, W, F_ST),
+                    "spatial": (B, H, W, F_S),
+                    "lu_index": (B, H, W),
+                }
+            ] * num_batches,
         )
-
-        # Check if datasets are created and contain data
-        self.assertIsInstance(train_dataset, tf.data.Dataset)
-        self.assertIsInstance(val_dataset, tf.data.Dataset)
-        self.assertIsInstance(test_dataset, tf.data.Dataset)
-
-        # Iterate over one batch to see if data structure matches the expected signature
-        for inputs, labels in train_dataset.take(1):
-            self.assertIn("spatiotemporal", inputs)
-            self.assertIn("spatial", inputs)
-            self.assertIn("lu_index", inputs)
-            self.assertEqual(
-                inputs["spatiotemporal"].shape, (batch_size, 6, 200, 200, 9)
-            )
-            self.assertEqual(inputs["spatial"].shape, (batch_size, 200, 200, 17))
-            self.assertEqual(inputs["lu_index"].shape, (batch_size, 200, 200))
-            self.assertEqual(labels.shape, (batch_size, 8, 200, 200, 1))
+        self.assertShapesRecursive(
+            list(labels),
+            [
+                (B, T_O, H, W, C),
+            ] * num_batches,
+        )
 
     @mock.patch("google.cloud.storage.Client")
     def test_load_labels_from_cloud(self, mock_storage_client):

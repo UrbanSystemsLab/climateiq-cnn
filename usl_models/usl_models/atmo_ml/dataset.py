@@ -28,6 +28,7 @@ def load_data_from_cloud(
         Union[np.ndarray, List[np.ndarray]]: Loaded numpy data or list of arrays.
     """
     bucket = storage_client.bucket(bucket_name)
+    print("bucket", bucket.name)
 
     if is_folder:
         # List all blobs within the folder
@@ -47,7 +48,7 @@ def load_data_from_cloud(
     else:
         # Load a single file
         blobs = bucket.list_blobs(prefix=path)
-        blob = next(blobs)
+        blob = next(iter(blobs))
         downloaded_data = blob.download_as_bytes()
         return np.load(io.BytesIO(downloaded_data))
 
@@ -136,11 +137,12 @@ def load_dataset(
     data_bucket_name: str,
     label_bucket_name: str,
     sim_names: list[str],
-    time_steps_per_day: int,
+    timesteps_per_day: int,
     shuffle: bool = True,
     storage_client: storage.Client = None,
 ) -> tf.data.Dataset:
     storage_client = storage_client or storage.Client()
+    print("loading dataset!!!")
 
     # Early validation
     assert storage_client.bucket(
@@ -150,7 +152,7 @@ def load_dataset(
         data_bucket_name
     ).exists(), f"Bucket does not exist: {data_bucket_name}"
 
-    label_timesteps = 2 * (time_steps_per_day - 2)
+    label_timesteps = 2 * (timesteps_per_day - 2)
 
     def data_generator():
         for sim_name in sim_names:
@@ -179,11 +181,11 @@ def load_dataset(
             # Iterate through each spatiotemporal and label file
             # Divide data into days and apply padding or truncation
             inputs, labels = cnn_inputs_outputs.divide_into_days(
-                spatiotemporal_data, label_data, time_steps_per_day
+                spatiotemporal_data, label_data, timesteps_per_day
             )
             for day_inputs, day_labels in zip(inputs, labels):
                 day_inputs_padded = pad_or_truncate_data(
-                    day_inputs.numpy(), time_steps_per_day
+                    day_inputs.numpy(), timesteps_per_day
                 )
                 day_labels_padded = pad_or_truncate_data(
                     day_labels.numpy(), label_timesteps
@@ -200,7 +202,7 @@ def load_dataset(
             {
                 "spatiotemporal": tf.TensorSpec(
                     shape=(
-                        time_steps_per_day,
+                        timesteps_per_day,
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
                         constants.NUM_SPATIOTEMPORAL_FEATURES,
@@ -248,7 +250,7 @@ def load_prediction(
     spatiotemporal_folder: str,
     spatial_folder: str,
     lu_index_folder: str,
-    time_steps_per_day: int,
+    timesteps_per_day: int,
     batch_size: int = 4,
     storage_client: storage.Client = None,
 ) -> tf.data.Dataset:
@@ -274,7 +276,7 @@ def load_prediction(
             )
             for day_inputs in inputs:
                 day_inputs_padded = pad_or_truncate_data(
-                    day_inputs.numpy(), time_steps_per_day
+                    day_inputs.numpy(), timesteps_per_day
                 )
                 yield {
                     "spatiotemporal": day_inputs_padded,
@@ -289,7 +291,7 @@ def load_prediction(
             {
                 "spatiotemporal": tf.TensorSpec(
                     shape=(
-                        time_steps_per_day,
+                        timesteps_per_day,
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
                         constants.NUM_SPATIOTEMPORAL_FEATURES,
