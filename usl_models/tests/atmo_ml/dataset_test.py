@@ -1,10 +1,8 @@
 # TODO: fix this file
 import io
 import numpy as np
-import unittest
 from unittest import mock
 import tensorflow as tf
-import pprint
 from unittest.mock import MagicMock
 import usl_models.testing
 from usl_models.atmo_ml import dataset

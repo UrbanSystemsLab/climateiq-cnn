@@ -425,21 +425,18 @@ class AtmoConvLSTM(tf.keras.Model):
                 paddings=[[0, 0], [0, 0], [0, 0], [0, 0], [0, missing_channels]],
                 constant_values=0,
             )
-        print("lu_index_input", lu_index_input.shape)
 
         # Reshape lu_index matrix for embedding
         lu_index_input_flat = tf.reshape(
             lu_index_input, (-1, self._spatial_height * self._spatial_width)
         )
         lu_index_embedded_flat = self.lu_index_embedding(lu_index_input_flat)
-        print("lu_index_embedded_flat", lu_index_embedded_flat)
 
         # Reshape back to matrix form (200, 200, ?, ?)
         lu_index_embedded = tf.reshape(
             lu_index_embedded_flat,
             (-1, self._spatial_height, self._spatial_width, self._embedding_dim),
         )
-        print("lu_index_embedded", lu_index_embedded.shape)
 
         # Concatenate lu_index embedding with other spatial features
         spatial_input = tf.concat([spatial_input, lu_index_embedded], axis=-1)
@@ -452,16 +449,13 @@ class AtmoConvLSTM(tf.keras.Model):
         spatial_cnn_output = spatial_cnn_output[:, tf.newaxis, :, :, :]
         n = st_input.shape[1]
         spatial_cnn_output = tf.repeat(spatial_cnn_output, [n], axis=1)
-        print("spatial_cnn_output", spatial_cnn_output.shape)
         concat_inputs = tf.concat([st_cnn_output, spatial_cnn_output], axis=-1)
 
         lstm_input = data_utils.boundary_pairs(concat_inputs)
         lstm_output = self.conv_lstm(lstm_input)
-        print("lstm_output", lstm_output.shape)
 
         # Split up paired tensors into individual time steps.
         trconv_input = data_utils.split_time_step_pairs(lstm_output)
-        print("trconv_input", trconv_input.shape)
 
         outputs = [
             self._t2_output_cnn(trconv_input),
@@ -469,5 +463,4 @@ class AtmoConvLSTM(tf.keras.Model):
             self._wspd10_output_cnn(trconv_input),
             self._wdir10_output_cnn(trconv_input),
         ]
-        print("outputs[0]", outputs[0].shape)
         return tf.concat(outputs, axis=-1)

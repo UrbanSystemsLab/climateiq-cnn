@@ -28,7 +28,6 @@ def load_data_from_cloud(
         Union[np.ndarray, List[np.ndarray]]: Loaded numpy data or list of arrays.
     """
     bucket = storage_client.bucket(bucket_name)
-    print("bucket", bucket.name)
 
     if is_folder:
         # List all blobs within the folder
@@ -142,7 +141,6 @@ def load_dataset(
     storage_client: storage.Client = None,
 ) -> tf.data.Dataset:
     storage_client = storage_client or storage.Client()
-    print("loading dataset!!!")
 
     # Early validation
     assert storage_client.bucket(
