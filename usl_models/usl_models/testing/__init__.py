@@ -9,7 +9,7 @@ class TestCase(unittest.TestCase):
     """Testing utils."""
     def assertShapesRecursive(self, obj: object, expected: object, path: str = ""):
         """Recursively checks the shapes of numpy arrays in a data structure."""
-        if type(obj) == np.ndarray or tf.is_tensor(obj):
+        if isinstance(obj, np.ndarray) or tf.is_tensor(obj):
             self.assertEqual(obj.shape, expected, msg=f"Shape mismatch in path {path}")
             return
 
