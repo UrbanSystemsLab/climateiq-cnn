@@ -92,13 +92,15 @@ class TestAtmoMLDataset(usl_models.testing.TestCase):
                     "spatial": (B, H, W, F_S),
                     "lu_index": (B, H, W),
                 }
-            ] * num_batches,
+            ]
+            * num_batches,
         )
         self.assertShapesRecursive(
             list(labels),
             [
                 (B, T_O, H, W, C),
-            ] * num_batches,
+            ]
+            * num_batches,
         )
 
     @mock.patch("google.cloud.storage.Client")

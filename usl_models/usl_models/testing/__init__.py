@@ -7,6 +7,7 @@ import tensorflow as tf
 
 class TestCase(unittest.TestCase):
     """Testing utils."""
+
     def assertShapesRecursive(self, obj: object, expected: object, path: str = ""):
         """Recursively checks the shapes of numpy arrays in a data structure."""
         if isinstance(obj, np.ndarray) or tf.is_tensor(obj):
