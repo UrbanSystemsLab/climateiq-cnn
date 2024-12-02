@@ -1,135 +1,38 @@
 import functools
-import io
 
 import tensorflow as tf
 import numpy as np
 from google.cloud import storage  # type: ignore
 from usl_models.atmo_ml import constants, cnn_inputs_outputs
+from usl_models.shared import downloader
 
 
 # Load data from Google Cloud Storage
 @functools.lru_cache(maxsize=256)
-def load_data_from_cloud(
+def load_folder_from_cloud(
     bucket_name: str,
     path: str,
     storage_client: storage.Client,
-    is_folder: bool = False,
-    max_blobs: int = 30,
-):
-    """Load data from Google Cloud Storage.
+    max_blobs: int | None = None,
+) -> tf.Tensor:
+    """Download all files in the folder.
 
-    Args:
-        bucket_name (str): Name of the Google Cloud Storage bucket.
-        path (str): Path to the file or folder in the bucket.
-        storage_client (storage.Client): Google Cloud Storage client instance.
-        is_folder (bool): If True, load all .npy files in the folder.
-
-    Returns:
-        Union[np.ndarray, List[np.ndarray]]: Loaded numpy data or list of arrays.
+    If max_blobs is specified, only returns that many blobs.
     """
     bucket = storage_client.bucket(bucket_name)
+    # List all blobs within the folder
+    blobs = bucket.list_blobs(prefix=path)
+    all_data = []
+    blob_count = 0
+    for blob in blobs:
+        blob_count += 1
+        if max_blobs is not None and blob_count > max_blobs:
+            break
 
-    if is_folder:
-        # List all blobs within the folder
-        blobs = bucket.list_blobs(prefix=path)
-        all_data = []
-        blob_count = 0
-        for blob in blobs:
-            blob_count += 1
-            if blob_count > max_blobs:
-                break
+        if blob.name.endswith(".npy"):  # Ensure only .npy files are processed
+            all_data.append(downloader.blob_to_tensor(blob))
 
-            if blob.name.endswith(".npy"):  # Ensure only .npy files are processed
-                downloaded_data = blob.download_as_bytes()
-                np_data = np.load(io.BytesIO(downloaded_data))
-                all_data.append(np_data)
-        return all_data  # Return a list of numpy arrays
-    else:
-        # Load a single file
-        blobs = bucket.list_blobs(prefix=path)
-        blob = next(iter(blobs))
-        downloaded_data = blob.download_as_bytes()
-        return np.load(io.BytesIO(downloaded_data))
-
-
-def load_spatiotemporal_data_from_cloud(
-    bucket_name: str,
-    folder_name: str,
-    storage_client: storage.Client,
-) -> tf.Tensor:
-    """Load all spatiotemporal files from a specified folder in Google Cloud Storage.
-
-    Args:
-        bucket_name (str): Name of the Google Cloud Storage bucket.
-        folder_name (str): Name of the folder containing time step numpy files.
-        storage_client (storage.Client): Google Cloud Storage client instance.
-
-    Returns:
-        tf.Tensor: A tensor containing spatiotemporal data across all time steps.
-    """
-    # Use load_data_from_cloud with is_folder=True to load all .npy files in the folder
-    time_step_data = load_data_from_cloud(
-        bucket_name=bucket_name,
-        path=folder_name,
-        storage_client=storage_client,
-        is_folder=True,
-    )
-
-    # Stack all time steps along a new axis to create a tensor
-    spatiotemporal_data = tf.convert_to_tensor(
-        np.stack(time_step_data), dtype=tf.float32
-    )
-    return spatiotemporal_data
-
-
-def load_labels_from_cloud(
-    bucket_name: str,
-    folder_name: str,
-    storage_client: storage.Client,
-) -> tf.Tensor:
-    """Load all label files from a specified folder in GCS.
-
-    Combine the label data into a single tensor.
-
-    Args:
-        bucket_name (str): Name of the Google Cloud Storage bucket.
-        folder_name (str): Name of the folder containing label numpy files.
-        storage_client (storage.Client): Google Cloud Storage client instance.
-
-    Returns:
-        tf.Tensor: A tensor containing label data across all time steps.
-    """
-    # Use load_data_from_cloud with is_folder=True to load all .npy files in the folder
-    label_data = load_data_from_cloud(
-        bucket_name=bucket_name,
-        path=folder_name,
-        storage_client=storage_client,
-        is_folder=True,
-    )
-
-    # Stack all label data along a new axis to create a tensor
-    labels_tensor = tf.convert_to_tensor(np.stack(label_data), dtype=tf.float32)
-    return labels_tensor
-
-
-def load_lu_index_from_cloud(
-    bucket_name: str,
-    folder_name: str,
-    storage_client: storage.Client,
-) -> tf.Tensor:
-    """Load land use index from Google Cloud Storage."""
-    lu_index_data = load_data_from_cloud(bucket_name, folder_name, storage_client)
-    return tf.convert_to_tensor(lu_index_data, dtype=tf.float32)
-
-
-def load_spatial_data_from_cloud(
-    bucket_name: str,
-    folder_name: str,
-    storage_client: storage.Client,
-) -> tf.Tensor:
-    """Load spatial data from Google Cloud Storage."""
-    spatial_data = load_data_from_cloud(bucket_name, folder_name, storage_client)
-    return tf.convert_to_tensor(spatial_data, dtype=tf.float32)
+    return tf.stack(all_data)
 
 
 def load_dataset(
@@ -139,6 +42,7 @@ def load_dataset(
     timesteps_per_day: int,
     shuffle: bool = True,
     storage_client: storage.Client = None,
+    max_blobs: int | None = None,
 ) -> tf.data.Dataset:
     storage_client = storage_client or storage.Client()
 
@@ -161,19 +65,21 @@ def load_dataset(
             label_folder = sim_name
 
             # Load spatial, LU index, spatiotemporal, and label from their folders
-            lu_index_data = load_lu_index_from_cloud(
-                data_bucket_name, lu_index_folder, storage_client
-            )
-            spatial_data = load_spatial_data_from_cloud(
-                data_bucket_name, spatial_folder, storage_client
-            )
-            spatiotemporal_data = load_spatiotemporal_data_from_cloud(
+            lu_index_data = load_folder_from_cloud(
+                data_bucket_name, lu_index_folder, storage_client, max_blobs=1
+            )[0]
+            spatial_data = load_folder_from_cloud(
+                data_bucket_name, spatial_folder, storage_client, max_blobs=1
+            )[0]
+            spatiotemporal_data = load_folder_from_cloud(
                 data_bucket_name,
                 spatiotemporal_folder,
                 storage_client,
+                max_blobs=max_blobs,
             )
-            label_data = load_labels_from_cloud(
-                label_bucket_name, label_folder, storage_client
+            label_data = load_folder_from_cloud(
+                label_bucket_name, label_folder, storage_client,
+                max_blobs=max_blobs
             )
 
             # Iterate through each spatiotemporal and label file
@@ -243,7 +149,7 @@ def load_dataset(
     return dataset
 
 
-def load_prediction(
+def load_prediction_dataset(
     data_bucket_name: str,
     spatiotemporal_folder: str,
     spatial_folder: str,
@@ -251,17 +157,18 @@ def load_prediction(
     timesteps_per_day: int,
     batch_size: int = 4,
     storage_client: storage.Client = None,
+    max_blobs: int | None = None
 ) -> tf.data.Dataset:
 
     # Load spatial, LU index, and spatiotemporal data from their respective folders
-    lu_index_data = load_lu_index_from_cloud(
-        data_bucket_name, lu_index_folder, storage_client
-    )
-    spatial_data = load_spatial_data_from_cloud(
-        data_bucket_name, spatial_folder, storage_client
-    )
-    spatiotemporal_data_list = load_spatiotemporal_data_from_cloud(
-        data_bucket_name, spatiotemporal_folder, storage_client
+    lu_index_data = load_folder_from_cloud(
+        data_bucket_name, lu_index_folder, storage_client, max_blobs=1
+    )[0]
+    spatial_data = load_folder_from_cloud(
+        data_bucket_name, spatial_folder, storage_client, max_blobs=1
+    )[0]
+    spatiotemporal_data_list = load_folder_from_cloud(
+        data_bucket_name, spatiotemporal_folder, storage_client, max_blobs=max_blobs
     )
 
     def data_generator():
