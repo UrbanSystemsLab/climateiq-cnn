@@ -2,8 +2,7 @@ r"""Run training on vertex AI for Atmo ML model.
 
 Command:
 cd usl_models
-python trainer/atmo_task.py \
-    --sim-names="NYC_Heat_Test/NYC_summer_2000_01p"
+python trainer/atmo_task.py
 """
 import argparse
 import logging
@@ -45,7 +44,6 @@ parser.add_argument(
     help="distributed training strategy",
     choices=["single", "mirrored", "multiworker", "tpu"],
 )
-parser.add_argument("--sim-names", dest="sim_names", nargs="+", type=str, required=True)
 args = parser.parse_args()
 
 logging.info("DEVICES" + str(device_lib.list_local_devices()))
@@ -87,7 +85,7 @@ def train(
     model: atmo_model.AtmoModel,
     train_dataset: tf.data.Dataset,
     val_dataset: tf.data.Dataset,
-    firestore_client: firestore.Client,
+    sim_names: list[str]
 ) -> None:
     """Trains a model with the given dataset and saves the model to GCS."""
     kwargs = {}
@@ -125,91 +123,59 @@ def train(
     metastore.write_model_metadata(
         firestore_client,
         gcs_model_dir=model_dir,
-        sim_names=args.sim_names,
+        sim_names=sim_names,
         model_params=model._model_params,
         epochs=args.epochs,
         model_name=args.model_name,
     )
 
 
-data_bucket_name = "climateiq-study-area-feature-chunks"
-label_bucket_name = "climateiq-study-area-label-chunks"
-time_steps_per_day = 6
-batch_size = 4
-# Initialize GCP storage client
-storage_client = storage.Client()
+if __name__ == "__main__":
+    sim_dirs = [
+        ('NYC_Heat_Test', [
+            'NYC_summer_2000_01p',
+            'NYC_summer_2010_25p',
+            'NYC_summer_2015_50p',
+            'NYC_summer_2017_75p',
+            'NYC_summer_2018_99p'
+        ]),
+        ('PHX_Heat_Test', [
+            'PHX_summer_2008_25p',
+            'PHX_summer_2009_50p',
+            'PHX_summer_2011_99p',
+            'PHX_summer_2015_75p',
+            'PHX_summer_2020_01p'
+        ])
+    ]
 
+    sim_names = []
+    for sim_dir, subdirs in sim_dirs:
+        for subdir in subdirs:
+            sim_names.append(sim_dir + '/' + subdir)
 
-def list_files_in_subfolders(bucket_name, region_folder, subfolder_suffix):
-    """List all files in subfolders of a region that match a specific suffix.
+    with strategy.scope():
+        data_bucket_name = "climateiq-study-area-feature-chunks"
+        label_bucket_name = "climateiq-study-area-label-chunks"
+        time_steps_per_day = 6
+        batch_size = 4
+        firestore_client = firestore.Client(project="climateiq")
+        model_params = atmo_model_params.default_params()
+        if args.batch_size is not None:
+            model_params["batch_size"] = args.batch_size
+        model = atmo_model.AtmoModel(params=model_params)
+        logging.info(
+            "Training model for %s epochs with params %s", args.epochs, model_params
+        )
+        storage_client = storage.Client(project="climateiq")
+        ds = dataset.load_dataset(
+            data_bucket_name=data_bucket_name,
+            label_bucket_name=label_bucket_name,
+            sim_names=sim_names,
+            timesteps_per_day=time_steps_per_day,
+            storage_client=storage_client
+        ).batch(batch_size=4)
+        train_dataset, val_dataset, test_dataset = dataset.split_dataset(
+            ds, train_frac=0.7, val_frac=0.15, test_frac=0.15
+        )
 
-    Args:
-        bucket_name (str): Name of the GCS bucket.
-        region_folder (str): Folder name for the region (e.g., "NYC").
-        subfolder_suffix (str): Suffix to match subfolders (e.g., "NYC_summer_").
-
-    Returns:
-        list: List of file paths within the subfolders.
-    """
-    bucket = storage_client.bucket(bucket_name)
-    blobs = storage_client.list_blobs(bucket, prefix=region_folder)
-
-    # Collect files from subfolders with matching suffix
-    file_paths = []
-    for blob in blobs:
-        # Check if the blob path matches the desired subfolder suffix
-        if subfolder_suffix in blob.name and not blob.name.endswith("/"):
-            file_paths.append(blob.name)
-    return file_paths
-
-
-# NYC-specific files
-nyc_feature_files = list_files_in_subfolders(data_bucket_name, "NYC", "NYC_summer_")
-nyc_label_files = list_files_in_subfolders(label_bucket_name, "NYC", "NYC_summer_")
-
-print(f"NYC Feature Files: {nyc_feature_files}")
-print(f"NYC Label Files: {nyc_label_files}")
-
-# Phoenix-specific files
-phoenix_feature_files = list_files_in_subfolders(
-    data_bucket_name, "Phoenix", "Phoenix_summer_"
-)
-phoenix_label_files = list_files_in_subfolders(
-    label_bucket_name, "Phoenix", "Phoenix_summer_"
-)
-
-print(f"Phoenix Feature Files: {phoenix_feature_files}")
-print(f"Phoenix Label Files: {phoenix_label_files}")
-
-# Combine NYC and Phoenix files
-combined_feature_files = nyc_feature_files + phoenix_feature_files
-combined_label_files = nyc_label_files + phoenix_label_files
-
-with strategy.scope():
-    firestore_client = firestore.Client(project="climateiq")
-
-    model_params = atmo_model_params.default_params()
-    if args.batch_size is not None:
-        model_params["batch_size"] = args.batch_size
-    model = atmo_model.AtmoModel(params=model_params)
-    logging.info(
-        "Training model for %s epochs with params %s", args.epochs, model_params
-    )
-
-    kwargs = {}
-    if args.batch_size is not None:
-        kwargs["batch_size"] = args.batch_size
-    storage_client = storage.Client(project="climateiq")
-    client = storage.Client(project="climateiq")
-    ds = dataset.load_dataset(
-        data_bucket_name=data_bucket_name,
-        label_bucket_name=label_bucket_name,
-        sim_names=args.sim_names,
-        timesteps_per_day=time_steps_per_day,
-    )
-    ds = ds.batch(batch_size=4)
-    train_dataset, val_dataset, test_dataset = dataset.split_dataset(
-        ds, train_frac=0.7, val_frac=0.15, test_frac=0.15
-    )
-
-train(model, train_dataset, val_dataset, firestore_client)
+        train(model, train_dataset, val_dataset, sim_names)
