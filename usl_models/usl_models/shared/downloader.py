@@ -32,5 +32,4 @@ def blob_to_tensor(blob: storage.Blob):
     return tf.convert_to_tensor(
         blob_to_array(blob),
         dtype=tf.float32,
-    ) 
-
+    )
