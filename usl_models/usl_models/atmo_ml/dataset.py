@@ -78,8 +78,7 @@ def load_dataset(
                 max_blobs=max_blobs,
             )
             label_data = load_folder_from_cloud(
-                label_bucket_name, label_folder, storage_client,
-                max_blobs=max_blobs
+                label_bucket_name, label_folder, storage_client, max_blobs=max_blobs
             )
 
             # Iterate through each spatiotemporal and label file
@@ -157,7 +156,7 @@ def load_prediction_dataset(
     timesteps_per_day: int,
     batch_size: int = 4,
     storage_client: storage.Client = None,
-    max_blobs: int | None = None
+    max_blobs: int | None = None,
 ) -> tf.data.Dataset:
 
     # Load spatial, LU index, and spatiotemporal data from their respective folders
