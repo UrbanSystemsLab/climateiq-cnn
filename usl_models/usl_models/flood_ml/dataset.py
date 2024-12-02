@@ -3,17 +3,15 @@
 import logging
 import random
 from typing import Any, Iterator, Tuple
-import urllib.parse
 
 from google.cloud import firestore  # type:ignore[attr-defined]
 from google.cloud import storage  # type:ignore[attr-defined]
-import numpy
-from numpy.typing import NDArray
 import tensorflow as tf
 
 from usl_models.flood_ml import constants
 from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
+from usl_models.shared import downloader
 
 
 def load_dataset(
@@ -327,7 +325,7 @@ def _generate_temporal_tensor(
     gcs_url = temporal_metadata["as_vector_gcs_uri"]
     logging.info("Retrieving temporal features from %s.", gcs_url)
 
-    temporal_vector = _download_as_tensor(storage_client, gcs_url)
+    temporal_vector = downloader.download_as_tensor(storage_client, gcs_url)
     temporal_vector = tf.transpose(
         tf.tile(tf.reshape(temporal_vector, (1, len(temporal_vector))), [m_rainfall, 1])
     )
@@ -354,29 +352,11 @@ def _iter_geo_feature_label_tensors(
         logging.info(
             "Retrieving features from %s and labels from %s", feature_url, label_url
         )
-        feature_tensor = _download_as_tensor(storage_client, feature_url)
-        label_tensor = _download_as_tensor(storage_client, label_url)
+        feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
+        label_tensor = downloader.download_as_tensor(storage_client, label_url)
 
         reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
         yield feature_tensor, reshaped_label_tensor
-
-
-def _download_as_array(client: storage.Client, gcs_url: str) -> NDArray:
-    """Retrieves the contents at `gcs_url` from GCS as a numpy array."""
-    parsed = urllib.parse.urlparse(gcs_url)
-    bucket = client.bucket(parsed.netloc)
-    blob = bucket.blob(parsed.path.lstrip("/"))
-
-    with blob.open("rb") as fd:
-        return numpy.load(fd)
-
-
-def _download_as_tensor(client: storage.Client, gcs_url: str) -> tf.Tensor:
-    """Retrieves the contents at `gcs_url` from GCS as a tf tensor."""
-    return tf.convert_to_tensor(
-        _download_as_array(client, gcs_url),
-        dtype=tf.float32,
-    )
 
 
 def _iter_model_inputs_for_prediction(
@@ -435,7 +415,7 @@ def _iter_study_area_tensors(
         chunk_name = feature_url.split("/")[-1]
 
         logging.info("Retrieving features from %s ", feature_url)
-        feature_tensor = _download_as_tensor(storage_client, feature_url)
+        feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
         yield feature_tensor, chunk_name
 
 

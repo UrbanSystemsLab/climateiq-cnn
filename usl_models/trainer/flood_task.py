@@ -133,36 +133,37 @@ def train(
     )
 
 
-with strategy.scope():
-    # Creation of dataset, and model building/compiling need to be within
-    # `strategy.scope()`.
-    firestore_client = firestore.Client(project="climateiq")
+if __name__ == "__main__":
+    with strategy.scope():
+        # Creation of dataset, and model building/compiling need to be within
+        # `strategy.scope()`.
+        firestore_client = firestore.Client(project="climateiq")
 
-    model_params = usl_models.flood_ml.model_params.default_params()
-    if args.batch_size is not None:
-        model_params["batch_size"] = args.batch_size
-    model = usl_models.flood_ml.model.FloodModel(params=model_params)
-    logging.info(
-        "Training model for %s epochs with params %s", args.epochs, model_params
-    )
+        model_params = usl_models.flood_ml.model_params.default_params()
+        if args.batch_size is not None:
+            model_params["batch_size"] = args.batch_size
+        model = usl_models.flood_ml.model.FloodModel(params=model_params)
+        logging.info(
+            "Training model for %s epochs with params %s", args.epochs, model_params
+        )
 
-    kwargs = {}
-    if args.batch_size is not None:
-        kwargs["batch_size"] = args.batch_size
-    train_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
-        sim_names=args.sim_names,
-        dataset_split="train",
-        firestore_client=firestore_client,
-        storage_client=storage.Client(project="climateiq"),
-        **kwargs,
-    )
-    val_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
-        sim_names=args.sim_names,
-        dataset_split="val",
-        firestore_client=firestore_client,
-        storage_client=storage.Client(project="climateiq"),
-        **kwargs,
-    )
+        kwargs = {}
+        if args.batch_size is not None:
+            kwargs["batch_size"] = args.batch_size
+        train_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
+            sim_names=args.sim_names,
+            dataset_split="train",
+            firestore_client=firestore_client,
+            storage_client=storage.Client(project="climateiq"),
+            **kwargs,
+        )
+        val_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
+            sim_names=args.sim_names,
+            dataset_split="val",
+            firestore_client=firestore_client,
+            storage_client=storage.Client(project="climateiq"),
+            **kwargs,
+        )
 
 
-train(model, train_dataset, val_dataset, firestore_client)
+    train(model, train_dataset, val_dataset, firestore_client)

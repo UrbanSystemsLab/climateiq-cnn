@@ -33,10 +33,10 @@ class AtmoModel:
         self,
         params: AtmoModelParams | None = None,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
-        num_spatial_features: int = constants.num_spatial_features,
-        num_spatiotemporal_features: int = constants.num_spatiotemporal_features,
-        lu_index_vocab_size: int = constants.lu_index_vocab_size,
-        embedding_dim: int = constants.embedding_dim,
+        num_spatial_features: int = constants.NUM_SAPTIAL_FEATURES,
+        num_spatiotemporal_features: int = constants.NUM_SPATIOTEMPORAL_FEATURES,
+        lu_index_vocab_size: int = constants.LU_INDEX_VOCAB_SIZE,
+        embedding_dim: int = constants.EMBEDDING_DIM,
     ):
         """Creates the Atmo model.
 
@@ -394,8 +394,19 @@ class AtmoConvLSTM(tf.keras.Model):
         Returns:
             A rank-5 tensor of all output predictions.
         """
-        spatial_input = inputs["spatial"]
+        spatial_input = inputs["spatial"]  # (B, H, W, C)
         st_input = inputs["spatiotemporal"]
+        lu_index_input = inputs["lu_index"]  # lu_index is passed separately
+
+        B = st_input.shape[0]
+        C = constants.NUM_SAPTIAL_FEATURES
+        H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
+        STF = constants.NUM_SPATIOTEMPORAL_FEATURES
+        T = constants.INPUT_TIME_STEPS
+
+        tf.ensure_shape(spatial_input, (B, H, W, C))
+        tf.ensure_shape(st_input, (B, T, H, W, STF))
+        tf.ensure_shape(lu_index_input, (B, H, W))
 
         # Ensure all spatial features are present; if not, replace with zeros
         if spatial_input.shape[-1] < self._spatial_features:
@@ -414,7 +425,6 @@ class AtmoConvLSTM(tf.keras.Model):
                 paddings=[[0, 0], [0, 0], [0, 0], [0, 0], [0, missing_channels]],
                 constant_values=0,
             )
-        lu_index_input = inputs["lu_index"]  # lu_index is passed separately
 
         # Reshape lu_index matrix for embedding
         lu_index_input_flat = tf.reshape(
@@ -422,7 +432,7 @@ class AtmoConvLSTM(tf.keras.Model):
         )
         lu_index_embedded_flat = self.lu_index_embedding(lu_index_input_flat)
 
-        # Reshape back to matrix form
+        # Reshape back to matrix form (200, 200, ?, ?)
         lu_index_embedded = tf.reshape(
             lu_index_embedded_flat,
             (-1, self._spatial_height, self._spatial_width, self._embedding_dim),
