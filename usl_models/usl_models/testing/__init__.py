@@ -1,6 +1,6 @@
 import builtins
 import unittest
-
+from typing import Any
 import numpy as np
 import tensorflow as tf
 
@@ -8,10 +8,11 @@ import tensorflow as tf
 class TestCase(unittest.TestCase):
     """Testing utilss."""
 
-    def assertShapesRecursive(self, obj: object, expected: object, path: str = ""):
+    def assertShapesRecursive(self, obj: Any, expected: Any, path: str = ""):
         """Recursively checks the shapes of numpy arrays in a data structure."""
         if isinstance(obj, np.ndarray) or tf.is_tensor(obj):
-            self.assertEqual(obj.shape, expected, msg=f"Shape mismatch in path {path}")
+            self.assertEqual(obj.shape,
+                             expected, msg=f"Shape mismatch in path {path}")
             return
 
         self.assertEqual(type(obj), type(expected), msg=f"Type mismatch in path {path}")
