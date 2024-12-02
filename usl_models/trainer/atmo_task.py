@@ -1,3 +1,10 @@
+r"""Run training on vertex AI for Atmo ML model.
+
+Command:
+cd usl_models
+python trainer/atmo_task.py \
+    --sim-names="NYC_Heat_Test/NYC_summer_2000_01p"
+"""
 import argparse
 import logging
 import os
@@ -7,10 +14,9 @@ from google.cloud import storage
 import tensorflow as tf
 from tensorflow.python.client import device_lib
 
-import usl_models.atmo_ml.dataset
-import usl_models.atmo_ml.model
+from usl_models.atmo_ml import model as atmo_model
 from usl_models.atmo_ml import metastore
-import usl_models.atmo_ml.model_params
+from usl_models.atmo_ml import model_params as atmo_model_params
 from usl_models.atmo_ml import dataset
 
 logging.basicConfig(level=logging.INFO)
@@ -78,7 +84,7 @@ def _is_chief(task_type, task_id):
 
 
 def train(
-    model: usl_models.atmo_ml.model.AtmoModel,
+    model: atmo_model.AtmoModel,
     train_dataset: tf.data.Dataset,
     val_dataset: tf.data.Dataset,
     firestore_client: firestore.Client,
@@ -182,10 +188,10 @@ combined_label_files = nyc_label_files + phoenix_label_files
 with strategy.scope():
     firestore_client = firestore.Client(project="climateiq")
 
-    model_params = usl_models.atmo_ml.model_params.default_params()
+    model_params = atmo_model_params.default_params()
     if args.batch_size is not None:
         model_params["batch_size"] = args.batch_size
-    model = usl_models.atmo_ml.model.AtmoModel(params=model_params)
+    model = atmo_model.AtmoModel(params=model_params)
     logging.info(
         "Training model for %s epochs with params %s", args.epochs, model_params
     )
@@ -196,8 +202,8 @@ with strategy.scope():
     storage_client = storage.Client(project="climateiq")
     client = storage.Client(project="climateiq")
     ds = dataset.load_dataset(
-        data_bucket_name=combined_feature_files,
-        label_bucket_name=combined_label_files,
+        data_bucket_name=data_bucket_name,
+        label_bucket_name=label_bucket_name,
         sim_names=args.sim_names,
         timesteps_per_day=time_steps_per_day,
     )
