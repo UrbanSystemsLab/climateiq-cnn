@@ -1,7 +1,7 @@
 import urllib.parse
 import numpy as np
 import numpy.typing as npt
-from google.cloud import storage
+from google.cloud import storage  # type:ignore[attr-defined]
 import tensorflow as tf
 
 
