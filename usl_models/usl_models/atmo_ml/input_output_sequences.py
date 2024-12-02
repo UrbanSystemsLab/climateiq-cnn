@@ -47,7 +47,6 @@ def create_input_output_sequences(
 
         # Input sequences
         for t in range(time_steps_per_day):
-            print(f"Time step: {t}")  # Debug: Print the current time step
             if day == 0:  # First day
                 if t == 0:
                     input_seq = tf.stack(

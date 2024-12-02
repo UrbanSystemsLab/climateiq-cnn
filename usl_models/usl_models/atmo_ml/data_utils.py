@@ -38,35 +38,35 @@ def boundary_pairs(data: tf.Tensor) -> tf.Tensor:
 def split_time_step_pairs(data: tf.Tensor) -> tf.Tensor:
     """Splits a tensor into two time steps.
 
-    Takes a time sequence of T paired tensors and returns 2T single tensors.
-    This function follows the work done by boundary_pairs, which groups tensors
-    tensors up, and splits them up again prior to retrieving the final output.
-
-        Input: [[T0, T1], [T2, T3], [T4, T5]]
-        Output: [T0, T1, T2, T3, T4, T5]
-
-    For more details about this function and boundary_pairs, see
-    https://www.notion.so/climate-iq/AtmoML-Architecture-Proposals-and-Design-c00d0e54265c4bb8a72ce01fd475f116?pvs=4#455d785c174a482c90a78efde380adf3.
-
     Args:
         data: A time sequence of paired tensors of shape [B, T, H, W, 2C].
 
     Returns:
-        A time sequence of single tensors of shape [B, 2T, H, W, C].
+        A time sequence of single tensors of shape [B, 2T - 2, H, W, C].
     """
-    # Transpose to [B, H, W, T, 2C] so that we can split the channel dimension
+    # Transpose to [B, H, W, T, 2C] for easier manipulation
     permuted = tf.transpose(data, (0, 2, 3, 1, 4))
-
     # Get the dynamic shape
     batch_size = tf.shape(permuted)[0]
     height = tf.shape(permuted)[1]
     width = tf.shape(permuted)[2]
-    time_steps = tf.shape(permuted)[3] * 2  # Original time steps are doubled
-    channels = tf.shape(permuted)[4] // 2  # Original channels are halved
-
-    # Reshape to [B, H, W, 2T, C]
-    reshaped = tf.reshape(permuted, (batch_size, height, width, time_steps, channels))
-
-    # Transpose back to [B, 2T, H, W, C]
-    output = tf.transpose(reshaped, (0, 3, 1, 2, 4))
+    original_time_steps = tf.shape(permuted)[3]  # This will be T
+    channels = tf.shape(permuted)[4] // 2  # Halve the channels (2C -> C)
+    # Split the time sequence into two halves for each pair
+    # Example: [ (X_{d-1}^{18}, X^0), (X^0, X^6),..] -> separate into individual tensors
+    split = tf.reshape(
+        permuted, (batch_size, height, width, original_time_steps, 2, channels)
+    )
+    print("Split shape:", split.shape)
+    # Reshape into individual time steps
+    separated = tf.reshape(
+        split, (batch_size, height, width, original_time_steps * 2, channels)
+    )
+    print("Separated shape (pre-slice):", separated.shape)
+    # Remove the outermost single time steps (X_{d-1}^{18} and X_{d+1}^0)
+    reduced = separated[:, :, :, 1:-1, :]
+    print("Reduced shape after removing outermost time steps:", reduced.shape)
+    # Transpose back to [B, T_adjusted, H, W, C]
+    output = tf.transpose(reduced, (0, 3, 1, 2, 4))
+    tf.print("Output shape:", output.shape)
     return output
