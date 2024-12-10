@@ -3,7 +3,7 @@ import hashlib  # For hashing days
 import tensorflow as tf
 import numpy as np
 from google.cloud import storage  # type: ignore
-from usl_models.atmo_ml import cnn_inputs_outputs
+from usl_models.atmo_ml import cnn_inputs_outputs, constants
 from usl_models.shared import downloader
 
 
@@ -47,7 +47,7 @@ def hash_day(timestamp: str) -> float:
         float: A hash value between 0 and 1 for the day.
     """
     # Extract the date part (e.g., '2000-05-24') from the timestamp
-    date_part = timestamp.split("_")[1]
+    date_part = timestamp.split(".")[2].split("_")[0]
 
     # Hash the date part to ensure all timestamps for the same day are consistent
     return int(hashlib.sha256(date_part.encode()).hexdigest(), 16) % (10**8) / (10**8)
@@ -60,13 +60,13 @@ def select_days(
     train_days = [
         day for day in all_days if train_range[0] <= hash_day(day) < train_range[1]
     ]
-    val_days = [
-        day for day in all_days if val_range[0] <= hash_day(day) < val_range[1]
-    ]
+    val_days = [day for day in all_days if val_range[0] <= hash_day(day) < val_range[1]]
     return train_days, val_days
 
 
-def get_all_simulation_days(sim_names: list[str], storage_client, bucket_name: str) -> list[str]:
+def get_all_simulation_days(
+    sim_names: list[str], storage_client, bucket_name: str
+) -> list[str]:
     """Retrieve all simulation days from simulation names."""
     all_days = set()
     bucket = storage_client.bucket(bucket_name)
@@ -107,9 +107,7 @@ def load_dataset(
 
     label_timesteps = 2 * (timesteps_per_day - 2)
     all_days = get_all_simulation_days(
-    sim_names=sim_names, 
-    storage_client=storage_client, 
-    bucket_name=data_bucket_name
+        sim_names=sim_names, storage_client=storage_client, bucket_name=data_bucket_name
     )
     train_days, val_days = select_days(all_days, train_range, val_range)
 
@@ -160,8 +158,42 @@ def load_dataset(
     def create_dataset(selected_days):
         dataset = tf.data.Dataset.from_generator(
             lambda: data_generator(selected_days),
-            output_signature=(...),
+            output_signature=(
+                {
+                    "spatiotemporal": tf.TensorSpec(
+                        shape=(
+                            6,
+                            constants.MAP_HEIGHT,
+                            constants.MAP_WIDTH,
+                            constants.NUM_SPATIOTEMPORAL_FEATURES,
+                        ),
+                        dtype=tf.float32,
+                    ),
+                    "spatial": tf.TensorSpec(
+                        shape=(
+                            constants.MAP_HEIGHT,
+                            constants.MAP_WIDTH,
+                            constants.NUM_SAPTIAL_FEATURES,
+                        ),
+                        dtype=tf.float32,
+                    ),
+                    "lu_index": tf.TensorSpec(
+                        shape=(constants.MAP_HEIGHT * constants.MAP_WIDTH,),
+                        dtype=tf.int32,
+                    ),
+                },
+                tf.TensorSpec(
+                    shape=(
+                        8,
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                        1,
+                    ),
+                    dtype=tf.float32,
+                ),
+            ),
         )
+
         if shuffle:
             dataset = dataset.shuffle(buffer_size=1000)
         return dataset
