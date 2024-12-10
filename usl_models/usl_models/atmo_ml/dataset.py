@@ -5,6 +5,7 @@ import numpy as np
 from google.cloud import storage  # type: ignore
 from usl_models.atmo_ml import cnn_inputs_outputs, constants
 from usl_models.shared import downloader
+import re  # To extract dates from filenames
 
 
 # Load data from Google Cloud Storage
@@ -215,3 +216,59 @@ def pad_or_truncate_data(data, target_length, pad_value=0):
         padding = np.full(pad_shape, pad_value, dtype=data.dtype)
         return np.concatenate([data, padding], axis=0)
     return data
+
+
+def extract_dates(bucket_name: str, path: str, storage_client: storage.Client) -> list[str]:
+    """Extract unique dates from filenames in the given bucket path."""
+    bucket = storage_client.bucket(bucket_name)
+    blobs = bucket.list_blobs(prefix=path)
+
+    dates = set()
+    for blob in blobs:
+        match = re.search(r"\d{4}-\d{2}-\d{2}", blob.name)  # Match YYYY-MM-DD format
+        if match:
+            dates.add(match.group())
+    return sorted(dates)
+
+
+def load_day(
+    day: str,
+    sim_name: str,
+    bucket_name_inputs: str,
+    bucket_name_labels: str,
+    storage_client: storage.Client,
+) -> tuple[tf.Tensor, tf.Tensor]:
+    """Load spatiotemporal data and labels for a given day from GCP."""
+    # Extract all available dates dynamically
+    base_path = f"{sim_name}/spatiotemporal/"
+    all_dates = extract_dates(bucket_name_inputs, base_path, storage_client)
+    
+    # Ensure the requested day exists in the list of dates
+    if day not in all_dates:
+        raise ValueError(f"Day {day} is not found in the dataset!")
+
+    # Determine previous, current, and next days
+    day_index = all_dates.index(day)
+    previous_day = all_dates[day_index - 1] if day_index > 0 else day
+    next_day = all_dates[day_index + 1] if day_index < len(all_dates) - 1 else day
+
+    # Load inputs for previous, current, and next days
+    def load_inputs_for_date(date: str, max_blobs: int | None = None):
+        input_path = f"{sim_name}/spatiotemporal/met_em.d03.{date}_"
+        return load_folder_from_cloud(bucket_name_inputs, input_path, storage_client, max_blobs)
+
+    inputs_previous = load_inputs_for_date(previous_day, max_blobs=1)
+    inputs_current = load_inputs_for_date(day)
+    inputs_next = load_inputs_for_date(next_day, max_blobs=1)
+
+    # Concatenate inputs to form a single tensor
+    inputs = tf.concat([inputs_previous, inputs_current, inputs_next], axis=0)
+
+    # Load labels for the day
+    label_path = f"{sim_name}/spatiotemporal/wrfout_d03_{day}_"
+    labels = load_folder_from_cloud(bucket_name_labels, label_path, storage_client)
+
+    return inputs, labels
+
+
+
