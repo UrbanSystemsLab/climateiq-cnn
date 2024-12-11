@@ -236,6 +236,8 @@ def load_day(
     bucket_name_labels: str,
     storage_client: storage.Client,
 ) -> tuple[tf.Tensor, tf.Tensor] | None:
+    # TODO: mock this out to return random tensor to get the count.
+
     logging.info("load_day", (day, sim_name))
     """Load spatiotemporal data and labels for a given day from GCP."""
     # Extract all available dates dynamically
