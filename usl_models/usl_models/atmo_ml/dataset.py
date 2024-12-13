@@ -1,4 +1,5 @@
 import logging
+import random
 
 import functools
 import hashlib  # For hashing days
@@ -11,10 +12,10 @@ import re  # To extract dates from filenames
 
 
 # Load data from Google Cloud Storage
-@functools.lru_cache(maxsize=256)
-def load_folder_from_cloud(
+@functools.lru_cache(maxsize=512)
+def load_pattern_from_cloud(
     bucket_name: str,
-    path: str,
+    prefix: str,
     storage_client: storage.Client,
     max_blobs: int | None = None,
 ) -> tf.Tensor:
@@ -23,7 +24,7 @@ def load_folder_from_cloud(
     If max_blobs is specified, only returns that many blobs.
     """
     bucket = storage_client.bucket(bucket_name)
-    blobs = bucket.list_blobs(prefix=path)
+    blobs = bucket.list_blobs(prefix=prefix)
     all_data = []
     blob_count = 0
     for blob in blobs:
@@ -41,8 +42,6 @@ def get_date(filename: str) -> str:
     return filename.split(".")[2].split("_")[0]
 
 
-# (NYC_summer_2000_01p, 2000-05-01)
-# (PHX_summer_2000_01p, 2000-05-01) - should return a different hash val
 def hash_day(sim_name: str, date: str) -> float:
     """Hash a timestamp into a float between 0 and 1.
 
@@ -76,11 +75,16 @@ def get_all_simulation_days(
     for sim_name in sim_names:
         # List blobs under the simulation folder
         blobs = bucket.list_blobs(prefix=f"{sim_name}/")
+        
+        num_blobs = 0
         for blob in blobs:
+            num_blobs += 1
             # Extract the date from the filename (e.g., "2000-05-24.npy")
 
             filename = blob.name.split("/")[-1]
             all_days.add((sim_name, get_date(filename)))
+        
+        assert num_blobs > 0
 
     return sorted(all_days)
 
@@ -89,8 +93,8 @@ def load_dataset(
     data_bucket_name: str,
     label_bucket_name: str,
     sim_names: list[str],
-    timesteps_per_day: int,
     storage_client: storage.Client = None,
+    shuffle: bool = True,
     hash_range=(0.0, 0.5),
 ) -> tuple[tf.data.Dataset, tf.data.Dataset]:
     storage_client = storage_client or storage.Client()
@@ -103,30 +107,33 @@ def load_dataset(
         data_bucket_name
     ).exists(), f"Bucket does not exist: {data_bucket_name}"
 
-    label_timesteps = 2 * (timesteps_per_day - 2)
-
     sim_name_dates = get_all_simulation_days(
         sim_names=sim_names, storage_client=storage_client, bucket_name=data_bucket_name
     )
 
+    if shuffle:
+        random.shuffle(sim_name_dates)
+
+    logging.info("sim_name_dates %s" % str(sim_name_dates))
     # for i, (sim_name, day) in enumerate(sim_name_dates):
 
     #     print("all_days:", sim_name_dates)
 
     def data_generator():
+        missing_files: int = 0
         for sim_name, day in sim_name_dates:
             # Skip days not in this dataset
             if hash_range[0] <= hash_day(sim_name, day) < hash_range[1]:
                 continue
 
             # Load spatial, LU index, spatiotemporal, and label from their folders
-            lu_index_data = load_folder_from_cloud(
+            lu_index_data = load_pattern_from_cloud(
                 data_bucket_name,
                 f"{sim_name}/lu_index",
                 storage_client,
                 max_blobs=1,
             )[0]
-            spatial_data = load_folder_from_cloud(
+            spatial_data = load_pattern_from_cloud(
                 data_bucket_name, f"{sim_name}/spatial", storage_client, max_blobs=1
             )[0]
 
@@ -138,7 +145,12 @@ def load_dataset(
                 storage_client=storage_client,
             )
             if load_result is None:
+                missing_files += 1
+                logging.warning(
+                    "incomplete data!: %s %s #%d" % (day, sim_name, missing_files)
+                )
                 continue
+
             spatiotemporal_data, label_data = load_result
 
             yield {
@@ -146,17 +158,6 @@ def load_dataset(
                 "spatial": spatial_data.numpy(),
                 "lu_index": lu_index_data.numpy().reshape(200, 200),
             }, label_data
-            # # Divide data into days and apply padding or truncation
-            # inputs, labels = cnn_inputs_outputs.divide_into_days(
-            #     spatiotemporal_data, label_data, timesteps_per_day
-            # )
-            # for day_inputs, day_labels in zip(spatiotemporal_data, label_data):
-            #     # day_inputs = pad_or_truncate_data(
-            #     #     day_inputs.numpy(), timesteps_per_day
-            #     # )
-            #     # day_labels = pad_or_truncate_data(
-            #     #     day_labels.numpy(), label_timesteps
-            #     # )
 
     dataset = tf.data.Dataset.from_generator(
         lambda: data_generator(),
@@ -238,7 +239,7 @@ def load_day(
 ) -> tuple[tf.Tensor, tf.Tensor] | None:
     # TODO: mock this out to return random tensor to get the count.
 
-    logging.info("load_day", (day, sim_name))
+    logging.info("load_day (%s, %s)" % (day, sim_name))
     """Load spatiotemporal data and labels for a given day from GCP."""
     # Extract all available dates dynamically
     base_path = f"{sim_name}/spatiotemporal/"
@@ -256,7 +257,7 @@ def load_day(
     # Load inputs for previous, current, and next days
     def load_inputs_for_date(date: str, max_blobs: int | None = None):
         input_path = f"{sim_name}/spatiotemporal/met_em.d03.{date}_"
-        return load_folder_from_cloud(
+        return load_pattern_from_cloud(
             bucket_name_inputs, input_path, storage_client, max_blobs
         )
 
@@ -269,7 +270,7 @@ def load_day(
 
     # Load labels for the day
     label_path = f"{sim_name}/wrfout_d03_{day}_"
-    labels = load_folder_from_cloud(bucket_name_labels, label_path, storage_client)
+    labels = load_pattern_from_cloud(bucket_name_labels, label_path, storage_client)
     num_label_timestamps = labels.shape[0]
     if num_label_timestamps == constants.OUTPUT_TIME_STEPS:
         return inputs, labels
