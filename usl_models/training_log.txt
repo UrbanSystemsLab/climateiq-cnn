@@ -1,0 +1,14 @@
+Epoch 1/15
+Split shape: (None, 50, 50, 5, 2, 256)
+Separated shape (pre-slice): (None, 50, 50, 10, 256)
+Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
+Split shape: (None, 50, 50, 5, 2, 256)
+Separated shape (pre-slice): (None, 50, 50, 10, 256)
+Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
+Output shape: TensorShape([None, 8, 50, 50, 256])
+      1/Unknown - 92s 92s/step - loss: 18157.7988 - mean_absolute_error: 74.2048 - root_mean_squared_error: 134.7509 - categorical_accuracy: 0.1665Output shape: TensorShape([None, 8, 50, 50, 256])
+      2/Unknown - 126s 34s/step - loss: 18212.8223 - mean_absolute_error: 74.0603 - root_mean_squared_error: 134.9549 - categorical_accuracy: 0.2400Output shape: TensorShape([None, 8, 50, 50, 256])
+Split shape: (None, 50, 50, 5, 2, 256)
+Separated shape (pre-slice): (None, 50, 50, 10, 256)
+Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
+Output shape: TensorShape([None, 8, 50, 50, 256])

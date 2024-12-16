@@ -267,6 +267,10 @@ def load_day(
 
     # Concatenate inputs to form a single tensor
     inputs = tf.concat([inputs_previous, inputs_current, inputs_next], axis=0)
+    # Check if the input tensor has the expected number of time steps
+    num_input_timestamps = inputs.shape[0]
+    if num_input_timestamps != constants.INPUT_TIME_STEPS:
+        return None  # Skip this day if the input data is not valid
 
     # Load labels for the day
     label_path = f"{sim_name}/wrfout_d03_{day}_"
