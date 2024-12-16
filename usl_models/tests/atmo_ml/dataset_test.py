@@ -1,4 +1,4 @@
-# TODO: fix this file
+# fix this file
 import io
 
 from unittest import mock
@@ -32,8 +32,11 @@ class TestAtmoMLDataset(usl_models.testing.TestCase):
 
         num_days = 4
         timesteps_per_day = 6
+        output_timesteps = 8
         num_timesteps = num_days * timesteps_per_day
+        num_timesteps_outputs = num_days * output_timesteps
         batch_size = 2
+        train_frac = 0.8
 
         B = batch_size
         H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
@@ -59,33 +62,68 @@ class TestAtmoMLDataset(usl_models.testing.TestCase):
         )
         mock_label_blobs = [
             create_mock_blob(np.random.rand(H, W, C).astype(np.float32))
-            for _ in range(num_timesteps)
+            for _ in range(num_timesteps_outputs)
         ]
 
-        # Mock blob listing behavior to simulate folder structure
+        # Updated mock structure to match sim_names format
         mock_bucket.list_blobs.side_effect = lambda prefix: {
-            "sim1/spatial": [mock_spatial_blob],
-            "sim1/spatiotemporal": mock_spatiotemporal_blobs,
-            "sim1/lu_index": [mock_lu_index_blob],
-            "sim1": mock_label_blobs,
-        }[prefix]
+            "NYC_Heat_Test/NYC_summer_2000_01p/spatial": [mock_spatial_blob],
+            "NYC_Heat_Test/NYC_summer_2000_01p/spatiotemporal": mock_spatiotemporal_blobs,
+            "NYC_Heat_Test/NYC_summer_2000_01p/lu_index": [mock_lu_index_blob],
+            "NYC_Heat_Test/NYC_summer_2000_01p": mock_label_blobs,
+        }.get(prefix, [])
 
-        # Define bucket names and folder paths
+        # Define bucket names and sim_names
         data_bucket_name = "test-data-bucket"
         label_bucket_name = "test-label-bucket"
+        sim_names = ["NYC_Heat_Test/NYC_summer_2000_01p"]
 
-        # Call the function under test
-        ds = dataset.load_dataset(
-            data_bucket_name=data_bucket_name,
-            label_bucket_name=label_bucket_name,
-            sim_names=["sim1"],
-            timesteps_per_day=timesteps_per_day,
-            storage_client=mock_storage_client_instance,
+        # Call load_dataset for training and validation datasets
+        train_ds = (
+            dataset.load_dataset(
+                data_bucket_name=data_bucket_name,
+                label_bucket_name=label_bucket_name,
+                sim_names=sim_names,
+                hash_range=(0.0, train_frac),
+            )
+            .batch(batch_size=batch_size)
         )
-        ds = ds.batch(batch_size=batch_size)
 
-        inputs, labels = zip(*ds)
-        num_batches = num_days // batch_size
+        val_ds = (
+            dataset.load_dataset(
+                data_bucket_name=data_bucket_name,
+                label_bucket_name=label_bucket_name,
+                sim_names=sim_names,
+                hash_range=(train_frac, 1.0),
+            )
+            .batch(batch_size=batch_size)
+        )
+
+        # Test shapes for the training dataset
+        inputs, labels = zip(*train_ds)
+        num_batches = int((num_days * train_frac) // batch_size)
+        self.assertShapesRecursive(
+            list(inputs),
+            [
+                {
+                    "spatiotemporal": (B, T_I, H, W, F_ST),
+                    "spatial": (B, H, W, F_S),
+                    "lu_index": (B, H, W),
+                }
+            ]
+            * num_batches,
+        )
+        self.assertShapesRecursive(
+            list(labels),
+            [
+                (B, T_O, H, W, C),
+            ]
+            * num_batches,
+        )
+
+        # Test shapes for the validation dataset
+        inputs, labels = zip(*val_ds)
+        num_batches = int((num_days * (1 - train_frac)) // batch_size)
         self.assertShapesRecursive(
             list(inputs),
             [
