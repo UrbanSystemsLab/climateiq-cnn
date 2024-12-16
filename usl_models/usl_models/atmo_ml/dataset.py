@@ -1,6 +1,6 @@
 import logging
 import random
-
+import concurrent.futures
 import functools
 import hashlib  # For hashing days
 import tensorflow as tf
@@ -114,16 +114,28 @@ def load_dataset(
     if shuffle:
         random.shuffle(sim_name_dates)
 
-    logging.info("sim_name_dates %s" % str(sim_name_dates))
-    # for i, (sim_name, day) in enumerate(sim_name_dates):
+    logging.info("Total simulation days before filtering: %d", len(sim_name_dates))
 
-    #     print("all_days:", sim_name_dates)
+    # Track stats for filtering
+    total_days = len(sim_name_dates)
+    selected_days = [
+        (sim_name, day)
+        for sim_name, day in sim_name_dates
+        if hash_range[0] <= hash_day(sim_name, day) < hash_range[1]
+    ]
+    selected_percentage = len(selected_days) / total_days * 100
+    logging.info(
+        "Selected %d/%d days (%.2f%%) based on hash range %s.",
+        len(selected_days), total_days, selected_percentage, hash_range,
+    )
 
     def data_generator():
         missing_files: int = 0
+        generated_count: int = 0
+
         for sim_name, day in sim_name_dates:
             # Skip days not in this dataset
-            if hash_range[0] <= hash_day(sim_name, day) < hash_range[1]:
+            if not (hash_range[0] <= hash_day(sim_name, day) < hash_range[1]):
                 continue
 
             # Load spatial, LU index, spatiotemporal, and label from their folders
@@ -147,17 +159,20 @@ def load_dataset(
             if load_result is None:
                 missing_files += 1
                 logging.warning(
-                    "incomplete data!: %s %s #%d" % (day, sim_name, missing_files)
+                    "Incomplete data!: %s %s #%d" % (day, sim_name, missing_files)
                 )
                 continue
 
             spatiotemporal_data, label_data = load_result
+            generated_count += 1
 
             yield {
                 "spatiotemporal": spatiotemporal_data,
                 "spatial": spatial_data.numpy(),
                 "lu_index": lu_index_data.numpy().reshape(200, 200),
             }, label_data
+
+        logging.info("Total generated samples: %d", generated_count)
 
     dataset = tf.data.Dataset.from_generator(
         lambda: data_generator(),
@@ -199,20 +214,8 @@ def load_dataset(
             ),
         ),
     )
+
     return dataset
-
-
-# Pad or truncate data to a target length along the first axis.
-def pad_or_truncate_data(data, target_length, pad_value=0):
-    """Pad or truncate data to the target length along the first axis."""
-    current_length = data.shape[0]
-    if current_length > target_length:
-        return data[:target_length]
-    elif current_length < target_length:
-        pad_shape = [target_length - current_length] + list(data.shape[1:])
-        padding = np.full(pad_shape, pad_value, dtype=data.dtype)
-        return np.concatenate([data, padding], axis=0)
-    return data
 
 
 def extract_dates(
@@ -261,9 +264,16 @@ def load_day(
             bucket_name_inputs, input_path, storage_client, max_blobs
         )
 
-    inputs_previous = load_inputs_for_date(previous_day, max_blobs=1)
-    inputs_current = load_inputs_for_date(day)
-    inputs_next = load_inputs_for_date(next_day, max_blobs=1)
+    # Using ThreadPoolExecutor to load inputs in parallel
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {
+            'previous': executor.submit(load_inputs_for_date, previous_day, 1),
+            'current': executor.submit(load_inputs_for_date, day),
+            'next': executor.submit(load_inputs_for_date, next_day, 1)
+        }
+        inputs_previous = futures['previous'].result()
+        inputs_current = futures['current'].result()
+        inputs_next = futures['next'].result()
 
     # Concatenate inputs to form a single tensor
     inputs = tf.concat([inputs_previous, inputs_current, inputs_next], axis=0)
@@ -276,5 +286,7 @@ def load_day(
     label_path = f"{sim_name}/wrfout_d03_{day}_"
     labels = load_pattern_from_cloud(bucket_name_labels, label_path, storage_client)
     num_label_timestamps = labels.shape[0]
-    if num_label_timestamps == constants.OUTPUT_TIME_STEPS:
-        return inputs, labels
+        # Skip this day if either inputs or labels are invalid
+    if num_input_timestamps != constants.INPUT_TIME_STEPS or num_label_timestamps != constants.OUTPUT_TIME_STEPS:
+        return None  # Skip this day if the input data or labels are not valid
+    return inputs, labels
