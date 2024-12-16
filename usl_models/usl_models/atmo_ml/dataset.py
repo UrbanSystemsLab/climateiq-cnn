@@ -95,7 +95,7 @@ def load_dataset(
     sim_names: list[str],
     storage_client: storage.Client = None,
     shuffle: bool = True,
-    hash_range=(0.0, 0.5),
+    hash_range=(0.0, 0.8),
 ) -> tuple[tf.data.Dataset, tf.data.Dataset]:
     storage_client = storage_client or storage.Client()
 
