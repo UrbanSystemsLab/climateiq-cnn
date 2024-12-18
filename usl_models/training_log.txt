@@ -1,4 +1,4 @@
-Epoch 1/15
+Epoch 1/500
 Split shape: (None, 50, 50, 5, 2, 256)
 Separated shape (pre-slice): (None, 50, 50, 10, 256)
 Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
@@ -6,81 +6,293 @@ Split shape: (None, 50, 50, 5, 2, 256)
 Separated shape (pre-slice): (None, 50, 50, 10, 256)
 Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
 Output shape: TensorShape([None, 8, 50, 50, 256])
-      1/Unknown - 90s 90s/step - loss: 18287.4238 - mean_absolute_error: 74.1840 - root_mean_squared_error: 135.2310 - categorical_accuracy: 0.4277Output shape: TensorShape([None, 8, 50, 50, 256])
-      2/Unknown - 127s 37s/step - loss: 18199.4102 - mean_absolute_error: 74.0381 - root_mean_squared_error: 134.9052 - categorical_accuracy: 0.5113Output shape: TensorShape([None, 8, 50, 50, 256])
+The autoreload extension is already loaded. To reload it, use:
+  %reload_ext autoreload
+['NYC_Heat_Test/NYC_summer_2000_01p', 'PHX_Heat_Test/PHX_summer_2008_25p']
+Epoch 1/500
+Split shape: (None, 50, 50, 5, 2, 256)
+Separated shape (pre-slice): (None, 50, 50, 10, 256)
+Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
+Split shape: (None, 50, 50, 5, 2, 256)
+Separated shape (pre-slice): (None, 50, 50, 10, 256)
+Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
+Output shape: TensorShape([None, 8, 50, 50, 256])
+The autoreload extension is already loaded. To reload it, use:
+  %reload_ext autoreload
+['NYC_Heat_Test/NYC_summer_2000_01p', 'PHX_Heat_Test/PHX_summer_2008_25p']
+Epoch 1/500
+Split shape: (None, 50, 50, 5, 2, 256)
+Separated shape (pre-slice): (None, 50, 50, 10, 256)
+Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
+Split shape: (None, 50, 50, 5, 2, 256)
+Separated shape (pre-slice): (None, 50, 50, 10, 256)
+Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
+Output shape: TensorShape([None, 8, 50, 50, 256])
+Epoch 1/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+The autoreload extension is already loaded. To reload it, use:
+  %reload_ext autoreload
+['NYC_Heat_Test/NYC_summer_2000_01p', 'PHX_Heat_Test/PHX_summer_2008_25p']
+Epoch 1/500
+Split shape: (None, 50, 50, 5, 2, 256)
+Separated shape (pre-slice): (None, 50, 50, 10, 256)
+Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
+Split shape: (None, 50, 50, 5, 2, 256)
+Separated shape (pre-slice): (None, 50, 50, 10, 256)
+Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
+Output shape: TensorShape([None, 8, 50, 50, 256])
+      1/Unknown - 4s 4s/step - loss: 18368.2793 - mean_absolute_error: 75.7341 - root_mean_squared_error: 135.5296 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
 Split shape: (None, 50, 50, 5, 2, 256)
 Separated shape (pre-slice): (None, 50, 50, 10, 256)
 Reduced shape after removing outermost time steps: (None, 50, 50, 8, 256)
 Output shape: TensorShape([None, 8, 50, 50, 256])
 Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 129s 39s/step - loss: 18199.4102 - mean_absolute_error: 74.0381 - root_mean_squared_error: 134.9052 - categorical_accuracy: 0.5113 - val_loss: 18141.7227 - val_mean_absolute_error: 73.8619 - val_root_mean_squared_error: 134.6912 - val_categorical_accuracy: 0.7526
-Epoch 2/15
+1/1 [==============================] - 5s 5s/step - loss: 18368.2793 - mean_absolute_error: 75.7341 - root_mean_squared_error: 135.5296 - categorical_accuracy: 0.0000e+00 - val_loss: 18366.0215 - val_mean_absolute_error: 75.7279 - val_root_mean_squared_error: 135.5213 - val_categorical_accuracy: 0.0000e+00
+Epoch 2/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 3s - loss: 18167.6562 - mean_absolute_error: 73.9340 - root_mean_squared_error: 134.7875 - categorical_accuracy: 0.7551Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 18085.8301 - mean_absolute_error: 73.7921 - root_mean_squared_error: 134.4836 - categorical_accuracy: 0.7539Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 18085.8301 - mean_absolute_error: 73.7921 - root_mean_squared_error: 134.4836 - categorical_accuracy: 0.7539 - val_loss: 18057.5000 - val_mean_absolute_error: 73.6387 - val_root_mean_squared_error: 134.3782 - val_categorical_accuracy: 0.7500
-Epoch 3/15
+1/1 [==============================] - ETA: 0s - loss: 18366.0312 - mean_absolute_error: 75.7279 - root_mean_squared_error: 135.5213 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18366.0312 - mean_absolute_error: 75.7279 - root_mean_squared_error: 135.5213 - categorical_accuracy: 0.0000e+00 - val_loss: 18359.0488 - val_mean_absolute_error: 75.7099 - val_root_mean_squared_error: 135.4956 - val_categorical_accuracy: 0.0000e+00
+Epoch 3/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 4s - loss: 18083.3867 - mean_absolute_error: 73.7092 - root_mean_squared_error: 134.4745 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 18003.4609 - mean_absolute_error: 73.5693 - root_mean_squared_error: 134.1770 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 18003.4609 - mean_absolute_error: 73.5693 - root_mean_squared_error: 134.1770 - categorical_accuracy: 0.7500 - val_loss: 17973.5098 - val_mean_absolute_error: 73.4047 - val_root_mean_squared_error: 134.0653 - val_categorical_accuracy: 0.7500
-Epoch 4/15
+1/1 [==============================] - ETA: 0s - loss: 18359.0508 - mean_absolute_error: 75.7099 - root_mean_squared_error: 135.4956 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18359.0508 - mean_absolute_error: 75.7099 - root_mean_squared_error: 135.4956 - categorical_accuracy: 0.0000e+00 - val_loss: 18354.2480 - val_mean_absolute_error: 75.6984 - val_root_mean_squared_error: 135.4778 - val_categorical_accuracy: 0.0000e+00
+Epoch 4/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 3s - loss: 17999.3477 - mean_absolute_error: 73.4745 - root_mean_squared_error: 134.1616 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 17917.3066 - mean_absolute_error: 73.3289 - root_mean_squared_error: 133.8555 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 17917.3066 - mean_absolute_error: 73.3289 - root_mean_squared_error: 133.8555 - categorical_accuracy: 0.7500 - val_loss: 17872.7656 - val_mean_absolute_error: 73.1262 - val_root_mean_squared_error: 133.6891 - val_categorical_accuracy: 0.7500
-Epoch 5/15
+1/1 [==============================] - ETA: 0s - loss: 18354.2480 - mean_absolute_error: 75.6984 - root_mean_squared_error: 135.4778 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18354.2480 - mean_absolute_error: 75.6984 - root_mean_squared_error: 135.4778 - categorical_accuracy: 0.0000e+00 - val_loss: 18350.3398 - val_mean_absolute_error: 75.6900 - val_root_mean_squared_error: 135.4634 - val_categorical_accuracy: 0.0000e+00
+Epoch 5/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 3s - loss: 17898.5273 - mean_absolute_error: 73.1960 - root_mean_squared_error: 133.7854 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 17813.7246 - mean_absolute_error: 73.0431 - root_mean_squared_error: 133.4681 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 17813.7246 - mean_absolute_error: 73.0431 - root_mean_squared_error: 133.4681 - categorical_accuracy: 0.7500 - val_loss: 17750.2305 - val_mean_absolute_error: 72.7980 - val_root_mean_squared_error: 133.2300 - val_categorical_accuracy: 0.7500
-Epoch 6/15
+1/1 [==============================] - ETA: 0s - loss: 18350.3398 - mean_absolute_error: 75.6900 - root_mean_squared_error: 135.4634 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18350.3398 - mean_absolute_error: 75.6900 - root_mean_squared_error: 135.4634 - categorical_accuracy: 0.0000e+00 - val_loss: 18346.5605 - val_mean_absolute_error: 75.6830 - val_root_mean_squared_error: 135.4495 - val_categorical_accuracy: 0.0000e+00
+Epoch 6/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 4s - loss: 17775.9043 - mean_absolute_error: 72.8684 - root_mean_squared_error: 133.3263 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 17687.7148 - mean_absolute_error: 72.7076 - root_mean_squared_error: 132.9952 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 17687.7148 - mean_absolute_error: 72.7076 - root_mean_squared_error: 132.9952 - categorical_accuracy: 0.7500 - val_loss: 17601.1055 - val_mean_absolute_error: 72.4205 - val_root_mean_squared_error: 132.6691 - val_categorical_accuracy: 0.7500
-Epoch 7/15
+1/1 [==============================] - ETA: 0s - loss: 18346.5605 - mean_absolute_error: 75.6830 - root_mean_squared_error: 135.4495 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18346.5605 - mean_absolute_error: 75.6830 - root_mean_squared_error: 135.4495 - categorical_accuracy: 0.0000e+00 - val_loss: 18342.8242 - val_mean_absolute_error: 75.6765 - val_root_mean_squared_error: 135.4357 - val_categorical_accuracy: 0.0000e+00
+Epoch 7/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 3s - loss: 17626.6699 - mean_absolute_error: 72.4908 - root_mean_squared_error: 132.7655 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 17534.7461 - mean_absolute_error: 72.3212 - root_mean_squared_error: 132.4188 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 17534.7461 - mean_absolute_error: 72.3212 - root_mean_squared_error: 132.4188 - categorical_accuracy: 0.7500 - val_loss: 17423.7461 - val_mean_absolute_error: 71.9965 - val_root_mean_squared_error: 131.9990 - val_categorical_accuracy: 0.7500
-Epoch 8/15
+1/1 [==============================] - ETA: 0s - loss: 18342.8242 - mean_absolute_error: 75.6765 - root_mean_squared_error: 135.4357 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18342.8242 - mean_absolute_error: 75.6765 - root_mean_squared_error: 135.4357 - categorical_accuracy: 0.0000e+00 - val_loss: 18339.2090 - val_mean_absolute_error: 75.6709 - val_root_mean_squared_error: 135.4223 - val_categorical_accuracy: 0.0000e+00
+Epoch 8/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 3s - loss: 17449.1816 - mean_absolute_error: 72.0649 - root_mean_squared_error: 132.0954 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 17353.6211 - mean_absolute_error: 71.8874 - root_mean_squared_error: 131.7331 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 17353.6211 - mean_absolute_error: 71.8874 - root_mean_squared_error: 131.7331 - categorical_accuracy: 0.7500 - val_loss: 17217.7910 - val_mean_absolute_error: 71.5312 - val_root_mean_squared_error: 131.2166 - val_categorical_accuracy: 0.7500
-Epoch 9/15
+1/1 [==============================] - ETA: 0s - loss: 18339.2090 - mean_absolute_error: 75.6709 - root_mean_squared_error: 135.4223 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18339.2090 - mean_absolute_error: 75.6709 - root_mean_squared_error: 135.4223 - categorical_accuracy: 0.0000e+00 - val_loss: 18335.2793 - val_mean_absolute_error: 75.6652 - val_root_mean_squared_error: 135.4078 - val_categorical_accuracy: 0.0000e+00
+Epoch 9/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 3s - loss: 17243.1113 - mean_absolute_error: 71.5969 - root_mean_squared_error: 131.3130 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 17143.4609 - mean_absolute_error: 71.4095 - root_mean_squared_error: 130.9330 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 17143.4609 - mean_absolute_error: 71.4095 - root_mean_squared_error: 130.9330 - categorical_accuracy: 0.7500 - val_loss: 16980.4375 - val_mean_absolute_error: 71.0087 - val_root_mean_squared_error: 130.3090 - val_categorical_accuracy: 0.7500
-Epoch 10/15
+1/1 [==============================] - ETA: 0s - loss: 18335.2812 - mean_absolute_error: 75.6652 - root_mean_squared_error: 135.4078 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18335.2812 - mean_absolute_error: 75.6652 - root_mean_squared_error: 135.4078 - categorical_accuracy: 0.0000e+00 - val_loss: 18331.0352 - val_mean_absolute_error: 75.6590 - val_root_mean_squared_error: 135.3922 - val_categorical_accuracy: 0.0000e+00
+Epoch 10/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 3s - loss: 17005.5430 - mean_absolute_error: 71.0715 - root_mean_squared_error: 130.4053 - categorical_accuracy: 0.7500Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 16901.7891 - mean_absolute_error: 70.8720 - root_mean_squared_error: 130.0069 - categorical_accuracy: 0.7589Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 16901.7891 - mean_absolute_error: 70.8720 - root_mean_squared_error: 130.0069 - categorical_accuracy: 0.7589 - val_loss: 16709.8301 - val_mean_absolute_error: 70.4022 - val_root_mean_squared_error: 129.2665 - val_categorical_accuracy: 0.7812
-Epoch 11/15
+1/1 [==============================] - ETA: 0s - loss: 18331.0352 - mean_absolute_error: 75.6590 - root_mean_squared_error: 135.3922 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18331.0352 - mean_absolute_error: 75.6590 - root_mean_squared_error: 135.3922 - categorical_accuracy: 0.0000e+00 - val_loss: 18326.1953 - val_mean_absolute_error: 75.6514 - val_root_mean_squared_error: 135.3743 - val_categorical_accuracy: 0.0000e+00
+Epoch 11/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 3s - loss: 16734.7285 - mean_absolute_error: 70.4632 - root_mean_squared_error: 129.3628 - categorical_accuracy: 0.7812Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 16626.2949 - mean_absolute_error: 70.2473 - root_mean_squared_error: 128.9430 - categorical_accuracy: 0.7812Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 16626.2949 - mean_absolute_error: 70.2473 - root_mean_squared_error: 128.9430 - categorical_accuracy: 0.7812 - val_loss: 16401.7363 - val_mean_absolute_error: 69.6810 - val_root_mean_squared_error: 128.0693 - val_categorical_accuracy: 0.7812
-Epoch 12/15
+1/1 [==============================] - ETA: 0s - loss: 18326.1973 - mean_absolute_error: 75.6514 - root_mean_squared_error: 135.3743 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18326.1973 - mean_absolute_error: 75.6514 - root_mean_squared_error: 135.3743 - categorical_accuracy: 0.0000e+00 - val_loss: 18320.9941 - val_mean_absolute_error: 75.6434 - val_root_mean_squared_error: 135.3551 - val_categorical_accuracy: 0.0000e+00
+Epoch 12/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 4s - loss: 16426.3945 - mean_absolute_error: 69.7414 - root_mean_squared_error: 128.1655 - categorical_accuracy: 0.7812Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 16312.9609 - mean_absolute_error: 69.5084 - root_mean_squared_error: 127.7222 - categorical_accuracy: 0.7812Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 16312.9609 - mean_absolute_error: 69.5084 - root_mean_squared_error: 127.7222 - categorical_accuracy: 0.7812 - val_loss: 16055.5283 - val_mean_absolute_error: 68.8417 - val_root_mean_squared_error: 126.7104 - val_categorical_accuracy: 0.7812
-Epoch 13/15
+1/1 [==============================] - ETA: 0s - loss: 18320.9961 - mean_absolute_error: 75.6434 - root_mean_squared_error: 135.3551 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18320.9961 - mean_absolute_error: 75.6434 - root_mean_squared_error: 135.3551 - categorical_accuracy: 0.0000e+00 - val_loss: 18315.9141 - val_mean_absolute_error: 75.6363 - val_root_mean_squared_error: 135.3363 - val_categorical_accuracy: 0.0000e+00
+Epoch 13/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 3s - loss: 16079.9111 - mean_absolute_error: 68.9025 - root_mean_squared_error: 126.8066 - categorical_accuracy: 0.7812Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 15961.8467 - mean_absolute_error: 68.6543 - root_mean_squared_error: 126.3402 - categorical_accuracy: 0.7812Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 15961.8467 - mean_absolute_error: 68.6543 - root_mean_squared_error: 126.3402 - categorical_accuracy: 0.7812 - val_loss: 15670.9932 - val_mean_absolute_error: 67.8895 - val_root_mean_squared_error: 125.1838 - val_categorical_accuracy: 0.7812
-Epoch 14/15
+1/1 [==============================] - ETA: 0s - loss: 18315.9160 - mean_absolute_error: 75.6363 - root_mean_squared_error: 135.3363 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18315.9160 - mean_absolute_error: 75.6363 - root_mean_squared_error: 135.3363 - categorical_accuracy: 0.0000e+00 - val_loss: 18310.5293 - val_mean_absolute_error: 75.6293 - val_root_mean_squared_error: 135.3164 - val_categorical_accuracy: 0.0000e+00
+Epoch 14/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 4s - loss: 15695.0635 - mean_absolute_error: 67.9513 - root_mean_squared_error: 125.2799 - categorical_accuracy: 0.7812Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 15571.9160 - mean_absolute_error: 67.6877 - root_mean_squared_error: 124.7875 - categorical_accuracy: 0.7902Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 15571.9160 - mean_absolute_error: 67.6877 - root_mean_squared_error: 124.7875 - categorical_accuracy: 0.7902 - val_loss: 15245.1934 - val_mean_absolute_error: 66.8218 - val_root_mean_squared_error: 123.4714 - val_categorical_accuracy: 0.8125
-Epoch 15/15
+1/1 [==============================] - ETA: 0s - loss: 18310.5293 - mean_absolute_error: 75.6293 - root_mean_squared_error: 135.3164 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18310.5293 - mean_absolute_error: 75.6293 - root_mean_squared_error: 135.3164 - categorical_accuracy: 0.0000e+00 - val_loss: 18304.7832 - val_mean_absolute_error: 75.6223 - val_root_mean_squared_error: 135.2952 - val_categorical_accuracy: 0.0000e+00
+Epoch 15/500
 Output shape: TensorShape([None, 8, 50, 50, 256])
-1/2 [==============>...............] - ETA: 4s - loss: 15268.9102 - mean_absolute_error: 66.8848 - root_mean_squared_error: 123.5674 - categorical_accuracy: 0.8125Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - ETA: 0s - loss: 15140.6895 - mean_absolute_error: 66.6052 - root_mean_squared_error: 123.0475 - categorical_accuracy: 0.8214Output shape: TensorShape([None, 8, 50, 50, 256])
-2/2 [==============================] - 7s 3s/step - loss: 15140.6895 - mean_absolute_error: 66.6052 - root_mean_squared_error: 123.0475 - categorical_accuracy: 0.8214 - val_loss: 14776.9141 - val_mean_absolute_error: 65.6330 - val_root_mean_squared_error: 121.5603 - val_categorical_accuracy: 0.9062
+1/1 [==============================] - ETA: 0s - loss: 18304.7832 - mean_absolute_error: 75.6223 - root_mean_squared_error: 135.2952 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18304.7832 - mean_absolute_error: 75.6223 - root_mean_squared_error: 135.2952 - categorical_accuracy: 0.0000e+00 - val_loss: 18298.5020 - val_mean_absolute_error: 75.6147 - val_root_mean_squared_error: 135.2719 - val_categorical_accuracy: 0.0000e+00
+Epoch 16/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18298.5020 - mean_absolute_error: 75.6147 - root_mean_squared_error: 135.2719 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18298.5020 - mean_absolute_error: 75.6147 - root_mean_squared_error: 135.2719 - categorical_accuracy: 0.0000e+00 - val_loss: 18291.2363 - val_mean_absolute_error: 75.6053 - val_root_mean_squared_error: 135.2451 - val_categorical_accuracy: 0.0000e+00
+Epoch 17/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18291.2363 - mean_absolute_error: 75.6053 - root_mean_squared_error: 135.2451 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18291.2363 - mean_absolute_error: 75.6053 - root_mean_squared_error: 135.2451 - categorical_accuracy: 0.0000e+00 - val_loss: 18283.2598 - val_mean_absolute_error: 75.5953 - val_root_mean_squared_error: 135.2156 - val_categorical_accuracy: 0.0000e+00
+Epoch 18/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18283.2598 - mean_absolute_error: 75.5953 - root_mean_squared_error: 135.2156 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18283.2598 - mean_absolute_error: 75.5953 - root_mean_squared_error: 135.2156 - categorical_accuracy: 0.0000e+00 - val_loss: 18274.9902 - val_mean_absolute_error: 75.5857 - val_root_mean_squared_error: 135.1850 - val_categorical_accuracy: 0.0000e+00
+Epoch 19/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18274.9902 - mean_absolute_error: 75.5857 - root_mean_squared_error: 135.1850 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18274.9902 - mean_absolute_error: 75.5857 - root_mean_squared_error: 135.1850 - categorical_accuracy: 0.0000e+00 - val_loss: 18266.0312 - val_mean_absolute_error: 75.5757 - val_root_mean_squared_error: 135.1519 - val_categorical_accuracy: 0.0000e+00
+Epoch 20/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18266.0332 - mean_absolute_error: 75.5757 - root_mean_squared_error: 135.1519 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18266.0332 - mean_absolute_error: 75.5757 - root_mean_squared_error: 135.1519 - categorical_accuracy: 0.0000e+00 - val_loss: 18256.4648 - val_mean_absolute_error: 75.5657 - val_root_mean_squared_error: 135.1165 - val_categorical_accuracy: 0.0000e+00
+Epoch 21/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18256.4648 - mean_absolute_error: 75.5657 - root_mean_squared_error: 135.1165 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18256.4648 - mean_absolute_error: 75.5657 - root_mean_squared_error: 135.1165 - categorical_accuracy: 0.0000e+00 - val_loss: 18246.0566 - val_mean_absolute_error: 75.5550 - val_root_mean_squared_error: 135.0780 - val_categorical_accuracy: 0.0000e+00
+Epoch 22/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18246.0566 - mean_absolute_error: 75.5550 - root_mean_squared_error: 135.0780 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18246.0566 - mean_absolute_error: 75.5550 - root_mean_squared_error: 135.0780 - categorical_accuracy: 0.0000e+00 - val_loss: 18234.2461 - val_mean_absolute_error: 75.5425 - val_root_mean_squared_error: 135.0342 - val_categorical_accuracy: 0.0000e+00
+Epoch 23/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18234.2461 - mean_absolute_error: 75.5425 - root_mean_squared_error: 135.0342 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18234.2461 - mean_absolute_error: 75.5425 - root_mean_squared_error: 135.0342 - categorical_accuracy: 0.0000e+00 - val_loss: 18221.2578 - val_mean_absolute_error: 75.5291 - val_root_mean_squared_error: 134.9861 - val_categorical_accuracy: 0.0000e+00
+Epoch 24/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18221.2598 - mean_absolute_error: 75.5291 - root_mean_squared_error: 134.9861 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18221.2598 - mean_absolute_error: 75.5291 - root_mean_squared_error: 134.9861 - categorical_accuracy: 0.0000e+00 - val_loss: 18207.3535 - val_mean_absolute_error: 75.5162 - val_root_mean_squared_error: 134.9346 - val_categorical_accuracy: 0.0000e+00
+Epoch 25/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18207.3535 - mean_absolute_error: 75.5162 - root_mean_squared_error: 134.9346 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18207.3535 - mean_absolute_error: 75.5162 - root_mean_squared_error: 134.9346 - categorical_accuracy: 0.0000e+00 - val_loss: 18192.5703 - val_mean_absolute_error: 75.5049 - val_root_mean_squared_error: 134.8798 - val_categorical_accuracy: 0.0000e+00
+Epoch 26/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18192.5703 - mean_absolute_error: 75.5049 - root_mean_squared_error: 134.8798 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18192.5703 - mean_absolute_error: 75.5049 - root_mean_squared_error: 134.8798 - categorical_accuracy: 0.0000e+00 - val_loss: 18177.3203 - val_mean_absolute_error: 75.4958 - val_root_mean_squared_error: 134.8233 - val_categorical_accuracy: 0.0000e+00
+Epoch 27/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18177.3203 - mean_absolute_error: 75.4958 - root_mean_squared_error: 134.8233 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18177.3203 - mean_absolute_error: 75.4958 - root_mean_squared_error: 134.8233 - categorical_accuracy: 0.0000e+00 - val_loss: 18160.0938 - val_mean_absolute_error: 75.4845 - val_root_mean_squared_error: 134.7594 - val_categorical_accuracy: 0.0000e+00
+Epoch 28/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18160.0938 - mean_absolute_error: 75.4845 - root_mean_squared_error: 134.7594 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18160.0938 - mean_absolute_error: 75.4845 - root_mean_squared_error: 134.7594 - categorical_accuracy: 0.0000e+00 - val_loss: 18141.5918 - val_mean_absolute_error: 75.4731 - val_root_mean_squared_error: 134.6907 - val_categorical_accuracy: 0.0000e+00
+Epoch 29/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18141.5918 - mean_absolute_error: 75.4731 - root_mean_squared_error: 134.6907 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18141.5918 - mean_absolute_error: 75.4731 - root_mean_squared_error: 134.6907 - categorical_accuracy: 0.0000e+00 - val_loss: 18121.6777 - val_mean_absolute_error: 75.4626 - val_root_mean_squared_error: 134.6168 - val_categorical_accuracy: 0.0000e+00
+Epoch 30/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18121.6777 - mean_absolute_error: 75.4626 - root_mean_squared_error: 134.6168 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18121.6777 - mean_absolute_error: 75.4626 - root_mean_squared_error: 134.6168 - categorical_accuracy: 0.0000e+00 - val_loss: 18100.6152 - val_mean_absolute_error: 75.4541 - val_root_mean_squared_error: 134.5385 - val_categorical_accuracy: 0.0000e+00
+Epoch 31/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18100.6152 - mean_absolute_error: 75.4541 - root_mean_squared_error: 134.5385 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18100.6152 - mean_absolute_error: 75.4541 - root_mean_squared_error: 134.5385 - categorical_accuracy: 0.0000e+00 - val_loss: 18078.3184 - val_mean_absolute_error: 75.4476 - val_root_mean_squared_error: 134.4556 - val_categorical_accuracy: 0.0000e+00
+Epoch 32/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18078.3184 - mean_absolute_error: 75.4476 - root_mean_squared_error: 134.4556 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18078.3184 - mean_absolute_error: 75.4476 - root_mean_squared_error: 134.4556 - categorical_accuracy: 0.0000e+00 - val_loss: 18054.9941 - val_mean_absolute_error: 75.4437 - val_root_mean_squared_error: 134.3689 - val_categorical_accuracy: 0.0000e+00
+Epoch 33/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18054.9941 - mean_absolute_error: 75.4437 - root_mean_squared_error: 134.3689 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18054.9941 - mean_absolute_error: 75.4437 - root_mean_squared_error: 134.3689 - categorical_accuracy: 0.0000e+00 - val_loss: 18030.8887 - val_mean_absolute_error: 75.4422 - val_root_mean_squared_error: 134.2791 - val_categorical_accuracy: 0.0000e+00
+Epoch 34/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18030.8887 - mean_absolute_error: 75.4422 - root_mean_squared_error: 134.2791 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18030.8887 - mean_absolute_error: 75.4422 - root_mean_squared_error: 134.2791 - categorical_accuracy: 0.0000e+00 - val_loss: 18005.5703 - val_mean_absolute_error: 75.4433 - val_root_mean_squared_error: 134.1848 - val_categorical_accuracy: 0.0000e+00
+Epoch 35/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 18005.5762 - mean_absolute_error: 75.4433 - root_mean_squared_error: 134.1848 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 18005.5762 - mean_absolute_error: 75.4433 - root_mean_squared_error: 134.1848 - categorical_accuracy: 0.0000e+00 - val_loss: 17979.1914 - val_mean_absolute_error: 75.4467 - val_root_mean_squared_error: 134.0865 - val_categorical_accuracy: 0.0000e+00
+Epoch 36/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17979.1914 - mean_absolute_error: 75.4467 - root_mean_squared_error: 134.0865 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17979.1914 - mean_absolute_error: 75.4467 - root_mean_squared_error: 134.0865 - categorical_accuracy: 0.0000e+00 - val_loss: 17951.4746 - val_mean_absolute_error: 75.4525 - val_root_mean_squared_error: 133.9831 - val_categorical_accuracy: 0.0000e+00
+Epoch 37/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17951.4707 - mean_absolute_error: 75.4525 - root_mean_squared_error: 133.9831 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17951.4707 - mean_absolute_error: 75.4525 - root_mean_squared_error: 133.9831 - categorical_accuracy: 0.0000e+00 - val_loss: 17922.4707 - val_mean_absolute_error: 75.4611 - val_root_mean_squared_error: 133.8748 - val_categorical_accuracy: 0.0000e+00
+Epoch 38/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17922.4707 - mean_absolute_error: 75.4611 - root_mean_squared_error: 133.8748 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17922.4707 - mean_absolute_error: 75.4611 - root_mean_squared_error: 133.8748 - categorical_accuracy: 0.0000e+00 - val_loss: 17891.6836 - val_mean_absolute_error: 75.4705 - val_root_mean_squared_error: 133.7598 - val_categorical_accuracy: 0.0000e+00
+Epoch 39/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17891.6836 - mean_absolute_error: 75.4705 - root_mean_squared_error: 133.7598 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17891.6836 - mean_absolute_error: 75.4705 - root_mean_squared_error: 133.7598 - categorical_accuracy: 0.0000e+00 - val_loss: 17859.6094 - val_mean_absolute_error: 75.4836 - val_root_mean_squared_error: 133.6398 - val_categorical_accuracy: 0.0000e+00
+Epoch 40/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17859.6094 - mean_absolute_error: 75.4836 - root_mean_squared_error: 133.6398 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17859.6094 - mean_absolute_error: 75.4836 - root_mean_squared_error: 133.6398 - categorical_accuracy: 0.0000e+00 - val_loss: 17826.1367 - val_mean_absolute_error: 75.5012 - val_root_mean_squared_error: 133.5145 - val_categorical_accuracy: 0.0000e+00
+Epoch 41/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17826.1367 - mean_absolute_error: 75.5012 - root_mean_squared_error: 133.5145 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17826.1367 - mean_absolute_error: 75.5012 - root_mean_squared_error: 133.5145 - categorical_accuracy: 0.0000e+00 - val_loss: 17791.4082 - val_mean_absolute_error: 75.5228 - val_root_mean_squared_error: 133.3844 - val_categorical_accuracy: 0.0000e+00
+Epoch 42/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17791.4082 - mean_absolute_error: 75.5228 - root_mean_squared_error: 133.3844 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17791.4082 - mean_absolute_error: 75.5228 - root_mean_squared_error: 133.3844 - categorical_accuracy: 0.0000e+00 - val_loss: 17755.1465 - val_mean_absolute_error: 75.5479 - val_root_mean_squared_error: 133.2484 - val_categorical_accuracy: 0.0000e+00
+Epoch 43/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17755.1465 - mean_absolute_error: 75.5479 - root_mean_squared_error: 133.2484 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17755.1465 - mean_absolute_error: 75.5479 - root_mean_squared_error: 133.2484 - categorical_accuracy: 0.0000e+00 - val_loss: 17717.2695 - val_mean_absolute_error: 75.5771 - val_root_mean_squared_error: 133.1062 - val_categorical_accuracy: 0.0000e+00
+Epoch 44/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17717.2695 - mean_absolute_error: 75.5771 - root_mean_squared_error: 133.1062 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17717.2695 - mean_absolute_error: 75.5771 - root_mean_squared_error: 133.1062 - categorical_accuracy: 0.0000e+00 - val_loss: 17678.0879 - val_mean_absolute_error: 75.6106 - val_root_mean_squared_error: 132.9590 - val_categorical_accuracy: 0.0000e+00
+Epoch 45/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17678.0879 - mean_absolute_error: 75.6106 - root_mean_squared_error: 132.9590 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17678.0879 - mean_absolute_error: 75.6106 - root_mean_squared_error: 132.9590 - categorical_accuracy: 0.0000e+00 - val_loss: 17636.8359 - val_mean_absolute_error: 75.6458 - val_root_mean_squared_error: 132.8037 - val_categorical_accuracy: 0.0000e+00
+Epoch 46/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - ETA: 0s - loss: 17636.8359 - mean_absolute_error: 75.6458 - root_mean_squared_error: 132.8037 - categorical_accuracy: 0.0000e+00Output shape: TensorShape([None, 8, 50, 50, 256])
+1/1 [==============================] - 1s 1s/step - loss: 17636.8359 - mean_absolute_error: 75.6458 - root_mean_squared_error: 132.8037 - categorical_accuracy: 0.0000e+00 - val_loss: 17594.5137 - val_mean_absolute_error: 75.6854 - val_root_mean_squared_error: 132.6443 - val_categorical_accuracy: 0.0000e+00
+Epoch 47/500
+Output shape: TensorShape([None, 8, 50, 50, 256])
+Model: "atmo_conv_lstm_4"
+_________________________________________________________________
+ Layer (type)                Output Shape              Param #   
+=================================================================
+ embedding_4 (Embedding)     multiple                  488       
+                                                                 
+ spatial_cnn (Sequential)    (None, 50, 50, 128)       252992    
+                                                                 
+ spatiotemporal_cnn (Sequen  (None, None, 50, 50, 64   30480     
+ tial)                       )                                   
+                                                                 
+ conv_lstm (Sequential)      (None, None, 50, 50, 51   45877248  
+                             2)                                  
+                                                                 
+ rh2_output_cnn (Sequential  (None, None, 200, 200,    69729     
+ )                           1)                                  
+                                                                 
+=================================================================
+Total params: 46230937 (176.36 MB)
+Trainable params: 46230937 (176.36 MB)
+Non-trainable params: 0 (0.00 Byte)
+_________________________________________________________________
+Model: "atmo_conv_lstm_4"
+_________________________________________________________________
+ Layer (type)                Output Shape              Param #   
+=================================================================
+ embedding_4 (Embedding)     multiple                  488       
+                                                                 
+ spatial_cnn (Sequential)    (None, 50, 50, 128)       252992    
+                                                                 
+ spatiotemporal_cnn (Sequen  (None, None, 50, 50, 64   30480     
+ tial)                       )                                   
+                                                                 
+ conv_lstm (Sequential)      (None, None, 50, 50, 51   45877248  
+                             2)                                  
+                                                                 
+ rh2_output_cnn (Sequential  (None, None, 200, 200,    69729     
+ )                           1)                                  
+                                                                 
+=================================================================
+Total params: 46230937 (176.36 MB)
+Trainable params: 46230937 (176.36 MB)
+Non-trainable params: 0 (0.00 Byte)
+_________________________________________________________________
+Model: "atmo_conv_lstm_4"
+_________________________________________________________________
+ Layer (type)                Output Shape              Param #   
+=================================================================
+ embedding_4 (Embedding)     multiple                  488       
+                                                                 
+ spatial_cnn (Sequential)    (None, 50, 50, 128)       252992    
+                                                                 
+ spatiotemporal_cnn (Sequen  (None, None, 50, 50, 64   30480     
+ tial)                       )                                   
+                                                                 
+ conv_lstm (Sequential)      (None, None, 50, 50, 51   45877248  
+                             2)                                  
+                                                                 
+ rh2_output_cnn (Sequential  (None, None, 200, 200,    69729     
+ )                           1)                                  
+                                                                 
+=================================================================
+Total params: 46230937 (176.36 MB)
+Trainable params: 46230937 (176.36 MB)
+Non-trainable params: 0 (0.00 Byte)
+_________________________________________________________________

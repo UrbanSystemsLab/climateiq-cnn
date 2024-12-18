@@ -218,6 +218,111 @@ def load_dataset(
     return dataset
 
 
+def load_fake_dataset(
+    data_bucket_name: str,
+    label_bucket_name: str,
+    sim_names: list[str],
+    storage_client: storage.Client = None,
+) -> tuple[tf.data.Dataset, tf.data.Dataset]:
+    storage_client = storage_client or storage.Client()
+
+    # Early validation
+    assert storage_client.bucket(
+        label_bucket_name
+    ).exists(), f"Bucket does not exist: {label_bucket_name}"
+    assert storage_client.bucket(
+        data_bucket_name
+    ).exists(), f"Bucket does not exist: {data_bucket_name}"
+
+    sim_name_dates = get_all_simulation_days(
+        sim_names=sim_names, storage_client=storage_client, bucket_name=data_bucket_name
+    )
+    sim_name, day = sim_name_dates[0]
+
+    logging.info("Total simulation days before filtering: %d", len(sim_name_dates))
+
+
+        # Load spatial, LU index, spatiotemporal, and label from their folders
+    lu_index_data = load_pattern_from_cloud(
+        data_bucket_name,
+        f"{sim_name}/lu_index",
+        storage_client,
+        max_blobs=1,
+    )[0]
+    spatial_data = load_pattern_from_cloud(
+        data_bucket_name, f"{sim_name}/spatial", storage_client, max_blobs=1
+    )[0]
+
+    load_result = load_day(
+        day,
+        sim_name,
+        bucket_name_inputs=data_bucket_name,
+        bucket_name_labels=label_bucket_name,
+        storage_client=storage_client,
+    )
+    if load_result is None:
+        missing_files += 1
+        logging.warning(
+            "Incomplete data!: %s %s #%d" % (day, sim_name, missing_files)
+        )
+    def data_generator():
+        generated_count: int = 0
+
+        spatiotemporal_data, label_data = load_result
+        generated_count += 1
+        for _ in range(16):
+            yield {
+                "spatiotemporal": spatiotemporal_data,
+                "spatial": spatial_data.numpy(),
+                "lu_index": lu_index_data.numpy().reshape(200, 200),
+            }, label_data
+
+        logging.info("Total generated samples: %d", generated_count)
+
+    dataset = tf.data.Dataset.from_generator(
+        lambda: data_generator(),
+        output_signature=(
+            {
+                "spatiotemporal": tf.TensorSpec(
+                    shape=(
+                        constants.INPUT_TIME_STEPS,
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                        constants.NUM_SPATIOTEMPORAL_FEATURES,
+                    ),
+                    dtype=tf.float32,
+                ),
+                "spatial": tf.TensorSpec(
+                    shape=(
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                        constants.NUM_SAPTIAL_FEATURES,
+                    ),
+                    dtype=tf.float32,
+                ),
+                "lu_index": tf.TensorSpec(
+                    shape=(
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                    ),
+                    dtype=tf.int32,
+                ),
+            },
+            tf.TensorSpec(
+                shape=(
+                    constants.OUTPUT_TIME_STEPS,
+                    constants.MAP_HEIGHT,
+                    constants.MAP_WIDTH,
+                    constants.OUTPUT_CHANNELS,
+                ),
+                dtype=tf.float32,
+            ),
+        ),
+    )
+
+    return dataset
+
+
 def extract_dates(
     bucket_name: str, path: str, storage_client: storage.Client
 ) -> list[str]:
