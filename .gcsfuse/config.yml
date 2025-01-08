@@ -1,0 +1,13 @@
+app-name: "climateiq-cnn"
+file-cache:
+  max-size-mb: 102400
+  cache-file-for-range-read: true
+  enable-parallel-downloads: true
+  parallel-downloads-per-file: 8
+  max-parallel-downloads: 8
+  download-chunk-size-mb: 50
+cache-dir: "/tmp"
+file-system:
+  dir-mode: "755"
+  file-mode: "755"
+implicit-dirs: true
