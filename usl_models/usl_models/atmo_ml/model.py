@@ -96,7 +96,6 @@ class AtmoModel:
             metrics=[
                 tf.keras.metrics.MeanAbsoluteError(),
                 tf.keras.metrics.RootMeanSquaredError(),
-                tf.keras.metrics.CategoricalAccuracy(),
             ],
         )
         return model
