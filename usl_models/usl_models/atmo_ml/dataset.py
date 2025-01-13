@@ -217,7 +217,8 @@ def load_dataset(
 
     return dataset
 
-
+SELECTED_SPATIAL_FEATURES = [0]  # Example: select feature indices 0, 2, 5
+SELECTED_SPATIOTEMPORAL_FEATURES = [0, 1, 2, 3, 4, 5, 6]
 def load_fake_dataset(
     data_bucket_name: str,
     label_bucket_name: str,
@@ -237,45 +238,58 @@ def load_fake_dataset(
     sim_name_dates = get_all_simulation_days(
         sim_names=sim_names, storage_client=storage_client, bucket_name=data_bucket_name
     )
-    sim_name, day = sim_name_dates[0]
+    sim_name_dates = sorted(sim_name_dates)
 
     logging.info("Total simulation days before filtering: %d", len(sim_name_dates))
 
+    if len(sim_name_dates) < 4:
+        raise ValueError("Not enough simulation days to load 4 unique samples.")
 
-        # Load spatial, LU index, spatiotemporal, and label from their folders
+    # Select the first four days
+    selected_sim_name_dates = sim_name_dates[:1]
+
+    # Load spatial and LU index data (assume these are consistent across days)
     lu_index_data = load_pattern_from_cloud(
         data_bucket_name,
-        f"{sim_name}/lu_index",
+        f"{selected_sim_name_dates[0][0]}/lu_index",
         storage_client,
         max_blobs=1,
     )[0]
     spatial_data = load_pattern_from_cloud(
-        data_bucket_name, f"{sim_name}/spatial", storage_client, max_blobs=1
+        data_bucket_name,
+        f"{selected_sim_name_dates[0][0]}/spatial",
+        storage_client,
+        max_blobs=1,
     )[0]
-
-    load_result = load_day(
-        day,
-        sim_name,
-        bucket_name_inputs=data_bucket_name,
-        bucket_name_labels=label_bucket_name,
-        storage_client=storage_client,
-    )
-    if load_result is None:
-        missing_files += 1
-        logging.warning(
-            "Incomplete data!: %s %s #%d" % (day, sim_name, missing_files)
-        )
+    spatial_data = tf.gather(spatial_data, SELECTED_SPATIAL_FEATURES, axis=-1)
+    sim_name, day = selected_sim_name_dates[0]
     def data_generator():
         generated_count: int = 0
+        for _ in range(4):
+        #for sim_name, day in selected_sim_name_dates:
+            load_result = load_day(
+                day,
+                sim_name,
+                bucket_name_inputs=data_bucket_name,
+                bucket_name_labels=label_bucket_name,
+                storage_client=storage_client,
+            )
+            if load_result is None:
+                logging.warning(f"Incomplete data for {sim_name} on {day}")
+                continue
 
-        spatiotemporal_data, label_data = load_result
-        generated_count += 1
-        for _ in range(16):
+            spatiotemporal_data, label_data = load_result
+            spatiotemporal_data = tf.gather(
+            spatiotemporal_data, SELECTED_SPATIOTEMPORAL_FEATURES, axis=-1
+        )
+
+            generated_count += 1
+
             yield {
                 "spatiotemporal": spatiotemporal_data,
                 "spatial": spatial_data.numpy(),
                 "lu_index": lu_index_data.numpy().reshape(200, 200),
-            }, label_data
+            }, tf.expand_dims(label_data[:, :, :, 0], axis=-1)
 
         logging.info("Total generated samples: %d", generated_count)
 
@@ -288,7 +302,7 @@ def load_fake_dataset(
                         constants.INPUT_TIME_STEPS,
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
-                        constants.NUM_SPATIOTEMPORAL_FEATURES,
+                        len(SELECTED_SPATIOTEMPORAL_FEATURES),
                     ),
                     dtype=tf.float32,
                 ),
@@ -296,7 +310,7 @@ def load_fake_dataset(
                     shape=(
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
-                        constants.NUM_SAPTIAL_FEATURES,
+                        len(SELECTED_SPATIAL_FEATURES),
                     ),
                     dtype=tf.float32,
                 ),
