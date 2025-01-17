@@ -4,7 +4,6 @@ import concurrent.futures
 import functools
 import hashlib  # For hashing days
 import tensorflow as tf
-import numpy as np
 from google.cloud import storage  # type: ignore
 from usl_models.atmo_ml import constants
 from usl_models.shared import downloader
@@ -126,7 +125,10 @@ def load_dataset(
     selected_percentage = len(selected_days) / total_days * 100
     logging.info(
         "Selected %d/%d days (%.2f%%) based on hash range %s.",
-        len(selected_days), total_days, selected_percentage, hash_range,
+        len(selected_days),
+        total_days,
+        selected_percentage,
+        hash_range,
     )
 
     def data_generator():
@@ -217,8 +219,9 @@ def load_dataset(
 
     return dataset
 
-SELECTED_SPATIAL_FEATURES = [0]  # Example: select feature indices 0, 2, 5
-SELECTED_SPATIOTEMPORAL_FEATURES = [0, 1, 2, 3, 4, 5, 6]
+
+# SELECTED_SPATIAL_FEATURES = [0]  # Example: select feature indices 0, 2, 5
+# SELECTED_SPATIOTEMPORAL_FEATURES = [0, 1, 2, 3, 4, 5, 6]
 def load_fake_dataset(
     data_bucket_name: str,
     label_bucket_name: str,
@@ -246,27 +249,29 @@ def load_fake_dataset(
         raise ValueError("Not enough simulation days to load 4 unique samples.")
 
     # Select the first four days
-    selected_sim_name_dates = sim_name_dates[:1]
-
+    selected_sim_name_dates = sim_name_dates[:16]
+    xo = 75
+    yo = 100
     # Load spatial and LU index data (assume these are consistent across days)
     lu_index_data = load_pattern_from_cloud(
         data_bucket_name,
         f"{selected_sim_name_dates[0][0]}/lu_index",
         storage_client,
         max_blobs=1,
-    )[0]
+    )[0][xo : constants.MAP_HEIGHT + xo, yo : constants.MAP_WIDTH + yo]
     spatial_data = load_pattern_from_cloud(
         data_bucket_name,
         f"{selected_sim_name_dates[0][0]}/spatial",
         storage_client,
         max_blobs=1,
-    )[0]
-    spatial_data = tf.gather(spatial_data, SELECTED_SPATIAL_FEATURES, axis=-1)
-    sim_name, day = selected_sim_name_dates[0]
+    )[0][xo : constants.MAP_HEIGHT + xo, yo : constants.MAP_WIDTH + yo]
+    # spatial_data = tf.gather(spatial_data, SELECTED_SPATIAL_FEATURES, axis=-1)
+    # sim_name, day = selected_sim_name_dates[0]
+
     def data_generator():
         generated_count: int = 0
-        for _ in range(4):
-        #for sim_name, day in selected_sim_name_dates:
+        # for _ in range(1):
+        for sim_name, day in selected_sim_name_dates:
             load_result = load_day(
                 day,
                 sim_name,
@@ -277,18 +282,25 @@ def load_fake_dataset(
             if load_result is None:
                 logging.warning(f"Incomplete data for {sim_name} on {day}")
                 continue
-
             spatiotemporal_data, label_data = load_result
-            spatiotemporal_data = tf.gather(
-            spatiotemporal_data, SELECTED_SPATIOTEMPORAL_FEATURES, axis=-1
-        )
+            spatiotemporal_data = spatiotemporal_data[
+                :, xo : constants.MAP_HEIGHT + xo, yo : constants.MAP_WIDTH + yo
+            ]
+            label_data = label_data[
+                :, xo : constants.MAP_HEIGHT + xo, yo : constants.MAP_WIDTH + yo
+            ]
+            #     spatiotemporal_data = tf.gather(
+            #     spatiotemporal_data, SELECTED_SPATIOTEMPORAL_FEATURES, axis=-1
+            # )
 
             generated_count += 1
 
             yield {
                 "spatiotemporal": spatiotemporal_data,
                 "spatial": spatial_data.numpy(),
-                "lu_index": lu_index_data.numpy().reshape(200, 200),
+                "lu_index": lu_index_data.numpy().reshape(
+                    constants.MAP_HEIGHT, constants.MAP_WIDTH
+                ),
             }, tf.expand_dims(label_data[:, :, :, 0], axis=-1)
 
         logging.info("Total generated samples: %d", generated_count)
@@ -302,7 +314,8 @@ def load_fake_dataset(
                         constants.INPUT_TIME_STEPS,
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
-                        len(SELECTED_SPATIOTEMPORAL_FEATURES),
+                        # len(SELECTED_SPATIOTEMPORAL_FEATURES),
+                        constants.NUM_SPATIOTEMPORAL_FEATURES,
                     ),
                     dtype=tf.float32,
                 ),
@@ -310,7 +323,8 @@ def load_fake_dataset(
                     shape=(
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
-                        len(SELECTED_SPATIAL_FEATURES),
+                        # len(SELECTED_SPATIAL_FEATURES),
+                        constants.NUM_SAPTIAL_FEATURES,
                     ),
                     dtype=tf.float32,
                 ),
@@ -386,13 +400,13 @@ def load_day(
     # Using ThreadPoolExecutor to load inputs in parallel
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = {
-            'previous': executor.submit(load_inputs_for_date, previous_day, 1),
-            'current': executor.submit(load_inputs_for_date, day),
-            'next': executor.submit(load_inputs_for_date, next_day, 1)
+            "previous": executor.submit(load_inputs_for_date, previous_day, 1),
+            "current": executor.submit(load_inputs_for_date, day),
+            "next": executor.submit(load_inputs_for_date, next_day, 1),
         }
-        inputs_previous = futures['previous'].result()
-        inputs_current = futures['current'].result()
-        inputs_next = futures['next'].result()
+        inputs_previous = futures["previous"].result()
+        inputs_current = futures["current"].result()
+        inputs_next = futures["next"].result()
 
     # Concatenate inputs to form a single tensor
     inputs = tf.concat([inputs_previous, inputs_current, inputs_next], axis=0)
@@ -405,7 +419,10 @@ def load_day(
     label_path = f"{sim_name}/wrfout_d03_{day}_"
     labels = load_pattern_from_cloud(bucket_name_labels, label_path, storage_client)
     num_label_timestamps = labels.shape[0]
-        # Skip this day if either inputs or labels are invalid
-    if num_input_timestamps != constants.INPUT_TIME_STEPS or num_label_timestamps != constants.OUTPUT_TIME_STEPS:
+    # Skip this day if either inputs or labels are invalid
+    if (
+        num_input_timestamps != constants.INPUT_TIME_STEPS
+        or num_label_timestamps != constants.OUTPUT_TIME_STEPS
+    ):
         return None  # Skip this day if the input data or labels are not valid
     return inputs, labels
