@@ -24,7 +24,7 @@
 # class TestAtmoMLDataset(usl_models.testing.TestCase):
 #     @mock.patch("google.cloud.storage.Client")
 #     def test_load_dataset_structure(self, mock_storage_client):
-#         """Test creating AtmoML dataset from GCS with expected structure and shapes."""
+#         """Test creating atmodataset from GCS with expected structure and shapes."""
 #         # Mock GCS client and bucket
 #         mock_storage_client_instance = mock_storage_client.return_value
 #         mock_bucket = MagicMock()
@@ -68,7 +68,8 @@
 #         # Updated mock structure to match sim_names format
 #         mock_bucket.list_blobs.side_effect = lambda prefix: {
 #             "NYC_Heat_Test/NYC_summer_2000_01p/spatial": [mock_spatial_blob],
-#             "NYC_Heat_Test/NYC_summer_2000_01p/spatiotemporal": mock_spatiotemporal_blobs,
+#             "NYC_Heat_Test/NYC_summer_2000_01p/spatiotemporal":
+#                   mock_spatiotemporal_blobs,
 #             "NYC_Heat_Test/NYC_summer_2000_01p/lu_index": [mock_lu_index_blob],
 #             "NYC_Heat_Test/NYC_summer_2000_01p": mock_label_blobs,
 #         }.get(prefix, [])
