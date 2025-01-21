@@ -306,7 +306,7 @@ class AtmoConvLSTM(tf.keras.Model):
 
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
-        output_cnn_params = {"padding": "same", "activation": "relu"}
+        # output_cnn_params = {"padding": "same", "activation": "relu"}
         # Input shape: (time, height, width, channels)
         output_cnn_input_shape = (
             None,
@@ -316,72 +316,74 @@ class AtmoConvLSTM(tf.keras.Model):
         )
 
         # Output: T2 (2m temperature)
-        self._t2_output_cnn = tf.keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
-                ),
-            ],
-            name="t2_output_cnn",
-        )
+        # self._t2_output_cnn = tf.keras.Sequential(
+        #     [
+        #         layers.InputLayer(output_cnn_input_shape),
+        #         layers.TimeDistributed(
+        #             layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
+        #         ),
+        #         layers.TimeDistributed(
+        #             layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
+        #         ),
+        #         layers.TimeDistributed(
+        #             layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
+        #         ),
+        #     ],
+        #     name="t2_output_cnn",
+        # )
 
         # Output: RH2 (2m relative humidity)
         self._rh2_output_cnn = tf.keras.Sequential(
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
-                ),
+                    layers.Flatten()
+                ),  # Flatten the spatial dimensions
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
-                ),
+                    layers.Dense(
+                        self._spatial_height * self._spatial_width, activation="relu"
+                    )
+                ),  # Adjust this to match your required output size
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
-                ),
+                    layers.Reshape((self._spatial_height, self._spatial_width, 1))
+                ),  # Reshape back to the spatial dimensions
             ],
             name="rh2_output_cnn",
         )
 
         # Output: WSPD10 (10m wind speed)
-        self._wspd10_output_cnn = tf.keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
-                ),
-            ],
-            name="wspd10_output_cnn",
-        )
+        # self._wspd10_output_cnn = tf.keras.Sequential(
+        #     [
+        #         layers.InputLayer(output_cnn_input_shape),
+        #         layers.TimeDistributed(
+        #             layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
+        #         ),
+        #         layers.TimeDistributed(
+        #             layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
+        #         ),
+        #         layers.TimeDistributed(
+        #             layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
+        #         ),
+        #     ],
+        #     name="wspd10_output_cnn",
+        # )
 
-        # Output: WDIR10 (10m wind direction sine and cosine functions)
-        self._wdir10_output_cnn = tf.keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(2, 1, strides=1, **output_cnn_params)
-                ),
-            ],
-            name="wdir10_output_cnn",
-        )
+        # # Output: WDIR10 (10m wind direction sine and cosine functions)
+        # self._wdir10_output_cnn = tf.keras.Sequential(
+        #     [
+        #         layers.InputLayer(output_cnn_input_shape),
+        #         layers.TimeDistributed(
+        #             layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
+        #         ),
+        #         layers.TimeDistributed(
+        #             layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
+        #         ),
+        #         layers.TimeDistributed(
+        #             layers.Conv2DTranspose(2, 1, strides=1, **output_cnn_params)
+        #         ),
+        #     ],
+        #     name="wdir10_output_cnn",
+        # )
 
     def call(self, inputs: AtmoModel.Input) -> tf.Tensor:
         """Makes a forward pass of the model.
@@ -458,9 +460,9 @@ class AtmoConvLSTM(tf.keras.Model):
         trconv_input = data_utils.split_time_step_pairs(lstm_output)
 
         outputs = [
-            self._t2_output_cnn(trconv_input),
+            # self._t2_output_cnn(trconv_input),
             self._rh2_output_cnn(trconv_input),
-            self._wspd10_output_cnn(trconv_input),
-            self._wdir10_output_cnn(trconv_input),
+            # self._wspd10_output_cnn(trconv_input),
+            # self._wdir10_output_cnn(trconv_input),
         ]
         return tf.concat(outputs, axis=-1)
