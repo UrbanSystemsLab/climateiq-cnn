@@ -7,8 +7,8 @@ from usl_models.atmo_ml import model as atmo_model
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import model_params
 
-_TEST_MAP_HEIGHT = 25
-_TEST_MAP_WIDTH = 25
+_TEST_MAP_HEIGHT = 24
+_TEST_MAP_WIDTH = 24
 _TEST_SPATIAL_FEATURES = 22  # lu_index is now separate
 _TEST_SPATIOTEMPORAL_FEATURES = 12
 _LU_INDEX_VOCAB_SIZE = 61
