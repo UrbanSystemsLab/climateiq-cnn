@@ -1,12 +1,11 @@
 """Constant definitions for the AtmoML model."""
 
-# Geospatial constants
 MAP_HEIGHT = 200
 MAP_WIDTH = 200
-
 # Other well-defined constants
 INPUT_TIME_STEPS = 6
-OUTPUT_CHANNELS = 5
+# OUTPUT_CHANNELS should be 5
+OUTPUT_CHANNELS = 1
 OUTPUT_TIME_STEPS = 8
 NUM_SAPTIAL_FEATURES = 22
 NUM_SPATIOTEMPORAL_FEATURES = 12
