@@ -1,9 +1,7 @@
 """Constant definitions for the AtmoML model."""
 
-# Geospatial constants should be 200
-MAP_HEIGHT = 24
-MAP_WIDTH = 24
-
+MAP_HEIGHT = 200
+MAP_WIDTH = 200
 # Other well-defined constants
 INPUT_TIME_STEPS = 6
 # OUTPUT_CHANNELS should be 5
