@@ -1,10 +1,44 @@
 import functools
+import pathlib
+import logging
 
 import tensorflow as tf
 import numpy as np
+
 from google.cloud import storage  # type: ignore
+from google.cloud.storage import transfer_manager
+
 from usl_models.atmo_ml import constants, cnn_inputs_outputs
 from usl_models.shared import downloader
+
+from datetime import datetime, timedelta
+
+
+DATE_FORMAT = '%Y-%m-%d'
+TIMESTAMP_FILENAME_FORMAT = 'met_em.d03.%Y-%m-%d_%H:%M:%S.npz'
+STATIC_FILENAME = 'static.npz'
+
+FEATURE_BUCKET_NAME = "climateiq-study-area-feature-chunks"
+LABEL_BUCKET_NAME = "climateiq-study-area-label-chunks"
+
+
+def load_day(path: pathlib.Path, date: datetime):
+    timestamps = [date + timedelta(hours=6 * i) for i in range(-1, 5)]
+    spatiotemporal = []
+    labels = []
+    for timestamp in timestamps:
+        temporal_file = path / timestamp.strftime(TIMESTAMP_FILENAME_FORMAT)
+        loaded = np.load(temporal_file)
+        spatiotemporal.append(loaded['spatiotemporal'])
+        labels.append(loaded['label'])
+    
+    static_data = np.load(path / STATIC_FILENAME)
+    return dict(
+        spatiotemporal=np.vstack(spatiotemporal),
+        labels=np.vstack(labels),
+        spatial=static_data['spatial'],
+        lu_index=static_data['lu_index']
+    )
 
 
 # Load data from Google Cloud Storage
@@ -277,3 +311,66 @@ def split_dataset(dataset, train_frac=0.7, val_frac=0.15, test_frac=0.15):
     test_dataset = dataset.skip(train_size + val_size)
 
     return train_dataset, val_dataset, test_dataset
+
+
+def download_simulation(
+    feature_bucket: storage.Bucket,
+    label_bucket: storage.Bucket,
+    sim_path: pathlib.Path,
+    output_path: pathlib.Path,
+    worker_type=transfer_manager.PROCESS,
+):
+    """Downloads a simulation to the target dir."""
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Download static files (time invariant)
+    [(_, spatial)] = list(
+        downloader.bulk_download_numpy(
+            feature_bucket, sim_path / "spatial", worker_type=worker_type, max_files=1
+        )
+    )
+    [(_, lu_index)] = list(
+        downloader.bulk_download_numpy(
+            feature_bucket, sim_path / "lu_index", worker_type=worker_type, max_files=1
+        )
+    )
+    np.savez_compressed(output_path / "static", spatial=spatial, lu_index=lu_index)
+
+    spatiotemporal_arrays = list(
+        downloader.bulk_download_numpy(
+            feature_bucket, sim_path / "spatiotemporal", worker_type=worker_type
+        )
+    )
+    label_arrays = list(
+        downloader.bulk_download_numpy(label_bucket, sim_path, worker_type=worker_type)
+    )
+    for (filename, label), (_, spatiotemporal) in zip(
+        spatiotemporal_arrays, label_arrays
+    ):
+        np.savez_compressed(
+            output_path / pathlib.Path(filename).stem,
+            spatiotemporal=spatiotemporal,
+            label=label,
+        )
+
+
+def download_dataset(
+    sim_names: list[str],
+    output_path: pathlib.Path,
+    client: storage.Client = storage.Client(),
+    feature_bucket_name: str = FEATURE_BUCKET_NAME,
+    label_bucket_name: str = LABEL_BUCKET_NAME,
+):
+    """Download a dataset from GCS to the given local path."""
+    output_path.mkdir(parents=True, exist_ok=True)
+    feature_bucket = client.bucket(feature_bucket_name)
+    label_bucket = client.bucket(label_bucket_name)
+    for sim_name in sim_names:
+        logging.info('Download simulation "%s"', sim_name)
+        sim_path = pathlib.Path(sim_name)
+        download_simulation(
+            sim_path=sim_path,
+            output_path=output_path / sim_path,
+            feature_bucket=feature_bucket,
+            label_bucket=label_bucket,
+        )
