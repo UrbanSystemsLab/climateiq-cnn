@@ -14,9 +14,9 @@ from usl_models.shared import downloader
 from datetime import datetime, timedelta
 
 
-DATE_FORMAT = '%Y-%m-%d'
-TIMESTAMP_FILENAME_FORMAT = 'met_em.d03.%Y-%m-%d_%H:%M:%S.npz'
-STATIC_FILENAME = 'static.npz'
+DATE_FORMAT = "%Y-%m-%d"
+TIMESTAMP_FILENAME_FORMAT = "met_em.d03.%Y-%m-%d_%H:%M:%S.npz"
+STATIC_FILENAME = "static.npz"
 
 FEATURE_BUCKET_NAME = "climateiq-study-area-feature-chunks"
 LABEL_BUCKET_NAME = "climateiq-study-area-label-chunks"
@@ -29,15 +29,15 @@ def load_day(path: pathlib.Path, date: datetime):
     for timestamp in timestamps:
         temporal_file = path / timestamp.strftime(TIMESTAMP_FILENAME_FORMAT)
         loaded = np.load(temporal_file)
-        spatiotemporal.append(loaded['spatiotemporal'])
-        labels.append(loaded['label'])
-    
+        spatiotemporal.append(loaded["spatiotemporal"])
+        labels.append(loaded["label"])
+
     static_data = np.load(path / STATIC_FILENAME)
     return dict(
         spatiotemporal=np.vstack(spatiotemporal),
         labels=np.vstack(labels),
-        spatial=static_data['spatial'],
-        lu_index=static_data['lu_index']
+        spatial=static_data["spatial"],
+        lu_index=static_data["lu_index"],
     )
 
 
