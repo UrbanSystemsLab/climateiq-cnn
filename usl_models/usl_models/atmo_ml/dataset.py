@@ -320,7 +320,17 @@ def download_simulation(
     output_path: pathlib.Path,
     worker_type=transfer_manager.PROCESS,
 ):
-    """Downloads a simulation to the target dir."""
+    """Downloads a simulation to the output_path.
+    
+    For the format looks like:
+    ```
+    NYC_summer_2017_25p/
+        ├── met_em.d03.2017-05-24_00:00:00.npz
+        ├── ...
+        ├── met_em.d03.2017-05-24_06:00:00.npz
+        └── static.npz
+    ```
+    """
     output_path.mkdir(parents=True, exist_ok=True)
 
     # Download static files (time invariant)
@@ -336,6 +346,7 @@ def download_simulation(
     )
     np.savez_compressed(output_path / "static", spatial=spatial, lu_index=lu_index)
 
+    # Download temporal files (one file per timestep)
     spatiotemporal_arrays = list(
         downloader.bulk_download_numpy(
             feature_bucket, sim_path / "spatiotemporal", worker_type=worker_type
