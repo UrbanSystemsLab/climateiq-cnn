@@ -58,6 +58,10 @@ def bulk_download(
 ) -> Iterable[tuple[str, io.BytesIO]]:
     """Download all blobs in the bucket under the given path."""
     blobs: list[storage.Blob] = list(bucket.list_blobs(prefix=path))
+    if not blobs:
+        raise ValueError(
+            f"Blob path '{path}' contained no files in bucket '{bucket.name}'"
+        )
     if worker_type == transfer_manager.THREAD:
         # If using threads, can download files directly into memory.
         blob_file_pairs = [(blob, io.BytesIO()) for blob in blobs[:max_files]]
