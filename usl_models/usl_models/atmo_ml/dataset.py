@@ -1,5 +1,6 @@
 import logging
 import random
+from typing import Iterable
 import functools
 import itertools
 from datetime import datetime, timedelta
@@ -149,7 +150,7 @@ def load_dataset(
         hash_range,
     )
 
-    def data_generator():
+    def data_generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
         missing_days: int = 0
         generated_count: int = 0
 
