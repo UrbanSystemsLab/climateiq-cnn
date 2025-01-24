@@ -17,38 +17,6 @@ FEATURE_FILENAME_FORMAT = "met_em.d03.%Y-%m-%d_%H:%M:%S.npy"
 LABEL_FILENAME_FORMAT = "wrfout_d03_%Y-%m-%d_%H:%M:%S.npy"
 
 
-# Load data from Google Cloud Storage
-@functools.lru_cache(maxsize=512)
-def load_pattern_from_cloud(
-    bucket_name: str,
-    prefix: str,
-    storage_client: storage.Client,
-    max_blobs: int | None = None,
-    blob_offset: int | None = None,
-) -> tf.Tensor:
-    """Download all files in the folder.
-
-    If max_blobs is specified, only returns that many blobs.
-    """
-    logging.warning("prefix: %s", prefix)
-    bucket = storage_client.bucket(bucket_name)
-
-    blobs = list(bucket.list_blobs(prefix=prefix, max_results=max_blobs))
-    if blob_offset:
-        blobs = blobs[blob_offset:]
-
-    all_data = []
-    for blob in blobs:
-        logging.warning("  blob.path: %s", urllib.parse.unquote_plus(blob.path))
-
-        if blob.name.endswith(".npy"):  # Ensure only .npy files are processed
-            all_data.append(downloader.blob_to_tensor(blob))
-        else:
-            logging.error("  Unexpected file extension: %s", blob.name)
-
-    return tf.stack(all_data)
-
-
 def get_date(filename: str) -> str:
     return filename.split(".")[2].split("_")[0]
 
