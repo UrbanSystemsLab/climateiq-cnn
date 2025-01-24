@@ -1,10 +1,8 @@
 import logging
 import random
 from typing import Iterable
-import functools
 import itertools
 from datetime import datetime, timedelta
-import urllib.parse
 import hashlib  # For hashing days
 import tensorflow as tf
 from google.cloud import storage  # type: ignore
@@ -211,7 +209,6 @@ def load_day(
     label_bucket: storage.Bucket,
 ) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
     """Loads a single example from (sim_name, date)."""
-
     logging.info("load_day('%s', '%s')" % (sim_name, date.strftime(DATE_FORMAT)))
     start_filename = date.strftime(FEATURE_FILENAME_FORMAT)
 
