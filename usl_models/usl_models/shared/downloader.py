@@ -1,5 +1,6 @@
 import urllib.parse
 import numpy as np
+import logging
 import numpy.typing as npt
 from google.cloud import storage  # type:ignore[attr-defined]
 import tensorflow as tf
@@ -33,3 +34,11 @@ def blob_to_tensor(blob: storage.Blob):
         blob_to_array(blob),
         dtype=tf.float32,
     )
+
+
+def try_download_tensor(bucket: storage.Bucket, path: str) -> tf.Tensor | None:
+    blob = bucket.blob(path)
+    if not blob.exists():
+        logging.warning("blob does not exist: %s", path)
+        return None
+    return blob_to_tensor(blob)

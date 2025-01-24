@@ -1,111 +1,156 @@
-import functools
-
+import logging
+import random
+from typing import Iterable
+import itertools
+from datetime import datetime, timedelta
+import hashlib  # For hashing days
 import tensorflow as tf
-import numpy as np
 from google.cloud import storage  # type: ignore
-from usl_models.atmo_ml import constants, cnn_inputs_outputs
+from usl_models.atmo_ml import constants
 from usl_models.shared import downloader
+import re  # To extract dates from filenames
+
+DATE_FORMAT = "%Y-%m-%d"
+FEATURE_FILENAME_FORMAT = "met_em.d03.%Y-%m-%d_%H:%M:%S.npy"
+LABEL_FILENAME_FORMAT = "wrfout_d03_%Y-%m-%d_%H:%M:%S.npy"
 
 
-# Load data from Google Cloud Storage
-@functools.lru_cache(maxsize=256)
-def load_folder_from_cloud(
-    bucket_name: str,
-    path: str,
-    storage_client: storage.Client,
-    max_blobs: int | None = None,
-) -> tf.Tensor:
-    """Download all files in the folder.
+def get_date(filename: str) -> str:
+    return filename.split(".")[2].split("_")[0]
 
-    If max_blobs is specified, only returns that many blobs.
+
+def hash_day(sim_name: str, date: str) -> float:
+    """Hash a timestamp into a float between 0 and 1.
+
+    Ensure that all timestamps for the same day hash to the same value.
+
+    Args:
+        filepath (str): A string in the format 'met_em.d03.2000-05-24_00:00:00.npy'
+                        or 'wrfout_d03_2000-05-24_00:00:00.npy'.
+
+    Returns:
+        float: A hash value between 0 and 1 for the day.
     """
+    # Hash the date part to ensure all timestamps for the same day are consistent
+    return (
+        int(hashlib.sha256((sim_name + date).encode()).hexdigest(), 16)
+        % (10**8)
+        / (10**8)
+    )
+
+
+def get_all_simulation_days(
+    sim_names: list[str], storage_client, bucket_name: str
+) -> list[tuple[str, str]]:
+    """Retrieve all simulation days from simulation names.
+
+    Returns: [(sim_name, date), ...]
+    """
+    all_days = set()
     bucket = storage_client.bucket(bucket_name)
-    # List all blobs within the folder
-    blobs = bucket.list_blobs(prefix=path)
-    all_data = []
-    blob_count = 0
-    for blob in blobs:
-        blob_count += 1
-        if max_blobs is not None and blob_count > max_blobs:
-            break
 
-        if blob.name.endswith(".npy"):  # Ensure only .npy files are processed
-            all_data.append(downloader.blob_to_tensor(blob))
+    for sim_name in sim_names:
+        # List blobs under the simulation folder
+        blobs = bucket.list_blobs(prefix=f"{sim_name}/")
 
-    return tf.stack(all_data)
+        num_blobs = 0
+        for blob in blobs:
+            num_blobs += 1
+            # Extract the date from the filename (e.g., "2000-05-24.npy")
+
+            filename = blob.name.split("/")[-1]
+            all_days.add((sim_name, get_date(filename)))
+
+        assert num_blobs > 0
+
+    return sorted(all_days)
 
 
 def load_dataset(
     data_bucket_name: str,
     label_bucket_name: str,
     sim_names: list[str],
-    timesteps_per_day: int,
-    shuffle: bool = True,
     storage_client: storage.Client = None,
-    max_blobs: int | None = None,
+    shuffle: bool = True,
+    hash_range=(0.0, 1.0),
+    dates: list[str] | None = None,
 ) -> tf.data.Dataset:
     storage_client = storage_client or storage.Client()
 
     # Early validation
     assert storage_client.bucket(
-        label_bucket_name
-    ).exists(), f"Bucket does not exist: {label_bucket_name}"
-    assert storage_client.bucket(
         data_bucket_name
     ).exists(), f"Bucket does not exist: {data_bucket_name}"
+    assert storage_client.bucket(
+        label_bucket_name
+    ).exists(), f"Bucket does not exist: {label_bucket_name}"
 
-    label_timesteps = 2 * (timesteps_per_day - 2)
+    if dates is not None:
+        sim_name_dates = list(itertools.product(sim_names, dates))
+    else:
+        sim_name_dates = get_all_simulation_days(
+            sim_names=sim_names,
+            storage_client=storage_client,
+            bucket_name=data_bucket_name,
+        )
+    print("sim_name_dates", sim_name_dates)
 
-    def data_generator():
-        for sim_name in sim_names:
+    if shuffle:
+        random.shuffle(sim_name_dates)
 
-            spatiotemporal_folder = f"{sim_name}/spatiotemporal"
-            spatial_folder = f"{sim_name}/spatial"
-            lu_index_folder = f"{sim_name}/lu_index"
-            label_folder = sim_name
+    logging.info("Total simulation days before filtering: %d", len(sim_name_dates))
 
-            # Load spatial, LU index, spatiotemporal, and label from their folders
-            lu_index_data = load_folder_from_cloud(
-                data_bucket_name, lu_index_folder, storage_client, max_blobs=1
-            )[0]
-            spatial_data = load_folder_from_cloud(
-                data_bucket_name, spatial_folder, storage_client, max_blobs=1
-            )[0]
-            spatiotemporal_data = load_folder_from_cloud(
-                data_bucket_name,
-                spatiotemporal_folder,
-                storage_client,
-                max_blobs=max_blobs,
+    # Track stats for filtering
+    total_days = len(sim_name_dates)
+    selected_days = [
+        (sim_name, day)
+        for sim_name, day in sim_name_dates
+        if hash_range[0] <= hash_day(sim_name, day) < hash_range[1]
+    ]
+    selected_percentage = len(selected_days) / total_days * 100
+    logging.info(
+        "Selected %d/%d days (%.2f%%) based on hash range %s.",
+        len(selected_days),
+        total_days,
+        selected_percentage,
+        hash_range,
+    )
+
+    def data_generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
+        missing_days: int = 0
+        generated_count: int = 0
+
+        feature_bucket = storage_client.bucket(data_bucket_name)
+        label_bucket = storage_client.bucket(label_bucket_name)
+        for sim_name, day in sim_name_dates:
+            # Skip days not in this dataset
+            if not (hash_range[0] <= hash_day(sim_name, day) < hash_range[1]):
+                continue
+
+            load_result = load_day(
+                sim_name,
+                datetime.strptime(day, DATE_FORMAT),
+                feature_bucket=feature_bucket,
+                label_bucket=label_bucket,
             )
-            label_data = load_folder_from_cloud(
-                label_bucket_name, label_folder, storage_client, max_blobs=max_blobs
-            )
+            if load_result is None:
+                missing_days += 1
+                continue
 
-            # Iterate through each spatiotemporal and label file
-            # Divide data into days and apply padding or truncation
-            inputs, labels = cnn_inputs_outputs.divide_into_days(
-                spatiotemporal_data, label_data, timesteps_per_day
-            )
-            for day_inputs, day_labels in zip(inputs, labels):
-                day_inputs_padded = pad_or_truncate_data(
-                    day_inputs.numpy(), timesteps_per_day
-                )
-                day_labels_padded = pad_or_truncate_data(
-                    day_labels.numpy(), label_timesteps
-                )
-                yield {
-                    "spatiotemporal": day_inputs_padded,
-                    "spatial": spatial_data.numpy(),
-                    "lu_index": lu_index_data.numpy().reshape(200, 200),
-                }, day_labels_padded
+            generated_count += 1
+            yield load_result
+
+        logging.info("Total generated samples: %d", generated_count)
+        if missing_days > 0:
+            logging.warning("Total days with missing data: %d", missing_days)
 
     dataset = tf.data.Dataset.from_generator(
-        data_generator,
+        lambda: data_generator(),
         output_signature=(
             {
                 "spatiotemporal": tf.TensorSpec(
                     shape=(
-                        timesteps_per_day,
+                        constants.INPUT_TIME_STEPS,
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
                         constants.NUM_SPATIOTEMPORAL_FEATURES,
@@ -125,14 +170,12 @@ def load_dataset(
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
                     ),
-                    dtype=tf.float32,
+                    dtype=tf.int32,
                 ),
             },
             tf.TensorSpec(
                 shape=(
-                    # Inputs have an extra 2 timesteps from the previous day.
-                    # Output has double the resolution.
-                    label_timesteps,
+                    constants.OUTPUT_TIME_STEPS,
                     constants.MAP_HEIGHT,
                     constants.MAP_WIDTH,
                     constants.OUTPUT_CHANNELS,
@@ -142,138 +185,105 @@ def load_dataset(
         ),
     )
 
-    if shuffle:
-        dataset = dataset.shuffle(buffer_size=1000)  # Use a fixed buffer size
-
     return dataset
 
 
-def load_prediction_dataset(
-    data_bucket_name: str,
-    spatiotemporal_folder: str,
-    spatial_folder: str,
-    lu_index_folder: str,
-    timesteps_per_day: int,
-    batch_size: int = 4,
-    storage_client: storage.Client = None,
-    max_blobs: int | None = None,
-) -> tf.data.Dataset:
+def extract_dates(
+    bucket: storage.Bucket, path: str, storage_client: storage.Client
+) -> list[str]:
+    """Extract unique dates from filenames in the given bucket path."""
+    blobs = bucket.list_blobs(prefix=path)
 
-    # Load spatial, LU index, and spatiotemporal data from their respective folders
-    lu_index_data = load_folder_from_cloud(
-        data_bucket_name, lu_index_folder, storage_client, max_blobs=1
-    )[0]
-    spatial_data = load_folder_from_cloud(
-        data_bucket_name, spatial_folder, storage_client, max_blobs=1
-    )[0]
-    spatiotemporal_data_list = load_folder_from_cloud(
-        data_bucket_name, spatiotemporal_folder, storage_client, max_blobs=max_blobs
+    dates = set()
+    for blob in blobs:
+        match = re.search(r"\d{4}-\d{2}-\d{2}", blob.name)  # Match YYYY-MM-DD format
+        if match:
+            dates.add(match.group())
+    return sorted(dates)
+
+
+def load_day(
+    sim_name: str,
+    date: datetime,
+    feature_bucket: storage.Bucket,
+    label_bucket: storage.Bucket,
+) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
+    """Loads a single example from (sim_name, date)."""
+    logging.info("load_day('%s', '%s')" % (sim_name, date.strftime(DATE_FORMAT)))
+    start_filename = date.strftime(FEATURE_FILENAME_FORMAT)
+
+    lu_index_data = downloader.try_download_tensor(
+        feature_bucket, f"{sim_name}/lu_index/{start_filename}"
     )
+    if lu_index_data is None:
+        return None
 
-    def data_generator():
-        # Iterate through each spatiotemporal data file
-        for spatiotemporal_data in spatiotemporal_data_list:
-            # Divide data into days and apply padding or truncation
-            # Divide the spatiotemporal data into daily inputs
-            inputs, _ = cnn_inputs_outputs.divide_into_days(
-                spatiotemporal_data, labels=None
-            )
-            for day_inputs in inputs:
-                day_inputs_padded = pad_or_truncate_data(
-                    day_inputs.numpy(), timesteps_per_day
-                )
-                yield {
-                    "spatiotemporal": day_inputs_padded,
-                    "spatial": spatial_data.numpy(),
-                    "lu_index": lu_index_data.numpy(),
-                }
+    spatial_data = downloader.try_download_tensor(
+        feature_bucket,
+        f"{sim_name}/spatial/{start_filename}",
+    )
+    if spatial_data is None:
+        return None
 
-    # Create the dataset using the data generator
-    dataset = tf.data.Dataset.from_generator(
-        data_generator,
-        output_signature=(
-            {
-                "spatiotemporal": tf.TensorSpec(
-                    shape=(
-                        timesteps_per_day,
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.NUM_SPATIOTEMPORAL_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                "spatial": tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.NUM_SAPTIAL_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                "lu_index": tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                    ),
-                    dtype=tf.float32,
-                ),
-            },
+    spatiotemporal_data = load_day_spatiotemporal(sim_name, date, feature_bucket)
+    if spatiotemporal_data is None:
+        return None
+
+    label_data = load_day_label(sim_name, date, label_bucket)
+    if label_data is None:
+        return None
+
+    return {
+        "spatiotemporal": spatiotemporal_data,
+        "spatial": spatial_data,
+        "lu_index": tf.reshape(
+            lu_index_data, shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH)
         ),
-    )
-
-    # Batch the dataset
-    dataset = dataset.batch(batch_size)
-    return dataset
+    }, label_data
 
 
-def make_predictions(model: tf.keras.Model, dataset: tf.data.Dataset) -> np.ndarray:
-    """Make predictions using the AtmoML model on the provided dataset.
-
-    Args:
-
-        model: The trained AtmoML model.
-        dataset: The dataset to predict on.
-
-    Returns:
-        A numpy array of predictions.
-    """
-    predictions = model.predict(dataset)
-    return predictions
-
-
-# Pad or truncate data to a target length along the first axis.
-def pad_or_truncate_data(data, target_length, pad_value=0):
-    """Pad or truncate data to the target length along the first axis."""
-    current_length = data.shape[0]
-    if current_length > target_length:
-        return data[:target_length]
-    elif current_length < target_length:
-        pad_shape = [target_length - current_length] + list(data.shape[1:])
-        padding = np.full(pad_shape, pad_value, dtype=data.dtype)
-        return np.concatenate([data, padding], axis=0)
-    return data
+def load_day_spatiotemporal(
+    sim_name: str, date: datetime, bucket: storage.Bucket
+) -> tf.Tensor | None:
+    """Load spatiotemporal tensors for a day."""
+    spatiotemporal_path = f"{sim_name}/spatiotemporal/"
+    timestep_interval = timedelta(hours=6)
+    timestamps = [date + timestep_interval * i for i in range(-1, 5)]
+    spatiotemporal_tensors = [
+        downloader.try_download_tensor(
+            bucket, ts.strftime(spatiotemporal_path + FEATURE_FILENAME_FORMAT)
+        )
+        for ts in timestamps
+    ]
+    if None in spatiotemporal_tensors:
+        logging.warning(
+            "Missing feature timestamp(s) for date %s",
+            date.strftime(spatiotemporal_path + DATE_FORMAT),
+        )
+        return None
+    return tf.concat([spatiotemporal_tensors], axis=0)
 
 
-def split_dataset(dataset, train_frac=0.7, val_frac=0.15, test_frac=0.15):
-    """Splits a tf.data.Dataset into training, validation, and test sets.
+def load_day_label(
+    sim_name: str,
+    date: datetime,
+    bucket: storage.Bucket,
+) -> tf.Tensor | None:
+    """Load label tensor for a day."""
+    label_path = f"{sim_name}/"
+    label_timestep_interval = timedelta(hours=3)
+    label_timestamps = [date + label_timestep_interval * i for i in range(8)]
+    label_tensors = [
+        downloader.try_download_tensor(
+            bucket, ts.strftime(label_path + LABEL_FILENAME_FORMAT)
+        )
+        for ts in label_timestamps
+    ]
+    if None in label_tensors:
+        logging.warning(
+            "Missing label timestamp(s) for date %s",
+            date.strftime(label_path + DATE_FORMAT),
+        )
+        return None
 
-    Args:
-        dataset (tf.data.Dataset): The dataset to split.
-        train_frac (float): Fraction of the dataset to use for training.
-        val_frac (float): Fraction of the dataset to use for validation.
-        test_frac (float): Fraction of the dataset to use for testing.
-
-    Returns:
-        train, validation, and test data.
-    """
-    assert train_frac + val_frac + test_frac == 1, "Fractions must sum to 1."
-
-    total_size = sum(1 for _ in dataset)  # Calculate the total dataset size
-    train_size = int(train_frac * total_size)
-    val_size = int(val_frac * total_size)
-
-    train_dataset = dataset.take(train_size)
-    val_dataset = dataset.skip(train_size).take(val_size)
-    test_dataset = dataset.skip(train_size + val_size)
-
-    return train_dataset, val_dataset, test_dataset
+    return tf.stack(label_tensors)
