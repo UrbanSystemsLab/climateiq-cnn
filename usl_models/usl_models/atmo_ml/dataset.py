@@ -293,7 +293,7 @@ def load_day_spatiotemporal(
     if None in spatiotemporal_tensors:
         logging.warning(
             "Missing feature timestamp(s) for date %s",
-            date.strftime(sim_name + "/" + DATE_FORMAT),
+            date.strftime(spatiotemporal_path + DATE_FORMAT),
         )
         return None
     return tf.concat([spatiotemporal_tensors], axis=0)
@@ -317,7 +317,7 @@ def load_day_label(
     if None in label_tensors:
         logging.warning(
             "Missing label timestamp(s) for date %s",
-            date.strftime(sim_name + "/" + DATE_FORMAT),
+            date.strftime(label_path + DATE_FORMAT),
         )
         return None
 
