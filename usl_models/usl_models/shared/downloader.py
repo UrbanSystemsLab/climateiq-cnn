@@ -47,6 +47,10 @@ def _rmdir_recursive(directory: pathlib.Path):
     directory = pathlib.Path(directory)
     for item in directory.iterdir():
         _rmdir_recursive(item)
+        if item.is_dir():
+            item.rmdir()
+        else:
+            item.unlink()
 
 
 def bulk_download(
