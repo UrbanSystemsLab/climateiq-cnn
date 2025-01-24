@@ -4,6 +4,7 @@ import pathlib
 from typing import Iterable
 
 import numpy as np
+import logging
 import numpy.typing as npt
 import tensorflow as tf
 
@@ -113,3 +114,11 @@ def bulk_download_numpy(
         max_files=max_files,
     ):
         yield filename, np.load(file)
+
+
+def try_download_tensor(bucket: storage.Bucket, path: str) -> tf.Tensor | None:
+    blob = bucket.blob(path)
+    if not blob.exists():
+        logging.warning("blob does not exist: %s", path)
+        return None
+    return blob_to_tensor(blob)
