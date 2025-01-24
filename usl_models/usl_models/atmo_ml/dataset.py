@@ -260,17 +260,13 @@ def load_day(
     if spatial_data is None:
         return None
 
-    load_result = load_day_temporal(
-        sim_name,
-        date,
-        feature_bucket,
-        label_bucket,
-    )
-    if load_result is None:
+    spatiotemporal_data = load_day_spatiotemporal(sim_name, date, feature_bucket)
+    if spatiotemporal_data is None:
         return None
 
-    spatiotemporal_data, label_data = load_result
-    logging.warning("label shape: %s", str(label_data.shape))
+    label_data = load_day_label(sim_name, date, label_bucket)
+    if label_data is None:
+        return None
 
     return {
         "spatiotemporal": spatiotemporal_data,
@@ -281,21 +277,16 @@ def load_day(
     }, label_data
 
 
-def load_day_temporal(
-    sim_name: str,
-    date: datetime,
-    feature_bucket: storage.Bucket,
-    label_bucket: storage.Bucket,
-) -> tuple[tf.Tensor, tf.Tensor] | None:
-    """Load spatiotemporal data and labels for a given day from GCP."""
-
-    # Load spatiotemporal tensors.
+def load_day_spatiotemporal(
+    sim_name: str, date: datetime, bucket: storage.Bucket
+) -> tf.Tensor | None:
+    """Load spatiotemporal tensors for a day."""
     spatiotemporal_path = f"{sim_name}/spatiotemporal/"
     timestep_interval = timedelta(hours=6)
     timestamps = [date + timestep_interval * i for i in range(-1, 5)]
     spatiotemporal_tensors = [
         downloader.try_download_tensor(
-            feature_bucket, ts.strftime(spatiotemporal_path + FEATURE_FILENAME_FORMAT)
+            bucket, ts.strftime(spatiotemporal_path + FEATURE_FILENAME_FORMAT)
         )
         for ts in timestamps
     ]
@@ -305,13 +296,21 @@ def load_day_temporal(
             date.strftime(sim_name + "/" + DATE_FORMAT),
         )
         return None
+    return tf.concat([spatiotemporal_tensors], axis=0)
 
+
+def load_day_label(
+    sim_name: str,
+    date: datetime,
+    bucket: storage.Bucket,
+) -> tf.Tensor | None:
+    """Load label tensor for a day."""
     label_path = f"{sim_name}/"
     label_timestep_interval = timedelta(hours=3)
     label_timestamps = [date + label_timestep_interval * i for i in range(8)]
     label_tensors = [
         downloader.try_download_tensor(
-            label_bucket, ts.strftime(label_path + LABEL_FILENAME_FORMAT)
+            bucket, ts.strftime(label_path + LABEL_FILENAME_FORMAT)
         )
         for ts in label_timestamps
     ]
@@ -322,6 +321,4 @@ def load_day_temporal(
         )
         return None
 
-    spatiotemporal_tensor = tf.concat([spatiotemporal_tensors], axis=0)
-    label_tensor = tf.stack(label_tensors)
-    return spatiotemporal_tensor, label_tensor
+    return tf.stack(label_tensors)
