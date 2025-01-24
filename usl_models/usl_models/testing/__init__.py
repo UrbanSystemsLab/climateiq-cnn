@@ -9,7 +9,7 @@ import pathlib
 import numpy as np
 import tensorflow as tf
 
-from google.cloud import storage
+from google.cloud import storage  # type: ignore
 
 
 class TestCase(unittest.TestCase):
