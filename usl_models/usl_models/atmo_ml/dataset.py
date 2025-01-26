@@ -460,11 +460,12 @@ def download_simulation(
 def download_dataset(
     sim_names: list[str],
     output_path: pathlib.Path,
-    client: storage.Client = storage.Client(),
+    client: storage.Client | None = None,
     feature_bucket_name: str = FEATURE_BUCKET_NAME,
     label_bucket_name: str = LABEL_BUCKET_NAME,
 ):
     """Download a dataset from GCS to the given local path."""
+    client = client or storage.Client()
     output_path.mkdir(parents=True, exist_ok=True)
     feature_bucket = client.bucket(feature_bucket_name)
     label_bucket = client.bucket(label_bucket_name)
