@@ -409,9 +409,8 @@ def download_simulation(
     output_path: pathlib.Path,
     worker_type=transfer_manager.PROCESS,
 ):
-    """Downloads a simulation to the target dir."""
     """Downloads a simulation to the output_path.
-    
+
     For the format looks like:
     ```
     NYC_summer_2017_25p/
