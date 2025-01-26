@@ -69,9 +69,7 @@ def bulk_download(
         )
     if worker_type == transfer_manager.THREAD:
         # If using threads, can download files directly into memory.
-        blob_bytesio = [
-            (blob, io.BytesIO()) for blob in blobs[:max_files]
-        ]
+        blob_bytesio = [(blob, io.BytesIO()) for blob in blobs[:max_files]]
         transfer_manager.download_many(
             blob_bytesio,
             max_workers=workers,
