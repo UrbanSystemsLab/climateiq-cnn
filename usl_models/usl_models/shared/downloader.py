@@ -60,7 +60,7 @@ def bulk_download(
     workers: int = 8,
     worker_type=transfer_manager.PROCESS,
     max_files: int = 100000,
-) -> Iterable[tuple[str, io.BytesIO]]:
+) -> Iterable[tuple[str, io.BufferedIOBase]]:
     """Download all blobs in the bucket under the given path."""
     blobs: list[storage.Blob] = list(bucket.list_blobs(prefix=path))
     if not blobs:
@@ -69,34 +69,36 @@ def bulk_download(
         )
     if worker_type == transfer_manager.THREAD:
         # If using threads, can download files directly into memory.
-        blob_file_pairs = [(blob, io.BytesIO()) for blob in blobs[:max_files]]
+        blob_bytesio = [
+            (blob, io.BytesIO()) for blob in blobs[:max_files]
+        ]
         transfer_manager.download_many(
-            blob_file_pairs,
+            blob_bytesio,
             max_workers=workers,
             worker_type=worker_type,
             raise_exception=True,
         )
-        for blob, fd in blob_file_pairs:
-            yield blob.name, fd
+        for blob, bytesio in blob_bytesio:
+            yield blob.name, bytesio
     else:
         # If using processes, must download files to temporary directory
         # and clean up afterwards.
         tmp_path.mkdir(parents=True, exist_ok=True)
-        blob_file_pairs = [
+        blob_filenames: list[tuple[storage.Blob, str]] = [
             (blob, str(tmp_path / blob.name)) for blob in blobs[:max_files]
         ]
-        for _, filename in blob_file_pairs:
+        for _, filename in blob_filenames:
             pathlib.Path(filename).parent.mkdir(parents=True, exist_ok=True)
         transfer_manager.download_many(
-            blob_file_pairs,
+            blob_filenames,
             max_workers=workers,
             worker_type=worker_type,
             raise_exception=True,
         )
-        for blob, filename in blob_file_pairs:
+        for blob, filename in blob_filenames:
             with open(filename, "rb") as fd:
                 yield blob.name, fd
-            pathlib.Path(filename).unlink(missing_ok=False)
+            pathlib.Path(filename).unlink(missing_ok=False)  # type: ignore
         _rmdir_recursive(tmp_path)
 
 
@@ -107,7 +109,7 @@ def bulk_download_numpy(
     workers: int = 8,
     worker_type=transfer_manager.PROCESS,
     max_files: int = 100000,
-) -> Iterable[tuple[str, io.BytesIO]]:
+) -> Iterable[tuple[str, np.ndarray]]:
     """Bulk download a path in a bucket."""
     for filename, file in bulk_download(
         bucket=bucket,

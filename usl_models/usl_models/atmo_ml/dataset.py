@@ -74,7 +74,7 @@ def get_all_simulation_days(
     return sorted(all_days)
 
 
-def get_cached_sim_dates(path: pathlib.Path) -> list[(str, str)]:
+def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
     """Return all cached simulation dates."""
     all_dates = set()
     for file in path.glob("**/met_em.d03.????-??-??_??:??:??.npz"):
@@ -83,7 +83,7 @@ def get_cached_sim_dates(path: pathlib.Path) -> list[(str, str)]:
         ts = datetime.strptime(relative_path.name, FEATURE_FILENAME_FORMAT_NPZ)
         all_dates.add((sim_name, ts.date().strftime(DATE_FORMAT)))
 
-    sorted(all_dates)
+    return sorted(all_dates)
 
 
 ExampleKey = tuple[str, str]
@@ -354,13 +354,21 @@ def load_day_cached(
     )
 
 
-def try_load_cached_npz(path: pathlib.Path) -> np.ndarray | None:
-    """Tries to load a cached npz file."""
-    if path.exists():
-        return np.load(path)
+def try_load_npz(path: pathlib.Path) -> dict[str, np.ndarray] | None:
+    """Tries to load an npz file."""
+    if not path.exists():
+        logging.warning("Missing path: %s", path)
+        return None
 
-    logging.warning("missing path: %s", path)
-    return None
+    npz = np.load(path)
+    if "arr_0" not in npz:
+        logging.warning(
+            "Missing array 'arr_0' for path %s",
+            path,
+        )
+        return None
+
+    return npz
 
 
 def load_day_spatiotemporal_cached(
@@ -369,37 +377,32 @@ def load_day_spatiotemporal_cached(
     """Load spatiotemporal tensors for a day."""
     timestep_interval = timedelta(hours=6)
     timestamps = [date + timestep_interval * i for i in range(-1, 5)]
-    arrays = [
-        try_load_cached_npz(path / ts.strftime(FEATURE_FILENAME_FORMAT_NPZ))
-        for ts in timestamps
-    ]
-    if None in arrays:
-        logging.warning(
-            "Missing feature timestamp(s) for date %s in simulation %s",
-            date.strftime(DATE_FORMAT),
-            path,
-        )
-        return None
-    return tf.stack([arr["arr_0"] for arr in arrays], axis=0)
+
+    arrays = []
+    for ts in timestamps:
+        npz = try_load_npz(path / ts.strftime(FEATURE_FILENAME_FORMAT_NPZ))
+        if npz is None:
+            return None
+
+        arrays.append(npz["arr_0"])
+
+    return tf.stack(arrays)
 
 
 def load_day_label_cached(path: pathlib.Path, date: datetime) -> tf.Tensor | None:
     """Load label tensor for a day."""
-    label_timestep_interval = timedelta(hours=3)
-    label_timestamps = [date + label_timestep_interval * i for i in range(8)]
-    arrays = [
-        try_load_cached_npz(path / ts.strftime(LABEL_FILENAME_FORMAT_NPZ))
-        for ts in label_timestamps
-    ]
-    if None in arrays:
-        logging.warning(
-            "Missing label timestamp(s) for date %s in simulation %s",
-            date.strftime(DATE_FORMAT),
-            path,
-        )
-        return None
+    timestep_interval = timedelta(hours=3)
+    timestamps = [date + timestep_interval * i for i in range(8)]
 
-    return tf.stack([arr["arr_0"] for arr in arrays])
+    arrays = []
+    for ts in timestamps:
+        npz = try_load_npz(path / ts.strftime(LABEL_FILENAME_FORMAT_NPZ))
+        if npz is None:
+            return None
+
+        arrays.append(npz["arr_0"])
+
+    return tf.stack(arrays)
 
 
 def download_simulation(
