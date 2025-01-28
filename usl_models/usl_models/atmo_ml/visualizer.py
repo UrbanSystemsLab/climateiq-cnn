@@ -95,37 +95,55 @@ def plot_spatial(
 
 def plot(
     inputs: dict[str, tf.Tensor],
-    label: tf.Tensor,
-    st_var: vars.Spatiotemporal,
-    sto_var: vars.SpatiotemporalOutput,
-    sim_name: str,
-    date: str,
-) -> tuple[matplotlib.figure.Figure, ...]:
+    label: tf.Tensor | None = None,
+    pred: tf.Tensor | None = None,
+    st_var: vars.Spatiotemporal = vars.Spatiotemporal.RH,
+    sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
+    sim_name: str = "test",
+    date: str = "undated",
+) -> list[matplotlib.figure.Figure]:
     """Plots an inputs, label pair for debugging."""
-    sp_fig0 = plot_spatial(
-        inputs["spatial"], spatial_ticks=6, features=list(range(0, 5))
+    figs = []
+    figs.append(
+        plot_spatial(inputs["spatial"], spatial_ticks=6, features=list(range(0, 5)))
     )
-    sp_fig1 = plot_spatial(
-        inputs["spatial"], spatial_ticks=6, features=list(range(5, 10))
+    figs.append(
+        plot_spatial(inputs["spatial"], spatial_ticks=6, features=list(range(5, 10)))
     )
     st_var_config = vars.ST_VAR_CONFIGS[st_var]
-    st_fig = plot_2d_timeseries(
-        inputs["spatiotemporal"][:, :, :, st_var.value],
-        title=st_var.name + f" ({sim_name} {date})",
-        vmin=st_var_config.vmin,
-        vmax=st_var_config.vmax,
-        t_start=-1.0,
-        t_interval=1.0,
+    figs.append(
+        plot_2d_timeseries(
+            inputs["spatiotemporal"][:, :, :, st_var.value],
+            title=st_var.name + f" ({sim_name} {date})",
+            vmin=st_var_config.vmin,
+            vmax=st_var_config.vmax,
+            t_start=-1.0,
+            t_interval=1.0,
+        )
     )
 
     sto_var_config = vars.STO_VAR_CONFIGS[sto_var]
-    sto_fig = plot_2d_timeseries(
-        label[:, :, :, sto_var.value],
-        title=sto_var.name + f" ({sim_name} {date})",
-        vmin=sto_var_config.vmin,
-        vmax=sto_var_config.vmax,
-        t_start=0.0,
-        t_interval=0.5,
-    )
+    if label is not None:
+        figs.append(
+            plot_2d_timeseries(
+                label[:, :, :, sto_var.value],
+                title=sto_var.name + f" ({sim_name} {date})",
+                vmin=sto_var_config.vmin,
+                vmax=sto_var_config.vmax,
+                t_start=0.0,
+                t_interval=0.5,
+            )
+        )
+    if pred is not None:
+        figs.append(
+            plot_2d_timeseries(
+                pred[:, :, :, sto_var.value],
+                title=sto_var.name + f" [pred] ({sim_name} {date})",
+                vmin=sto_var_config.vmin,
+                vmax=sto_var_config.vmax,
+                t_start=0.0,
+                t_interval=0.5,
+            )
+        )
 
-    return sp_fig0, sp_fig1, st_fig, sto_fig
+    return figs

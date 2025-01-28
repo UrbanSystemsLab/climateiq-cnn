@@ -31,7 +31,7 @@ def default_params() -> AtmoModelParams:
         "lstm_recurrent_dropout": 0.2,
         "optimizer_config": {
             "class_name": "Adam",
-            "config": {"learning_rate": 1e-3},
+            "config": {"learning_rate": 5e-3},
         },
         "epochs": 10,
     }

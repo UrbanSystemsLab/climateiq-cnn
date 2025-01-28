@@ -98,7 +98,12 @@ class AtmoModel:
                 tf.keras.metrics.RootMeanSquaredError(),
             ],
         )
+        model.build(constants.INPUT_SHAPE_BATCHED)
         return model
+
+    def summary(self):
+        """Print the model summary."""
+        self._model.summary()
 
     def call(self, input: Input) -> tf.Tensor:
         """Forward pass for predictions. See `AtmoConvLSTM.call`."""
@@ -112,6 +117,7 @@ class AtmoModel:
         steps_per_epoch: int | None = None,
         early_stopping: int | None = None,
         callbacks: List[Callable] | None = None,
+        validation_freq: int | None = None,
     ):
         """Fit the model to the given dataset."""
         if callbacks is None:
@@ -129,6 +135,7 @@ class AtmoModel:
             epochs=epochs,
             steps_per_epoch=steps_per_epoch,
             callbacks=callbacks,
+            validation_freq=validation_freq,
         )
 
     def load_weights(self, filepath: str) -> None:
