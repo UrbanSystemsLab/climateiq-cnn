@@ -10,7 +10,6 @@ from keras.layers import Embedding
 import tensorflow as tf
 
 from usl_models.atmo_ml import constants
-from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import vars
 
 
@@ -27,7 +26,7 @@ class AtmoModelParams:
 
     # The optimizer configuration.
     # We use the dictionary definition to ensure the model is serializable.
-    # This value is passed to tf.keras.optimizers.get to build the optimizer object.
+    # This value is passed to keras.optimizers.get to build the optimizer object.
     optimizer_config: Mapping[str, Any] = dataclasses.field(
         default_factory=lambda: {
             "class_name": "Adam",
@@ -118,11 +117,11 @@ class AtmoModel:
             embedding_dim=self._embedding_dim,
         )
         model.compile(
-            optimizer=tf.keras.optimizers.get(self._model_params.optimizer_config),
-            loss=tf.keras.losses.MeanSquaredError(),
+            optimizer=keras.optimizers.get(self._model_params.optimizer_config),
+            loss=keras.losses.MeanSquaredError(),
             metrics=[
-                tf.keras.metrics.MeanAbsoluteError(),
-                tf.keras.metrics.RootMeanSquaredError(),
+                keras.metrics.MeanAbsoluteError(),
+                keras.metrics.RootMeanSquaredError(),
             ],
         )
         model.build(constants.INPUT_SHAPE_BATCHED)
@@ -206,7 +205,7 @@ class AtmoModel:
 ###############################################################################
 
 
-class AtmoConvLSTM(tf.keras.Model):
+class AtmoConvLSTM(keras.Model):
     """Atmo ConvLSTM model.
 
     The architecture is a multi-head ConvLSTM model.
@@ -266,7 +265,7 @@ class AtmoConvLSTM(tf.keras.Model):
 
         # Spatial CNN
         spatial_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
-        self._spatial_cnn = tf.keras.Sequential(
+        self._spatial_cnn = keras.Sequential(
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
@@ -286,7 +285,7 @@ class AtmoConvLSTM(tf.keras.Model):
 
         # Spatiotemporal CNN
         st_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
-        self._st_cnn = tf.keras.Sequential(
+        self._st_cnn = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer(
@@ -317,8 +316,8 @@ class AtmoConvLSTM(tf.keras.Model):
         # due to stacking two boundary condition pairs.
         conv_lstm_height = self._spatial_height // 4
         conv_lstm_width = self._spatial_width // 4
-        conv_lstm_channels = 2 * (128 + 64)
-        self.conv_lstm = tf.keras.Sequential(
+        conv_lstm_channels = 128 + 64
+        self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer(
@@ -327,7 +326,6 @@ class AtmoConvLSTM(tf.keras.Model):
                 layers.ConvLSTM2D(
                     self._params.lstm_units,
                     self._params.lstm_kernel_size,
-                    return_sequences=True,
                     strides=1,
                     padding="same",
                     activation="tanh",
@@ -341,38 +339,32 @@ class AtmoConvLSTM(tf.keras.Model):
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
         output_cnn_params = {"padding": "same", "activation": "relu"}
-        # Input shape: (time, height, width, channels)
+        # Input shape: (height, width, channels)
         output_cnn_input_shape = (
-            None,
             conv_lstm_height,
             conv_lstm_width,
-            self._params.lstm_units // 2,
-        )
-
-        # Output: T2 (2m temperature)
-        self._t2_output_cnn = (
-            tf.keras.Sequential(
-                [
-                    layers.InputLayer(output_cnn_input_shape),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
-                    ),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
-                    ),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
-                    ),
-                ],
-                name="t2_output_cnn",
-            )
-            if vars.SpatiotemporalOutput.T2 in params.output_vars
-            else None
+            self._params.lstm_units,
         )
 
         # Output: RH2 (2m relative humidity)
         self._rh2_output_cnn = (
-            tf.keras.Sequential(
+            keras.Sequential(
+                [
+                    layers.InputLayer(
+                        (conv_lstm_height, conv_lstm_width, self._params.lstm_units)
+                    ),
+                    layers.Conv2DTranspose(8, 4, strides=4, **output_cnn_params),
+                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params),
+                ],
+                name="rh2_output_cnn",
+            )
+            if vars.SpatiotemporalOutput.RH2 in params.output_vars
+            else None
+        )
+
+        # Output: T2 (2m temperature)
+        self._t2_output_cnn = (
+            keras.Sequential(
                 [
                     layers.InputLayer(output_cnn_input_shape),
                     layers.TimeDistributed(
@@ -387,13 +379,13 @@ class AtmoConvLSTM(tf.keras.Model):
                 ],
                 name="rh2_output_cnn",
             )
-            if vars.SpatiotemporalOutput.RH2 in params.output_vars
+            if vars.SpatiotemporalOutput.T2 in params.output_vars
             else None
         )
 
         # Output: WSPD10 (10m wind speed)
         self._wspd10_output_cnn = (
-            tf.keras.Sequential(
+            keras.Sequential(
                 [
                     layers.InputLayer(output_cnn_input_shape),
                     layers.TimeDistributed(
@@ -414,7 +406,7 @@ class AtmoConvLSTM(tf.keras.Model):
 
         # Output: WDIR10 (10m wind direction sine and cosine functions)
         self._wdir10_output_cnn = (
-            tf.keras.Sequential(
+            keras.Sequential(
                 [
                     layers.InputLayer(output_cnn_input_shape),
                     layers.TimeDistributed(
@@ -502,22 +494,21 @@ class AtmoConvLSTM(tf.keras.Model):
         spatial_cnn_output = spatial_cnn_output[:, tf.newaxis, :, :, :]
         n = st_input.shape[1]
         spatial_cnn_output = tf.repeat(spatial_cnn_output, [n], axis=1)
-        concat_inputs = tf.concat([st_cnn_output, spatial_cnn_output], axis=-1)
-
-        lstm_input = data_utils.boundary_pairs(concat_inputs)
-        lstm_output = self.conv_lstm(lstm_input)
+        lstm_inputs = tf.concat([st_cnn_output, spatial_cnn_output], axis=-1)
+        # lstm_input = data_utils.boundary_pairs(concat_inputs)
+        lstm_output = self.conv_lstm(lstm_inputs)
 
         # Split up paired tensors into individual time steps.
-        trconv_input = data_utils.split_time_step_pairs(lstm_output)
+        # trconv_input = data_utils.split_time_step_pairs(lstm_output)
 
         outputs = []
         if self._t2_output_cnn is not None:
-            outputs.append(self._t2_output_cnn(trconv_input))
+            outputs.append(self._t2_output_cnn(lstm_output))
         if self._rh2_output_cnn is not None:
-            outputs.append(self._rh2_output_cnn(trconv_input))
+            outputs.append(self._rh2_output_cnn(lstm_output))
         if self._wspd10_output_cnn is not None:
-            outputs.append(self._wspd10_output_cnn(trconv_input))
+            outputs.append(self._wspd10_output_cnn(lstm_output))
         if self._wdir10_output_cnn is not None:
-            outputs.append(self._wdir10_output_cnn(trconv_input))
+            outputs.append(self._wdir10_output_cnn(lstm_output))
 
         return tf.concat(outputs, axis=-1)

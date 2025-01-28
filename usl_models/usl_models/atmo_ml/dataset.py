@@ -96,7 +96,7 @@ def make_dataset(generator, output_channels: int) -> tf.data.Dataset:
             constants.INPUT_SPEC,
             tf.TensorSpec(
                 shape=(
-                    constants.OUTPUT_TIME_STEPS,
+                    # constants.OUTPUT_TIME_STEPS,
                     constants.MAP_HEIGHT,
                     constants.MAP_WIDTH,
                     output_channels,
@@ -136,7 +136,7 @@ def load_dataset_cached(
 
             generated_count += 1
             inputs, labels = load_result
-            yield inputs, tf.boolean_mask(labels, output_mask, axis=3)
+            yield inputs, tf.boolean_mask(labels, output_mask, axis=3)[-1]
 
         logging.info("Total generated samples: %d", generated_count)
         if missing_days > 0:
@@ -221,7 +221,7 @@ def load_dataset(
 
             generated_count += 1
             inputs, labels = load_result
-            yield inputs, tf.boolean_mask(labels, output_mask, axis=3)
+            yield inputs, tf.boolean_mask(labels, output_mask, axis=3)[-1]
 
         logging.info("Total generated samples: %d", generated_count)
         if missing_days > 0:
@@ -383,7 +383,12 @@ def load_day_label_cached(path: pathlib.Path, date: datetime) -> tf.Tensor | Non
         if npz is None:
             return None
 
-        arrays.append(npz["arr_0"])
+        labels = npz["arr_0"]
+        for sto_var in vars.SpatiotemporalOutput:
+            labels[:, :, sto_var.value] = (
+                labels[:, :, sto_var.value] / vars.STO_VAR_CONFIGS[sto_var].vmax
+            )
+        arrays.append(labels)
 
     return tf.stack(arrays)
 

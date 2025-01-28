@@ -27,12 +27,11 @@ def plot_2d_timeseries(
 
     fig, axs = plt.subplots(1, T, figsize=(10, 2), sharey=True)
     cbar_ax = fig.add_axes((0.91, 0.3, 0.01, 0.5))
-    fig.subplots_adjust()
 
     for t in range(T):
         _plot_2d(
             data=data[t],
-            ax=axs[t],
+            ax=axs[t] if T > 1 else axs,
             spatial_ticks=spatial_ticks,
             vmin=vmin,
             vmax=vmax,
@@ -42,6 +41,7 @@ def plot_2d_timeseries(
 
     fig.suptitle(title)
     fig.set_dpi(200)
+    fig.subplots_adjust()
     return fig
 
 
@@ -129,7 +129,7 @@ def plot(
                 label[:, :, :, sto_var.value],
                 title=sto_var.name + f" ({sim_name} {date})",
                 vmin=sto_var_config.vmin,
-                vmax=sto_var_config.vmax,
+                vmax=1.0,
                 t_start=0.0,
                 t_interval=0.5,
             )
@@ -140,7 +140,7 @@ def plot(
                 pred[:, :, :, sto_var.value],
                 title=sto_var.name + f" [pred] ({sim_name} {date})",
                 vmin=sto_var_config.vmin,
-                vmax=sto_var_config.vmax,
+                vmax=1.0,
                 t_start=0.0,
                 t_interval=0.5,
             )
