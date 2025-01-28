@@ -80,14 +80,12 @@ INPUT_SPEC = {
 }
 
 
-OUTPUT_SPEC = (
-    tf.TensorSpec(
-        shape=(
-            OUTPUT_TIME_STEPS,
-            MAP_HEIGHT,
-            MAP_WIDTH,
-            OUTPUT_CHANNELS,
-        ),
-        dtype=tf.float32,
+OUTPUT_SPEC = tf.TensorSpec(
+    shape=(
+        OUTPUT_TIME_STEPS,
+        MAP_HEIGHT,
+        MAP_WIDTH,
+        OUTPUT_CHANNELS,
     ),
+    dtype=tf.float32,
 )

@@ -93,41 +93,8 @@ def make_dataset(generator) -> tf.data.Dataset:
     return tf.data.Dataset.from_generator(
         lambda: generator(),
         output_signature=(
-            {
-                "spatiotemporal": tf.TensorSpec(
-                    shape=(
-                        constants.INPUT_TIME_STEPS,
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.NUM_SPATIOTEMPORAL_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                "spatial": tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.NUM_SAPTIAL_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                "lu_index": tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                    ),
-                    dtype=tf.int32,
-                ),
-            },
-            tf.TensorSpec(
-                shape=(
-                    constants.OUTPUT_TIME_STEPS,
-                    constants.MAP_HEIGHT,
-                    constants.MAP_WIDTH,
-                    constants.OUTPUT_CHANNELS,
-                ),
-                dtype=tf.float32,
-            ),
+            constants.INPUT_SPEC,
+            constants.OUTPUT_SPEC
         ),
     )
 
