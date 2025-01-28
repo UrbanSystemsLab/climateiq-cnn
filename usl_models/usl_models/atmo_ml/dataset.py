@@ -9,7 +9,7 @@ import tensorflow as tf
 import numpy as np
 from google.cloud import storage  # type: ignore
 from google.cloud.storage import transfer_manager  # type: ignore
-from usl_models.atmo_ml import constants
+from usl_models.atmo_ml import constants, vars
 from usl_models.shared import downloader
 
 
@@ -89,12 +89,20 @@ def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
 ExampleKey = tuple[str, str]
 
 
-def make_dataset(generator) -> tf.data.Dataset:
+def make_dataset(generator, output_channels: int) -> tf.data.Dataset:
     return tf.data.Dataset.from_generator(
         lambda: generator(),
         output_signature=(
             constants.INPUT_SPEC,
-            constants.OUTPUT_SPEC
+            tf.TensorSpec(
+                shape=(
+                    constants.OUTPUT_TIME_STEPS,
+                    constants.MAP_HEIGHT,
+                    constants.MAP_WIDTH,
+                    output_channels,
+                ),
+                dtype=tf.float32,
+            ),
         ),
     )
 
@@ -103,9 +111,12 @@ def load_dataset_cached(
     filecache_dir: pathlib.Path,
     hash_range=(0.0, 1.0),
     example_keys: list[ExampleKey] | None = None,
+    output_vars: list[vars.SpatiotemporalOutput] | None = None,
 ):
     """Loads a dataset from a filecache."""
     example_keys = example_keys or get_cached_sim_dates(filecache_dir)
+    output_vars = output_vars or list(vars.SpatiotemporalOutput)
+    output_mask = tf.constant([var in output_vars for var in vars.SpatiotemporalOutput])
 
     def generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
         missing_days: int = 0
@@ -124,13 +135,14 @@ def load_dataset_cached(
                 continue
 
             generated_count += 1
-            yield load_result
+            inputs, labels = load_result
+            yield inputs, tf.boolean_mask(labels, output_mask, axis=3)
 
         logging.info("Total generated samples: %d", generated_count)
         if missing_days > 0:
             logging.warning("Total days with missing data: %d", missing_days)
 
-    return make_dataset(generator)
+    return make_dataset(generator, len(output_vars))
 
 
 def load_dataset(
@@ -141,8 +153,11 @@ def load_dataset(
     shuffle: bool = True,
     hash_range=(0.0, 1.0),
     dates: list[str] | None = None,
+    output_vars: list[vars.SpatiotemporalOutput] | None = None,
 ) -> tf.data.Dataset:
     storage_client = storage_client or storage.Client()
+    output_vars = output_vars or list(vars.SpatiotemporalOutput)
+    output_mask = [var in output_vars for var in vars.SpatiotemporalOutput]
 
     # Early validation
     assert storage_client.bucket(
@@ -205,7 +220,8 @@ def load_dataset(
                 continue
 
             generated_count += 1
-            yield load_result
+            inputs, labels = load_result
+            yield inputs, tf.boolean_mask(labels, output_mask, axis=3)
 
         logging.info("Total generated samples: %d", generated_count)
         if missing_days > 0:
