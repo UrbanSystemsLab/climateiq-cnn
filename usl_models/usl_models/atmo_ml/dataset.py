@@ -130,7 +130,8 @@ def load_dataset_cached(
                 continue
 
             load_result = load_day_cached(
-                filecache_dir / sim_name,
+                filecache_dir,
+                sim_name,
                 datetime.strptime(day, DATE_FORMAT),
             )
             if load_result is None:
@@ -321,17 +322,19 @@ def load_day_label(
 
 
 def load_day_cached(
-    path: pathlib.Path, date: datetime
+    filecache_dir: pathlib.Path, sim_name: str, date: datetime
 ) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
-    spatiotemporal = load_day_spatiotemporal_cached(path / "spatiotemporal", date)
+    spatiotemporal = load_day_spatiotemporal_cached(
+        filecache_dir / sim_name / "spatiotemporal", date
+    )
     if spatiotemporal is None:
         return None
 
-    labels = load_day_label_cached(path / "labels", date)
+    labels = load_day_label_cached(filecache_dir / sim_name / "labels", date)
     if labels is None:
         return None
 
-    static_data = np.load(path / STATIC_FILENAME_NPZ)
+    static_data = np.load(filecache_dir / sim_name / STATIC_FILENAME_NPZ)
     if static_data is None:
         return None
 
@@ -345,6 +348,8 @@ def load_day_cached(
                     (constants.MAP_HEIGHT, constants.MAP_WIDTH)
                 )
             ),
+            sim_name=sim_name,
+            date=date.strftime(DATE_FORMAT),
         ),
         labels,
     )

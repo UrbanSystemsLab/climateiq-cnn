@@ -101,12 +101,12 @@ def plot(
     pred: tf.Tensor | None = None,
     st_var: vars.Spatiotemporal = vars.Spatiotemporal.RH,
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
-    sim_name: str = "test",
-    date: str = "undated",
     spatial_features: list[int] | None = None,
     spatial_ticks: int = 6,
 ) -> list[matplotlib.figure.Figure]:
     """Plots an inputs, label pair for debugging."""
+    sim_name = inputs["sim_name"].numpy().decode("utf-8")
+    date = inputs["date"].numpy().decode("utf-8")
     figs = []
     if spatial_features is not None:
         for i in range(len(spatial_features) // 5):
