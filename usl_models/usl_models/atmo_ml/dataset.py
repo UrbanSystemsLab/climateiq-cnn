@@ -330,14 +330,14 @@ def load_day_cached(
     filecache_dir: pathlib.Path, sim_name: str, date: datetime
 ) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
     spatiotemporal = load_day_spatiotemporal_cached(
-        filecache_dir / "spatiotemporal", date
+        filecache_dir / sim_name / "spatiotemporal", date
     )
     if spatiotemporal is None:
         return None
-    labels = load_day_label_cached(filecache_dir / "labels", date)
+    labels = load_day_label_cached(filecache_dir / sim_name / "labels", date)
     if labels is None:
         return None
-    static_data = np.load(filecache_dir / STATIC_FILENAME_NPZ)
+    static_data = np.load(filecache_dir / sim_name / STATIC_FILENAME_NPZ)
     if static_data is None:
         return None
     return (
