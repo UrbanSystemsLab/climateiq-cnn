@@ -59,6 +59,10 @@ class AtmoModel:
         self._embedding_dim = embedding_dim
         self._model = self._build_model()
 
+    def summary(self, expand_nested: bool = False):
+        """Print the model summary."""
+        self._model.summary(expand_nested=expand_nested)
+
     @classmethod
     def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "AtmoModel":
         """Loads the model from a checkpoint URI.
@@ -91,13 +95,14 @@ class AtmoModel:
             embedding_dim=self._embedding_dim,
         )
         model.compile(
-            optimizer=tf.keras.optimizers.get(self._model_params["optimizer_config"]),
-            loss=tf.keras.losses.MeanSquaredError(),
+            optimizer=keras.optimizers.get(self._model_params["optimizer_config"]),
+            loss=keras.losses.MeanSquaredError(),
             metrics=[
-                tf.keras.metrics.MeanAbsoluteError(),
-                tf.keras.metrics.RootMeanSquaredError(),
+                keras.metrics.MeanAbsoluteError(),
+                keras.metrics.RootMeanSquaredError(),
             ],
         )
+        model.build(constants.INPUT_SHAPE_BATCHED)
         return model
 
     def call(self, input: Input) -> tf.Tensor:
@@ -172,7 +177,7 @@ class AtmoModel:
 ###############################################################################
 
 
-class AtmoConvLSTM(tf.keras.Model):
+class AtmoConvLSTM(keras.Model):
     """Atmo ConvLSTM model.
 
     The architecture is a multi-head ConvLSTM model.
@@ -232,7 +237,7 @@ class AtmoConvLSTM(tf.keras.Model):
 
         # Spatial CNN
         spatial_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
-        self._spatial_cnn = tf.keras.Sequential(
+        self._spatial_cnn = keras.Sequential(
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
@@ -252,7 +257,7 @@ class AtmoConvLSTM(tf.keras.Model):
 
         # Spatiotemporal CNN
         st_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
-        self._st_cnn = tf.keras.Sequential(
+        self._st_cnn = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer(
@@ -284,7 +289,7 @@ class AtmoConvLSTM(tf.keras.Model):
         conv_lstm_height = self._spatial_height // 4
         conv_lstm_width = self._spatial_width // 4
         conv_lstm_channels = 2 * (128 + 64)
-        self.conv_lstm = tf.keras.Sequential(
+        self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer(
@@ -316,7 +321,7 @@ class AtmoConvLSTM(tf.keras.Model):
         )
 
         # Output: T2 (2m temperature)
-        self._t2_output_cnn = tf.keras.Sequential(
+        self._t2_output_cnn = keras.Sequential(
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
@@ -333,7 +338,7 @@ class AtmoConvLSTM(tf.keras.Model):
         )
 
         # Output: RH2 (2m relative humidity)
-        self._rh2_output_cnn = tf.keras.Sequential(
+        self._rh2_output_cnn = keras.Sequential(
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
@@ -350,7 +355,7 @@ class AtmoConvLSTM(tf.keras.Model):
         )
 
         # Output: WSPD10 (10m wind speed)
-        self._wspd10_output_cnn = tf.keras.Sequential(
+        self._wspd10_output_cnn = keras.Sequential(
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
@@ -367,7 +372,7 @@ class AtmoConvLSTM(tf.keras.Model):
         )
 
         # Output: WDIR10 (10m wind direction sine and cosine functions)
-        self._wdir10_output_cnn = tf.keras.Sequential(
+        self._wdir10_output_cnn = keras.Sequential(
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(

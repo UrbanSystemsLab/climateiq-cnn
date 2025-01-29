@@ -57,16 +57,12 @@ def split_time_step_pairs(data: tf.Tensor) -> tf.Tensor:
     split = tf.reshape(
         permuted, (batch_size, height, width, original_time_steps, 2, channels)
     )
-    print("Split shape:", split.shape)
     # Reshape into individual time steps
     separated = tf.reshape(
         split, (batch_size, height, width, original_time_steps * 2, channels)
     )
-    print("Separated shape (pre-slice):", separated.shape)
     # Remove the outermost single time steps (X_{d-1}^{18} and X_{d+1}^0)
     reduced = separated[:, :, :, 1:-1, :]
-    print("Reduced shape after removing outermost time steps:", reduced.shape)
     # Transpose back to [B, T_adjusted, H, W, C]
     output = tf.transpose(reduced, (0, 3, 1, 2, 4))
-    tf.print("Output shape:", output.shape)
     return output

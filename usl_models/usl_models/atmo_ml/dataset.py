@@ -23,6 +23,11 @@ LABEL_FILENAME_FORMAT = "wrfout_d03_%Y-%m-%d_%H:%M:%S.npy"
 LABEL_FILENAME_FORMAT_NPZ = "wrfout_d03_%Y-%m-%d_%H:%M:%S.npz"
 
 
+# Key for each example in the dataset.
+# (sim_name, date)
+ExampleKey = tuple[str, str]
+
+
 def get_date(filename: str) -> str:
     return filename.split(".")[2].split("_")[0]
 
@@ -77,58 +82,20 @@ def get_all_simulation_days(
 def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
     """Return all cached simulation dates."""
     all_dates = set()
-    for file in path.glob("**/met_em.d03.????-??-??_??:??:??.npz"):
+    for file in path.glob("**/labels/wrfout_d03_????-??-??_??:??:??.npz"):
         relative_path = file.relative_to(path)
-        sim_name = str(relative_path.parent)
-        ts = datetime.strptime(relative_path.name, FEATURE_FILENAME_FORMAT_NPZ)
+        sim_name = str(relative_path.parent.parent)
+        ts = datetime.strptime(relative_path.name, LABEL_FILENAME_FORMAT_NPZ)
         all_dates.add((sim_name, ts.date().strftime(DATE_FORMAT)))
 
     return sorted(all_dates)
 
 
-ExampleKey = tuple[str, str]
-
-
 def make_dataset(generator) -> tf.data.Dataset:
+    """Construct a dataset. from the given generator."""
     return tf.data.Dataset.from_generator(
         lambda: generator(),
-        output_signature=(
-            {
-                "spatiotemporal": tf.TensorSpec(
-                    shape=(
-                        constants.INPUT_TIME_STEPS,
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.NUM_SPATIOTEMPORAL_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                "spatial": tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.NUM_SAPTIAL_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
-                "lu_index": tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                    ),
-                    dtype=tf.int32,
-                ),
-            },
-            tf.TensorSpec(
-                shape=(
-                    constants.OUTPUT_TIME_STEPS,
-                    constants.MAP_HEIGHT,
-                    constants.MAP_WIDTH,
-                    constants.OUTPUT_CHANNELS,
-                ),
-                dtype=tf.float32,
-            ),
-        ),
+        output_signature=(constants.INPUT_SPEC, constants.OUTPUT_SPEC),
     )
 
 
@@ -136,9 +103,12 @@ def load_dataset_cached(
     filecache_dir: pathlib.Path,
     hash_range=(0.0, 1.0),
     example_keys: list[ExampleKey] | None = None,
+    shuffle: bool = True,
 ):
     """Loads a dataset from a filecache."""
     example_keys = example_keys or get_cached_sim_dates(filecache_dir)
+    if shuffle:
+        random.shuffle(example_keys)
 
     def generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
         missing_days: int = 0
@@ -338,8 +308,14 @@ def load_day_cached(
     path: pathlib.Path, date: datetime
 ) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
     spatiotemporal = load_day_spatiotemporal_cached(path / "spatiotemporal", date)
+    if spatiotemporal is None:
+        return None
     labels = load_day_label_cached(path / "labels", date)
+    if labels is None:
+        return None
     static_data = np.load(path / STATIC_FILENAME_NPZ)
+    if static_data is None:
+        return None
     return (
         dict(
             spatiotemporal=spatiotemporal,
