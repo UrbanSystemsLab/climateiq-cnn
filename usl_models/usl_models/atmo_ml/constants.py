@@ -17,7 +17,6 @@ TIME_STEPS_PER_DAY = 4
 LU_INDEX_VOCAB_SIZE = 61
 EMBEDDING_DIM = 8
 
-
 INPUT_SHAPE = {
     "spatiotemporal": (
         INPUT_TIME_STEPS,
@@ -38,20 +37,6 @@ INPUT_SHAPE = {
 
 INPUT_SHAPE_BATCHED = {k: (None, *v) for k, v in INPUT_SHAPE.items()}
 
-# INPUT_SPEC = {
-#     "spatiotemporal": tf.TensorSpec(
-#         shape=INPUT_SHAPE["spatiotemporal"],
-#         dtype=tf.float32,
-#     ),
-#     "spatial": tf.TensorSpec(
-#         shape=INPUT_SHAPE["spatial"],
-#         dtype=tf.float32,
-#     ),
-#     "lu_index": tf.TensorSpec(
-#         shape=INPUT_SHAPE["lu_index"],
-#         dtype=tf.int32,
-#     ),
-# }
 INPUT_SPEC = {
     "spatiotemporal": tf.TensorSpec(
         shape=(
@@ -78,7 +63,6 @@ INPUT_SPEC = {
         dtype=tf.int32,
     ),
 }
-
 
 OUTPUT_SPEC = tf.TensorSpec(
     shape=(

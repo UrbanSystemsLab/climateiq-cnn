@@ -35,7 +35,7 @@ class AtmoModelParams:
         }
     )
     output_vars: list[vars.SpatiotemporalOutput] = dataclasses.field(
-        default_factory=list(vars.SpatiotemporalOutput)
+        default_factory=lambda: list(vars.SpatiotemporalOutput)
     )
     epochs: int = 10
 
@@ -121,8 +121,8 @@ class AtmoModel:
             optimizer=tf.keras.optimizers.get(self._model_params.optimizer_config),
             loss=tf.keras.losses.MeanSquaredError(),
             metrics=[
-                tf.keras.metrics.MeanAbsoluteError(),
-                tf.keras.metrics.RootMeanSquaredError(),
+                keras.metrics.MeanAbsoluteError(),
+                keras.metrics.RootMeanSquaredError(),
             ],
         )
         model.build(constants.INPUT_SHAPE_BATCHED)
@@ -206,7 +206,7 @@ class AtmoModel:
 ###############################################################################
 
 
-class AtmoConvLSTM(tf.keras.Model):
+class AtmoConvLSTM(keras.Model):
     """Atmo ConvLSTM model.
 
     The architecture is a multi-head ConvLSTM model.
@@ -266,7 +266,7 @@ class AtmoConvLSTM(tf.keras.Model):
 
         # Spatial CNN
         spatial_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
-        self._spatial_cnn = tf.keras.Sequential(
+        self._spatial_cnn = keras.Sequential(
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
@@ -286,7 +286,7 @@ class AtmoConvLSTM(tf.keras.Model):
 
         # Spatiotemporal CNN
         st_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
-        self._st_cnn = tf.keras.Sequential(
+        self._st_cnn = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer(
@@ -318,7 +318,7 @@ class AtmoConvLSTM(tf.keras.Model):
         conv_lstm_height = self._spatial_height // 4
         conv_lstm_width = self._spatial_width // 4
         conv_lstm_channels = 2 * (128 + 64)
-        self.conv_lstm = tf.keras.Sequential(
+        self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer(

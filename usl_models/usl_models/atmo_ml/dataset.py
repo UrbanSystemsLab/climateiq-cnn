@@ -23,6 +23,11 @@ LABEL_FILENAME_FORMAT = "wrfout_d03_%Y-%m-%d_%H:%M:%S.npy"
 LABEL_FILENAME_FORMAT_NPZ = "wrfout_d03_%Y-%m-%d_%H:%M:%S.npz"
 
 
+# Key for each example in the dataset.
+# (sim_name, date)
+ExampleKey = tuple[str, str]
+
+
 def get_date(filename: str) -> str:
     return filename.split(".")[2].split("_")[0]
 
@@ -77,16 +82,13 @@ def get_all_simulation_days(
 def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
     """Return all cached simulation dates."""
     all_dates = set()
-    for file in path.glob("**/met_em.d03.????-??-??_??:??:??.npz"):
+    for file in path.glob("**/labels/wrfout_d03_????-??-??_??:??:??.npz"):
         relative_path = file.relative_to(path)
-        sim_name = str(relative_path.parent)
-        ts = datetime.strptime(relative_path.name, FEATURE_FILENAME_FORMAT_NPZ)
+        sim_name = str(relative_path.parent.parent)
+        ts = datetime.strptime(relative_path.name, LABEL_FILENAME_FORMAT_NPZ)
         all_dates.add((sim_name, ts.date().strftime(DATE_FORMAT)))
 
     return sorted(all_dates)
-
-
-ExampleKey = tuple[str, str]
 
 
 def make_dataset(generator, output_channels: int) -> tf.data.Dataset:
@@ -112,11 +114,15 @@ def load_dataset_cached(
     hash_range=(0.0, 1.0),
     example_keys: list[ExampleKey] | None = None,
     output_vars: list[vars.SpatiotemporalOutput] | None = None,
+    shuffle: bool = True,
 ):
     """Loads a dataset from a filecache."""
     example_keys = example_keys or get_cached_sim_dates(filecache_dir)
     output_vars = output_vars or list(vars.SpatiotemporalOutput)
     output_mask = tf.constant([var in output_vars for var in vars.SpatiotemporalOutput])
+
+    if shuffle:
+        random.shuffle(example_keys)
 
     def generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
         missing_days: int = 0
@@ -227,7 +233,7 @@ def load_dataset(
         if missing_days > 0:
             logging.warning("Total days with missing data: %d", missing_days)
 
-    return make_dataset(generator)
+    return make_dataset(generator, output_channels=len(output_vars))
 
 
 def load_day(
@@ -321,8 +327,14 @@ def load_day_cached(
     path: pathlib.Path, date: datetime
 ) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
     spatiotemporal = load_day_spatiotemporal_cached(path / "spatiotemporal", date)
+    if spatiotemporal is None:
+        return None
     labels = load_day_label_cached(path / "labels", date)
+    if labels is None:
+        return None
     static_data = np.load(path / STATIC_FILENAME_NPZ)
+    if static_data is None:
+        return None
     return (
         dict(
             spatiotemporal=spatiotemporal,
