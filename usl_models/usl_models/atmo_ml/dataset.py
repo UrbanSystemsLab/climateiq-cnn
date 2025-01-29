@@ -23,6 +23,11 @@ LABEL_FILENAME_FORMAT = "wrfout_d03_%Y-%m-%d_%H:%M:%S.npy"
 LABEL_FILENAME_FORMAT_NPZ = "wrfout_d03_%Y-%m-%d_%H:%M:%S.npz"
 
 
+# Key for each example in the dataset.
+# (sim_name, date)
+ExampleKey = tuple[str, str]
+
+
 def get_date(filename: str) -> str:
     return filename.split(".")[2].split("_")[0]
 
@@ -86,9 +91,6 @@ def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
     return sorted(all_dates)
 
 
-ExampleKey = tuple[str, str]
-
-
 def make_dataset(generator, output_channels: int) -> tf.data.Dataset:
     return tf.data.Dataset.from_generator(
         lambda: generator(),
@@ -120,6 +122,9 @@ def load_dataset_cached(
         random.shuffle(example_keys)
     output_vars = output_vars or list(vars.SpatiotemporalOutput)
     output_mask = tf.constant([var in output_vars for var in vars.SpatiotemporalOutput])
+
+    if shuffle:
+        random.shuffle(example_keys)
 
     def generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
         missing_days: int = 0
@@ -231,7 +236,7 @@ def load_dataset(
         if missing_days > 0:
             logging.warning("Total days with missing data: %d", missing_days)
 
-    return make_dataset(generator)
+    return make_dataset(generator, output_channels=len(output_vars))
 
 
 def load_day(
@@ -325,20 +330,16 @@ def load_day_cached(
     filecache_dir: pathlib.Path, sim_name: str, date: datetime
 ) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
     spatiotemporal = load_day_spatiotemporal_cached(
-        filecache_dir / sim_name / "spatiotemporal", date
+        filecache_dir / "spatiotemporal", date
     )
     if spatiotemporal is None:
         return None
-
-    labels = load_day_label_cached(filecache_dir / sim_name / "labels", date)
+    labels = load_day_label_cached(filecache_dir / "labels", date)
     if labels is None:
         return None
-
-    static_data = np.load(filecache_dir / sim_name / STATIC_FILENAME_NPZ)
+    static_data = np.load(filecache_dir / STATIC_FILENAME_NPZ)
     if static_data is None:
         return None
-
-    # logging.info("Loaded example: %s %s", path, date)
     return (
         dict(
             spatiotemporal=spatiotemporal,

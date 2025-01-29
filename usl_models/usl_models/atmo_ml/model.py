@@ -34,7 +34,7 @@ class AtmoModelParams:
         }
     )
     output_vars: list[vars.SpatiotemporalOutput] = dataclasses.field(
-        default_factory=list(vars.SpatiotemporalOutput)
+        default_factory=lambda: list(vars.SpatiotemporalOutput)
     )
     epochs: int = 10
 
