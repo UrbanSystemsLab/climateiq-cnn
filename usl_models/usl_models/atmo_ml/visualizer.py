@@ -25,8 +25,8 @@ def plot_2d_timeseries(
     """Plot a map of atmo data."""
     T, H, W, *_ = data.shape
 
-    fig, axs = plt.subplots(1, T, figsize=(10, 2), sharey=True)
-    cbar_ax = fig.add_axes((0.91, 0.3, 0.01, 0.5))
+    fig, axs = plt.subplots(1, T, figsize=(2 * (T + 0.2), 2), sharey=True)
+    cbar_ax = fig.add_axes((0.91, 0.3, 0.06 / (T + 0.2), 0.5))
 
     for t in range(T):
         _plot_2d(
@@ -39,9 +39,10 @@ def plot_2d_timeseries(
             cbar_ax=cbar_ax,
         )
 
-    fig.suptitle(title)
+    fig.subplots_adjust(top=0.85)
+    fig.suptitle(title, y=1.0)
     fig.set_dpi(200)
-    fig.subplots_adjust()
+
     return fig
 
 
@@ -80,7 +81,7 @@ def plot_spatial(
     data: np.ndarray, features: list[int], spatial_ticks: int = 5
 ) -> matplotlib.figure.Figure:
     F = len(features)
-    fig, axs = plt.subplots(1, F, figsize=(10, 2), constrained_layout=True)
+    fig, axs = plt.subplots(1, F, figsize=(2 * (F + 1), 2), sharey=True)
     for i, f in enumerate(features):
         _ = _plot_2d(
             data=data[:, :, f],
@@ -88,6 +89,7 @@ def plot_spatial(
             title=f"Spatial feature {f}",
             spatial_ticks=spatial_ticks,
         )
+    fig.subplots_adjust(top=0.85)
     fig.suptitle("Spatial features")
     fig.set_dpi(200)
     return fig
@@ -101,15 +103,21 @@ def plot(
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
     sim_name: str = "test",
     date: str = "undated",
+    spatial_features: list[int] | None = None,
+    spatial_ticks: int = 6,
 ) -> list[matplotlib.figure.Figure]:
     """Plots an inputs, label pair for debugging."""
     figs = []
-    figs.append(
-        plot_spatial(inputs["spatial"], spatial_ticks=6, features=list(range(0, 5)))
-    )
-    figs.append(
-        plot_spatial(inputs["spatial"], spatial_ticks=6, features=list(range(5, 10)))
-    )
+    if spatial_features is not None:
+        for i in range(len(spatial_features) // 5):
+            figs.append(
+                plot_spatial(
+                    inputs["spatial"],
+                    spatial_ticks=spatial_ticks,
+                    features=spatial_features[5 * i : 5 * (i + 1)],
+                )
+            )
+
     st_var_config = vars.ST_VAR_CONFIGS[st_var]
     figs.append(
         plot_2d_timeseries(

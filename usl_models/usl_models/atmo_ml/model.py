@@ -30,7 +30,7 @@ class AtmoModelParams:
     optimizer_config: Mapping[str, Any] = dataclasses.field(
         default_factory=lambda: {
             "class_name": "Adam",
-            "config": {"learning_rate": 5e-3},
+            "config": {"learning_rate": 1e-4},
         }
     )
     output_vars: list[vars.SpatiotemporalOutput] = dataclasses.field(
@@ -264,7 +264,7 @@ class AtmoConvLSTM(keras.Model):
         # Model definition
 
         # Spatial CNN
-        spatial_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
+        # spatial_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
         self._spatial_cnn = keras.Sequential(
             [
                 # Input shape: (height, width, channels)
@@ -275,16 +275,16 @@ class AtmoConvLSTM(keras.Model):
                         self._spatial_features + embedding_dim,
                     )
                 ),
-                layers.Conv2D(64, 5, **spatial_cnn_params),
-                layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
-                layers.Conv2D(128, 5, **spatial_cnn_params),
-                layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
+                # layers.Conv2D(64, 5, **spatial_cnn_params),
+                # layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
+                # layers.Conv2D(128, 5, **spatial_cnn_params),
+                # layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
             ],
             name="spatial_cnn",
         )
 
         # Spatiotemporal CNN
-        st_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
+        # st_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
         self._st_cnn = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
@@ -298,14 +298,14 @@ class AtmoConvLSTM(keras.Model):
                 ),
                 # Remaining layers are TimeDistributed and are applied to each
                 # temporal slice
-                layers.TimeDistributed(layers.Conv2D(16, 5, **st_cnn_params)),
-                layers.TimeDistributed(
-                    layers.MaxPool2D(pool_size=2, strides=1, padding="same")
-                ),
-                layers.TimeDistributed(layers.Conv2D(64, 5, **st_cnn_params)),
-                layers.TimeDistributed(
-                    layers.MaxPool2D(pool_size=2, strides=1, padding="same")
-                ),
+                # layers.TimeDistributed(layers.Conv2D(16, 5, **st_cnn_params)),
+                # layers.TimeDistributed(
+                #     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
+                # ),
+                # layers.TimeDistributed(layers.Conv2D(64, 5, **st_cnn_params)),
+                # layers.TimeDistributed(
+                #     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
+                # ),
             ],
             name="spatiotemporal_cnn",
         )
@@ -314,14 +314,21 @@ class AtmoConvLSTM(keras.Model):
         # The spatial dimensions have been reduced 4x by the CNNs.
         # The "channel" dimension is double the sum of the channels from the CNNs,
         # due to stacking two boundary condition pairs.
-        conv_lstm_height = self._spatial_height // 4
-        conv_lstm_width = self._spatial_width // 4
-        conv_lstm_channels = 128 + 64
+        conv_lstm_height = self._spatial_height // 1
+        conv_lstm_width = self._spatial_width // 1
+        # conv_lstm_channels = 128 + 64
         self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer(
-                    (None, conv_lstm_height, conv_lstm_width, conv_lstm_channels)
+                    (
+                        None,
+                        conv_lstm_height,
+                        conv_lstm_width,
+                        self._spatiotemporal_features
+                        + self._spatial_features
+                        + embedding_dim,
+                    )
                 ),
                 layers.ConvLSTM2D(
                     self._params.lstm_units,
@@ -353,7 +360,7 @@ class AtmoConvLSTM(keras.Model):
                     layers.InputLayer(
                         (conv_lstm_height, conv_lstm_width, self._params.lstm_units)
                     ),
-                    layers.Conv2DTranspose(8, 4, strides=4, **output_cnn_params),
+                    # layers.Conv2DTranspose(8, 4, strides=4, **output_cnn_params),
                     layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params),
                 ],
                 name="rh2_output_cnn",
@@ -502,10 +509,10 @@ class AtmoConvLSTM(keras.Model):
         # trconv_input = data_utils.split_time_step_pairs(lstm_output)
 
         outputs = []
-        if self._t2_output_cnn is not None:
-            outputs.append(self._t2_output_cnn(lstm_output))
         if self._rh2_output_cnn is not None:
             outputs.append(self._rh2_output_cnn(lstm_output))
+        if self._t2_output_cnn is not None:
+            outputs.append(self._t2_output_cnn(lstm_output))
         if self._wspd10_output_cnn is not None:
             outputs.append(self._wspd10_output_cnn(lstm_output))
         if self._wdir10_output_cnn is not None:
