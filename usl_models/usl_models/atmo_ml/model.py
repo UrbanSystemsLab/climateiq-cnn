@@ -1,20 +1,51 @@
 """AtmoML model definition."""
 
 import logging
-from typing import TypeAlias, TypedDict, List, Callable
+from typing import TypedDict, List, Callable, Mapping, Any
+
 import keras
-import tensorflow as tf
 from keras import layers
 from keras.layers import Embedding
+import tensorflow as tf
+
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
-from usl_models.atmo_ml import model_params
-
-AtmoModelParams: TypeAlias = model_params.AtmoModelParams
 
 
 class AtmoModel:
     """Atmo model class."""
+
+    class Params(TypedDict):
+        """Model parameters dictionary."""
+
+        # General parameters.
+        batch_size: int
+
+        # Layer-specific parameters.
+        lstm_units: int
+        lstm_kernel_size: int
+        lstm_dropout: float
+        lstm_recurrent_dropout: float
+
+        # The optimizer configuration.
+        # We use the dictionary definition to ensure the model is serializable.
+        # This value is passed to keras.optimizers.get to build the optimizer object.
+        optimizer_config: Mapping[str, Any]
+
+    @classmethod
+    def default_params(cls) -> Params:
+        """Returns the default params for the model."""
+        return cls.Params(
+            optimizer_config={
+                "class_name": "Adam",
+                "config": {"learning_rate": 1e-4},
+            },
+            batch_size=4,
+            lstm_units=512,
+            lstm_kernel_size=5,
+            lstm_dropout=0.2,
+            lstm_recurrent_dropout=0.2,
+        )
 
     class Input(TypedDict):
         """Input tensors dictionary."""
@@ -31,7 +62,7 @@ class AtmoModel:
 
     def __init__(
         self,
-        params: AtmoModelParams | None = None,
+        params: Params | None = None,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
         num_spatial_features: int = constants.NUM_SAPTIAL_FEATURES,
         num_spatiotemporal_features: int = constants.NUM_SPATIOTEMPORAL_FEATURES,
@@ -51,17 +82,13 @@ class AtmoModel:
             feature.
             embedding_dim: Size of the embedding vectors for lu_index.
         """
-        self._model_params = params or model_params.default_params()
+        self._model_params = params or self.default_params()
         self._spatial_dims = spatial_dims
         self._spatial_features = num_spatial_features
         self._spatiotemporal_features = num_spatiotemporal_features
         self._lu_index_vocab_size = lu_index_vocab_size
         self._embedding_dim = embedding_dim
         self._model = self._build_model()
-
-    def summary(self, expand_nested: bool = False):
-        """Print the model summary."""
-        self._model.summary(expand_nested=expand_nested)
 
     @classmethod
     def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "AtmoModel":
@@ -105,6 +132,10 @@ class AtmoModel:
         model.build(constants.INPUT_SHAPE_BATCHED)
         return model
 
+    def summary(self, expand_nested: bool = False):
+        """Print the model summary."""
+        self._model.summary(expand_nested=expand_nested)
+
     def call(self, input: Input) -> tf.Tensor:
         """Forward pass for predictions. See `AtmoConvLSTM.call`."""
         return self._model.call(input)
@@ -117,6 +148,7 @@ class AtmoModel:
         steps_per_epoch: int | None = None,
         early_stopping: int | None = None,
         callbacks: List[Callable] | None = None,
+        validation_freq: int = 1,
     ):
         """Fit the model to the given dataset."""
         if callbacks is None:
@@ -134,6 +166,7 @@ class AtmoModel:
             epochs=epochs,
             steps_per_epoch=steps_per_epoch,
             callbacks=callbacks,
+            validation_freq=validation_freq,
         )
 
     def load_weights(self, filepath: str) -> None:
@@ -195,7 +228,7 @@ class AtmoConvLSTM(keras.Model):
 
     def __init__(
         self,
-        params: AtmoModelParams,
+        params: AtmoModel.Params,
         spatial_dims: tuple[int, int],
         num_spatial_features: int,
         num_spatiotemporal_features: int,
@@ -321,7 +354,7 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Output: T2 (2m temperature)
-        self._t2_output_cnn = keras.Sequential(
+        self._t2_output_cnn = tf.keras.Sequential(
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
@@ -338,7 +371,7 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Output: RH2 (2m relative humidity)
-        self._rh2_output_cnn = keras.Sequential(
+        self._rh2_output_cnn = tf.keras.Sequential(
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
@@ -462,10 +495,14 @@ class AtmoConvLSTM(keras.Model):
         # Split up paired tensors into individual time steps.
         trconv_input = data_utils.split_time_step_pairs(lstm_output)
 
-        outputs = [
-            self._t2_output_cnn(trconv_input),
-            self._rh2_output_cnn(trconv_input),
-            self._wspd10_output_cnn(trconv_input),
-            self._wdir10_output_cnn(trconv_input),
-        ]
+        outputs = []
+        if self._t2_output_cnn is not None:
+            outputs.append(self._t2_output_cnn(trconv_input))
+        if self._rh2_output_cnn is not None:
+            outputs.append(self._rh2_output_cnn(trconv_input))
+        if self._wspd10_output_cnn is not None:
+            outputs.append(self._wspd10_output_cnn(trconv_input))
+        if self._wdir10_output_cnn is not None:
+            outputs.append(self._wdir10_output_cnn(trconv_input))
+
         return tf.concat(outputs, axis=-1)

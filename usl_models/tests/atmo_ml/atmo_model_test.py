@@ -5,7 +5,6 @@ import tempfile
 import numpy as np
 from usl_models.atmo_ml import model as atmo_model
 from usl_models.atmo_ml import constants
-from usl_models.atmo_ml import model_params
 
 _TEST_MAP_HEIGHT = 200
 _TEST_MAP_WIDTH = 200
@@ -15,17 +14,10 @@ _LU_INDEX_VOCAB_SIZE = 61
 _EMBEDDING_DIM = 8
 
 
-def pytest_model_params() -> model_params.AtmoModelParams:
-    """Defines AtmoModelParams for testing."""
-    params = model_params.default_params()
-    params.update(
-        {
-            "batch_size": 4,
-            "lstm_units": 32,
-            "lstm_kernel_size": 3,
-            "epochs": 1,
-        }
-    )
+def pytest_model_params() -> atmo_model.AtmoModel.Params:
+    """Defines AtmoModel.Params for testing."""
+    params = atmo_model.AtmoModel.default_params()
+    params.update({"batch_size": 4, "lstm_units": 32, "lstm_kernel_size": 3})
     return params
 
 
