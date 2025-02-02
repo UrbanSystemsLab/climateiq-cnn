@@ -40,7 +40,7 @@ class AtmoModel:
                 "config": {"learning_rate": 1e-4},
             },
             batch_size=4,
-            lstm_units=512,
+            lstm_units=256,
             lstm_kernel_size=5,
             lstm_dropout=0.2,
             lstm_recurrent_dropout=0.2,
@@ -351,7 +351,7 @@ class AtmoConvLSTM(keras.Model):
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
         output_cnn_params = {"padding": "same", "activation": "relu"}
-        # Input shape: (height, width, channels)
+        # Input shape: (time, height, width, channels)
         output_cnn_input_shape = (
             None,
             conv_lstm_height,
@@ -425,8 +425,10 @@ class AtmoConvLSTM(keras.Model):
         T = constants.INPUT_TIME_STEPS
 
         tf.ensure_shape(spatial_input, (B, H, W, C))
-        tf.ensure_shape(st_input, (B, T, H, W, STF))
+        tf.ensure_shape(st_input, (B, None, H, W, STF))
         tf.ensure_shape(lu_index_input, (B, H, W))
+
+        T_O = st_input.shape[1] - T + 1
 
         # Ensure all spatial features are present; if not, replace with zeros
         if spatial_input.shape[-1] < self._spatial_features:
@@ -470,8 +472,7 @@ class AtmoConvLSTM(keras.Model):
         n = st_input.shape[1]
         spatial_cnn_output = tf.repeat(spatial_cnn_output, [n], axis=1)
         lstm_inputs = tf.concat([st_cnn_output, spatial_cnn_output], axis=-1)
-        t = 1
-        lstm_output = self.conv_lstm(lstm_inputs)[-1 - t : -1]
+        lstm_output = self.conv_lstm(lstm_inputs)[:, -T_O:]  # Take the last timestamp.
 
         outputs = []
         if self._rh2_output_cnn is not None:
