@@ -304,25 +304,26 @@ def load_day_label(
 ) -> tf.Tensor | None:
     """Load label tensor for a day."""
     label_path = f"{sim_name}/"
-    label_timestep_interval = timedelta(hours=3)
-    label_timestamps = [date + label_timestep_interval * i for i in range(8)]
-    label_arrays = [
-        downloader.try_download_array(
+    timestep_interval = timedelta(hours=3)
+    timestamps = [date + timestep_interval * i for i in range(8)]
+    arrays = []
+
+    for ts in timestamps:
+        label = downloader.try_download_array(
             bucket, ts.strftime(label_path + LABEL_FILENAME_FORMAT)
         )
-        for ts in label_timestamps
-    ]
-    if None in label_arrays:
-        logging.warning(
-            "Missing label timestamp(s) for date %s",
-            date.strftime(label_path + DATE_FORMAT),
-        )
-        return None
+        if label is None:
+            logging.warning(
+                "Missing label timestamp(s) for date %s",
+                date.strftime(label_path + DATE_FORMAT),
+            )
+            return None
 
-    labels = np.stack(label_arrays)
-    for sto_var in vars.SpatiotemporalOutput:
-        labels[:, :, sto_var.value] = sto_var.scale(labels[:, :, sto_var.value])
-    return tf.convert_to_tensor(labels)
+        for sto_var in vars.SpatiotemporalOutput:
+            label[:, :, sto_var.value] = sto_var.scale(label[:, :, sto_var.value])
+        arrays.append(label)
+
+    return tf.stack(arrays)
 
 
 def load_day_cached(
@@ -333,8 +334,8 @@ def load_day_cached(
     )
     if spatiotemporal is None:
         return None
-    labels = load_day_label_cached(filecache_dir / sim_name / "labels", date)
-    if labels is None:
+    label = load_day_label_cached(filecache_dir / sim_name / "labels", date)
+    if label is None:
         return None
     static_data = np.load(filecache_dir / sim_name / STATIC_FILENAME_NPZ)
     if static_data is None:
@@ -351,7 +352,7 @@ def load_day_cached(
             sim_name=sim_name,
             date=date.strftime(DATE_FORMAT),
         ),
-        labels,
+        label,
     )
 
 
@@ -401,10 +402,10 @@ def load_day_label_cached(path: pathlib.Path, date: datetime) -> tf.Tensor | Non
         if npz is None:
             return None
 
-        labels = npz["arr_0"]
+        label = npz["arr_0"]
         for sto_var in vars.SpatiotemporalOutput:
-            labels[:, :, sto_var.value] = sto_var.scale(labels[:, :, sto_var.value])
-        arrays.append(labels)
+            label[:, :, sto_var.value] = sto_var.scale(label[:, :, sto_var.value])
+        arrays.append(label)
 
     return tf.stack(arrays)
 
