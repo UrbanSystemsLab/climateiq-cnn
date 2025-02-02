@@ -91,17 +91,17 @@ def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
     return sorted(all_dates)
 
 
-def make_dataset(generator, output_channels: int) -> tf.data.Dataset:
+def make_dataset(generator) -> tf.data.Dataset:
     return tf.data.Dataset.from_generator(
         lambda: generator(),
         output_signature=(
             constants.INPUT_SPEC,
             tf.TensorSpec(
                 shape=(
-                    # constants.OUTPUT_TIME_STEPS,
+                    constants.OUTPUT_TIME_STEPS,
                     constants.MAP_HEIGHT,
                     constants.MAP_WIDTH,
-                    output_channels,
+                    constants.OUTPUT_CHANNELS,
                 ),
                 dtype=tf.float32,
             ),
@@ -113,15 +113,12 @@ def load_dataset_cached(
     filecache_dir: pathlib.Path,
     hash_range=(0.0, 1.0),
     example_keys: list[ExampleKey] | None = None,
-    output_vars: list[vars.SpatiotemporalOutput] | None = None,
     shuffle: bool = False,
 ):
     """Loads a dataset from a filecache."""
     example_keys = example_keys or get_cached_sim_dates(filecache_dir)
     if shuffle:
         random.shuffle(example_keys)
-    output_vars = output_vars or list(vars.SpatiotemporalOutput)
-    output_mask = tf.constant([var in output_vars for var in vars.SpatiotemporalOutput])
 
     if shuffle:
         random.shuffle(example_keys)
@@ -145,13 +142,13 @@ def load_dataset_cached(
 
             generated_count += 1
             inputs, labels = load_result
-            yield inputs, tf.boolean_mask(labels, output_mask, axis=3)[-1]
+            yield inputs, labels[-2:-1]
 
         logging.info("Total generated samples: %d", generated_count)
         if missing_days > 0:
             logging.warning("Total days with missing data: %d", missing_days)
 
-    return make_dataset(generator, len(output_vars))
+    return make_dataset(generator)
 
 
 def load_dataset(
@@ -166,7 +163,6 @@ def load_dataset(
 ) -> tf.data.Dataset:
     storage_client = storage_client or storage.Client()
     output_vars = output_vars or list(vars.SpatiotemporalOutput)
-    output_mask = [var in output_vars for var in vars.SpatiotemporalOutput]
 
     # Early validation
     assert storage_client.bucket(
@@ -230,13 +226,13 @@ def load_dataset(
 
             generated_count += 1
             inputs, labels = load_result
-            yield inputs, tf.boolean_mask(labels, output_mask, axis=3)[-1]
+            yield inputs, labels[-2:-1]
 
         logging.info("Total generated samples: %d", generated_count)
         if missing_days > 0:
             logging.warning("Total days with missing data: %d", missing_days)
 
-    return make_dataset(generator, output_channels=len(output_vars))
+    return make_dataset(generator)
 
 
 def load_day(
@@ -310,20 +306,23 @@ def load_day_label(
     label_path = f"{sim_name}/"
     label_timestep_interval = timedelta(hours=3)
     label_timestamps = [date + label_timestep_interval * i for i in range(8)]
-    label_tensors = [
-        downloader.try_download_tensor(
+    label_arrays = [
+        downloader.try_download_array(
             bucket, ts.strftime(label_path + LABEL_FILENAME_FORMAT)
         )
         for ts in label_timestamps
     ]
-    if None in label_tensors:
+    if None in label_arrays:
         logging.warning(
             "Missing label timestamp(s) for date %s",
             date.strftime(label_path + DATE_FORMAT),
         )
         return None
 
-    return tf.stack(label_tensors)
+    labels = np.stack(label_arrays)
+    for sto_var in vars.SpatiotemporalOutput:
+        labels[:, :, sto_var.value] = sto_var.scale(labels[:, :, sto_var.value])
+    return tf.convert_to_tensor(labels)
 
 
 def load_day_cached(
@@ -404,9 +403,7 @@ def load_day_label_cached(path: pathlib.Path, date: datetime) -> tf.Tensor | Non
 
         labels = npz["arr_0"]
         for sto_var in vars.SpatiotemporalOutput:
-            labels[:, :, sto_var.value] = (
-                labels[:, :, sto_var.value] / vars.STO_VAR_CONFIGS[sto_var].vmax
-            )
+            labels[:, :, sto_var.value] = sto_var.scale(labels[:, :, sto_var.value])
         arrays.append(labels)
 
     return tf.stack(arrays)

@@ -1,7 +1,6 @@
 """AtmoML model definition."""
 
 import logging
-import dataclasses
 from typing import TypedDict, List, Callable, Mapping, Any
 
 import keras
@@ -10,37 +9,42 @@ from keras.layers import Embedding
 import tensorflow as tf
 
 from usl_models.atmo_ml import constants
-from usl_models.atmo_ml import vars
-
-
-@dataclasses.dataclass
-class AtmoModelParams:
-    # General parameters.
-    batch_size: int = 4
-
-    # Layer-specific parameters.
-    lstm_units: int = 512
-    lstm_kernel_size: int = 5
-    lstm_dropout: float = 0.2
-    lstm_recurrent_dropout: float = 0.2
-
-    # The optimizer configuration.
-    # We use the dictionary definition to ensure the model is serializable.
-    # This value is passed to keras.optimizers.get to build the optimizer object.
-    optimizer_config: Mapping[str, Any] = dataclasses.field(
-        default_factory=lambda: {
-            "class_name": "Adam",
-            "config": {"learning_rate": 1e-4},
-        }
-    )
-    output_vars: list[vars.SpatiotemporalOutput] = dataclasses.field(
-        default_factory=lambda: list(vars.SpatiotemporalOutput)
-    )
-    epochs: int = 10
 
 
 class AtmoModel:
     """Atmo model class."""
+
+    class Params(TypedDict):
+        """Model parameters dictionary."""
+
+        # General parameters.
+        batch_size: int
+
+        # Layer-specific parameters.
+        lstm_units: int
+        lstm_kernel_size: int
+        lstm_dropout: float
+        lstm_recurrent_dropout: float
+
+        # The optimizer configuration.
+        # We use the dictionary definition to ensure the model is serializable.
+        # This value is passed to keras.optimizers.get to build the optimizer object.
+        optimizer_config: Mapping[str, Any]
+
+    @classmethod
+    def default_params(cls) -> Params:
+        """Returns the default params for the model."""
+        return cls.Params(
+            optimizer_config={
+                "class_name": "Adam",
+                "config": {"learning_rate": 1e-4},
+            },
+            batch_size=4,
+            lstm_units=512,
+            lstm_kernel_size=5,
+            lstm_dropout=0.2,
+            lstm_recurrent_dropout=0.2,
+        )
 
     class Input(TypedDict):
         """Input tensors dictionary."""
@@ -57,7 +61,7 @@ class AtmoModel:
 
     def __init__(
         self,
-        params: AtmoModelParams | None = None,
+        params: Params | None = None,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
         num_spatial_features: int = constants.NUM_SAPTIAL_FEATURES,
         num_spatiotemporal_features: int = constants.NUM_SPATIOTEMPORAL_FEATURES,
@@ -77,7 +81,7 @@ class AtmoModel:
             feature.
             embedding_dim: Size of the embedding vectors for lu_index.
         """
-        self._model_params = params or AtmoModelParams()
+        self._model_params = params or self.default_params()
         self._spatial_dims = spatial_dims
         self._spatial_features = num_spatial_features
         self._spatiotemporal_features = num_spatiotemporal_features
@@ -117,7 +121,7 @@ class AtmoModel:
             embedding_dim=self._embedding_dim,
         )
         model.compile(
-            optimizer=keras.optimizers.get(self._model_params.optimizer_config),
+            optimizer=keras.optimizers.get(self._model_params["optimizer_config"]),
             loss=keras.losses.MeanSquaredError(),
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
@@ -223,7 +227,7 @@ class AtmoConvLSTM(keras.Model):
 
     def __init__(
         self,
-        params: AtmoModelParams,
+        params: AtmoModel.Params,
         spatial_dims: tuple[int, int],
         num_spatial_features: int,
         num_spatiotemporal_features: int,
@@ -331,13 +335,14 @@ class AtmoConvLSTM(keras.Model):
                     )
                 ),
                 layers.ConvLSTM2D(
-                    self._params.lstm_units,
-                    self._params.lstm_kernel_size,
+                    self._params["lstm_units"],
+                    self._params["lstm_kernel_size"],
                     strides=1,
+                    return_sequences=True,
                     padding="same",
                     activation="tanh",
-                    dropout=self._params.lstm_dropout,
-                    recurrent_dropout=self._params.lstm_recurrent_dropout,
+                    dropout=self._params["lstm_dropout"],
+                    recurrent_dropout=self._params["lstm_recurrent_dropout"],
                 ),
             ],
             name="conv_lstm",
@@ -348,91 +353,54 @@ class AtmoConvLSTM(keras.Model):
         output_cnn_params = {"padding": "same", "activation": "relu"}
         # Input shape: (height, width, channels)
         output_cnn_input_shape = (
+            None,
             conv_lstm_height,
             conv_lstm_width,
-            self._params.lstm_units,
+            self._params["lstm_units"],
         )
 
         # Output: RH2 (2m relative humidity)
-        self._rh2_output_cnn = (
-            keras.Sequential(
-                [
-                    layers.InputLayer(
-                        (conv_lstm_height, conv_lstm_width, self._params.lstm_units)
-                    ),
-                    # layers.Conv2DTranspose(8, 4, strides=4, **output_cnn_params),
-                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params),
-                ],
-                name="rh2_output_cnn",
-            )
-            if vars.SpatiotemporalOutput.RH2 in params.output_vars
-            else None
+        self._rh2_output_cnn = keras.Sequential(
+            [
+                layers.InputLayer(output_cnn_input_shape),
+                layers.TimeDistributed(
+                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
+                ),
+            ],
+            name="rh2_output_cnn",
         )
 
         # Output: T2 (2m temperature)
-        self._t2_output_cnn = (
-            keras.Sequential(
-                [
-                    layers.InputLayer(output_cnn_input_shape),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
-                    ),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
-                    ),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
-                    ),
-                ],
-                name="rh2_output_cnn",
-            )
-            if vars.SpatiotemporalOutput.T2 in params.output_vars
-            else None
+        self._t2_output_cnn = keras.Sequential(
+            [
+                layers.InputLayer(output_cnn_input_shape),
+                layers.TimeDistributed(
+                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
+                ),
+            ],
+            name="rh2_output_cnn",
         )
 
         # Output: WSPD10 (10m wind speed)
-        self._wspd10_output_cnn = (
-            keras.Sequential(
-                [
-                    layers.InputLayer(output_cnn_input_shape),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
-                    ),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
-                    ),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
-                    ),
-                ],
-                name="wspd10_output_cnn",
-            )
-            if vars.SpatiotemporalOutput.WSPD_WDIR10 in params.output_vars
-            else None
+        self._wspd10_output_cnn = keras.Sequential(
+            [
+                layers.InputLayer(output_cnn_input_shape),
+                layers.TimeDistributed(
+                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
+                ),
+            ],
+            name="wspd10_output_cnn",
         )
 
         # Output: WDIR10 (10m wind direction sine and cosine functions)
-        self._wdir10_output_cnn = (
-            keras.Sequential(
-                [
-                    layers.InputLayer(output_cnn_input_shape),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
-                    ),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
-                    ),
-                    layers.TimeDistributed(
-                        layers.Conv2DTranspose(2, 1, strides=1, **output_cnn_params)
-                    ),
-                ],
-                name="wdir10_output_cnn",
-            )
-            if (
-                vars.SpatiotemporalOutput.WSPD_WDIR10_COS in params.output_vars
-                and vars.SpatiotemporalOutput.WSPD_WDIR10_SIN in params.output_vars
-            )
-            else None
+        self._wdir10_output_cnn = keras.Sequential(
+            [
+                layers.InputLayer(output_cnn_input_shape),
+                layers.TimeDistributed(
+                    layers.Conv2DTranspose(2, 1, strides=1, **output_cnn_params)
+                ),
+            ],
+            name="wdir10_output_cnn",
         )
 
     def call(self, inputs: AtmoModel.Input) -> tf.Tensor:
@@ -502,11 +470,8 @@ class AtmoConvLSTM(keras.Model):
         n = st_input.shape[1]
         spatial_cnn_output = tf.repeat(spatial_cnn_output, [n], axis=1)
         lstm_inputs = tf.concat([st_cnn_output, spatial_cnn_output], axis=-1)
-        # lstm_input = data_utils.boundary_pairs(concat_inputs)
-        lstm_output = self.conv_lstm(lstm_inputs)
-
-        # Split up paired tensors into individual time steps.
-        # trconv_input = data_utils.split_time_step_pairs(lstm_output)
+        t = 1
+        lstm_output = self.conv_lstm(lstm_inputs)[-1 - t : -1]
 
         outputs = []
         if self._rh2_output_cnn is not None:
