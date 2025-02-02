@@ -144,7 +144,7 @@ class AtmoModel:
         steps_per_epoch: int | None = None,
         early_stopping: int | None = None,
         callbacks: List[Callable] | None = None,
-        validation_freq: int | None = None,
+        validation_freq: int = 1,
     ):
         """Fit the model to the given dataset."""
         if callbacks is None:
