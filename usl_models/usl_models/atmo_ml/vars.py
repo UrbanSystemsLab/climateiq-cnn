@@ -51,5 +51,5 @@ STO_VAR_CONFIGS: dict[SpatiotemporalOutput, VarConfig] = {
     SpatiotemporalOutput.T2: VarConfig(vmin=0.0, vmax=1.0),
     SpatiotemporalOutput.WSPD_WDIR10: VarConfig(vmin=0.0, vmax=10.0),
     SpatiotemporalOutput.WSPD_WDIR10_SIN: VarConfig(vmin=-1.0, vmax=1.0),
-    SpatiotemporalOutput.WSPD_WDIR10_SIN: VarConfig(vmin=-1.0, vmax=1.0),
+    SpatiotemporalOutput.WSPD_WDIR10_COS: VarConfig(vmin=-1.0, vmax=1.0),
 }
