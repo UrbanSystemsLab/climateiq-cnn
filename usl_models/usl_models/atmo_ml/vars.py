@@ -1,6 +1,9 @@
 from enum import Enum
 import dataclasses
 
+import numpy as np
+import tensorflow as tf
+
 
 @dataclasses.dataclass
 class VarConfig:
@@ -8,6 +11,9 @@ class VarConfig:
 
     vmin: float = 0.0
     vmax: float = 1.0
+
+    norm_vmin: float = 0.0
+    norm_vmax = 1.0
 
 
 class Spatiotemporal(Enum):
@@ -45,11 +51,23 @@ class SpatiotemporalOutput(Enum):
     WSPD_WDIR10_SIN = 3
     WSPD_WDIR10_COS = 4
 
+    def scale(self, x: np.ndarray | tf.Tensor) -> np.ndarray | tf.Tensor:
+        """Apply min max scaling."""
+        cfg = STO_VAR_CONFIGS[self]
+
+        x[x > cfg.vmax] = cfg.vmax
+        x[x < cfg.vmin] = cfg.vmin
+        return (x - cfg.vmin) / (cfg.vmax - cfg.vmin)
+
 
 STO_VAR_CONFIGS: dict[SpatiotemporalOutput, VarConfig] = {
     SpatiotemporalOutput.RH2: VarConfig(vmin=0.0, vmax=100.0),
-    SpatiotemporalOutput.T2: VarConfig(vmin=0.0, vmax=1.0),
-    SpatiotemporalOutput.WSPD_WDIR10: VarConfig(vmin=0.0, vmax=10.0),
-    SpatiotemporalOutput.WSPD_WDIR10_SIN: VarConfig(vmin=-1.0, vmax=1.0),
-    SpatiotemporalOutput.WSPD_WDIR10_SIN: VarConfig(vmin=-1.0, vmax=1.0),
+    SpatiotemporalOutput.T2: VarConfig(vmin=263.15, vmax=333.15),
+    SpatiotemporalOutput.WSPD_WDIR10: VarConfig(vmin=0.0, vmax=100.0),
+    SpatiotemporalOutput.WSPD_WDIR10_SIN: VarConfig(
+        vmin=-1.0, vmax=1.0, norm_vmin=-1.0
+    ),
+    SpatiotemporalOutput.WSPD_WDIR10_COS: VarConfig(
+        vmin=-1.0, vmax=1.0, norm_vmin=-1.0
+    ),
 }
