@@ -136,8 +136,8 @@ def plot(
             plot_2d_timeseries(
                 label[:, :, :, sto_var.value],
                 title=sto_var.name + f" ({sim_name} {date})",
-                vmin=sto_var_config.vmin,
-                vmax=1.0,
+                vmin=sto_var_config.norm_vmin,
+                vmax=sto_var_config.norm_vmax,
                 t_start=0.0,
                 t_interval=0.5,
             )
@@ -147,8 +147,8 @@ def plot(
             plot_2d_timeseries(
                 pred[:, :, :, sto_var.value],
                 title=sto_var.name + f" [pred] ({sim_name} {date})",
-                vmin=sto_var_config.vmin,
-                vmax=1.0,
+                vmin=sto_var_config.norm_vmin,
+                vmax=sto_var_config.norm_vmax,
                 t_start=0.0,
                 t_interval=0.5,
             )

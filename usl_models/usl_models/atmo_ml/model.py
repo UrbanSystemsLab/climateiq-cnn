@@ -9,6 +9,8 @@ from keras.layers import Embedding
 import tensorflow as tf
 
 from usl_models.atmo_ml import constants
+from usl_models.atmo_ml import vars
+from usl_models.atmo_ml import metrics
 
 
 class AtmoModel:
@@ -105,7 +107,12 @@ class AtmoModel:
             The loaded AtmoModel.
         """
         model = cls(**kwargs)
-        loaded_model = keras.models.load_model(artifact_uri)
+        loaded_model = keras.models.load_model(
+            artifact_uri,
+            custom_objects={
+                "OutputVarMeanSquaredError": metrics.OutputVarMeanSquaredError
+            },
+        )
         assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
         model._model.set_weights(loaded_model.get_weights())
         return model
@@ -125,7 +132,19 @@ class AtmoModel:
             loss=keras.losses.MeanSquaredError(),
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
+                keras.metrics.MeanSquaredError(),
                 keras.metrics.RootMeanSquaredError(),
+                metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.RH2),
+                metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.T2),
+                metrics.OutputVarMeanSquaredError(
+                    vars.SpatiotemporalOutput.WSPD_WDIR10
+                ),
+                metrics.OutputVarMeanSquaredError(
+                    vars.SpatiotemporalOutput.WSPD_WDIR10_COS
+                ),
+                metrics.OutputVarMeanSquaredError(
+                    vars.SpatiotemporalOutput.WSPD_WDIR10_SIN
+                ),
             ],
         )
         model.build(constants.INPUT_SHAPE_BATCHED)

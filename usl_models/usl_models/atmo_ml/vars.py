@@ -12,6 +12,9 @@ class VarConfig:
     vmin: float = 0.0
     vmax: float = 1.0
 
+    norm_vmin: float = 0.0
+    norm_vmax = 1.0
+
 
 class Spatiotemporal(Enum):
     """Spatiotemporal variables used by the ML model."""
@@ -61,6 +64,10 @@ STO_VAR_CONFIGS: dict[SpatiotemporalOutput, VarConfig] = {
     SpatiotemporalOutput.RH2: VarConfig(vmin=0.0, vmax=100.0),
     SpatiotemporalOutput.T2: VarConfig(vmin=263.15, vmax=333.15),
     SpatiotemporalOutput.WSPD_WDIR10: VarConfig(vmin=0.0, vmax=100.0),
-    SpatiotemporalOutput.WSPD_WDIR10_SIN: VarConfig(vmin=-1.0, vmax=1.0),
-    SpatiotemporalOutput.WSPD_WDIR10_COS: VarConfig(vmin=-1.0, vmax=1.0),
+    SpatiotemporalOutput.WSPD_WDIR10_SIN: VarConfig(
+        vmin=-1.0, vmax=1.0, norm_vmin=-1.0
+    ),
+    SpatiotemporalOutput.WSPD_WDIR10_COS: VarConfig(
+        vmin=-1.0, vmax=1.0, norm_vmin=-1.0
+    ),
 }
