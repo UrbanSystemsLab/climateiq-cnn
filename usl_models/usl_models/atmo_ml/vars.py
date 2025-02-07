@@ -15,6 +15,12 @@ class VarConfig:
     norm_vmin: float = 0.0
     norm_vmax = 1.0
 
+    def scale(self, x: np.ndarray | tf.Tensor) -> np.ndarray | tf.Tensor:
+        """Apply min max scaling."""
+        x[x > self.vmax] = self.vmax
+        x[x < self.vmin] = self.vmin
+        return (x - self.vmin) / (self.vmax - self.vmin)
+
 
 class Spatiotemporal(Enum):
     """Spatiotemporal variables used by the ML model."""
@@ -31,6 +37,10 @@ class Spatiotemporal(Enum):
     LAI12M = 9
     SOLAR_TIME_SIN = 10
     SOLAR_TIME_COS = 11
+
+    def scale(self, x: np.ndarray | tf.Tensor):
+        """Apply min max scaling."""
+        return ST_VAR_CONFIGS[self].scale(x)
 
 
 ST_VAR_CONFIGS: dict[Spatiotemporal, VarConfig] = {
@@ -51,19 +61,15 @@ class SpatiotemporalOutput(Enum):
     WSPD_WDIR10_SIN = 3
     WSPD_WDIR10_COS = 4
 
-    def scale(self, x: np.ndarray | tf.Tensor) -> np.ndarray | tf.Tensor:
+    def scale(self, x: np.ndarray | tf.Tensor):
         """Apply min max scaling."""
-        cfg = STO_VAR_CONFIGS[self]
-
-        x[x > cfg.vmax] = cfg.vmax
-        x[x < cfg.vmin] = cfg.vmin
-        return (x - cfg.vmin) / (cfg.vmax - cfg.vmin)
+        return STO_VAR_CONFIGS[self].scale(x)
 
 
 STO_VAR_CONFIGS: dict[SpatiotemporalOutput, VarConfig] = {
     SpatiotemporalOutput.RH2: VarConfig(vmin=0.0, vmax=100.0),
-    SpatiotemporalOutput.T2: VarConfig(vmin=263.15, vmax=333.15),
-    SpatiotemporalOutput.WSPD_WDIR10: VarConfig(vmin=0.0, vmax=100.0),
+    SpatiotemporalOutput.T2: VarConfig(vmin=0.0, vmax=1.0),
+    SpatiotemporalOutput.WSPD_WDIR10: VarConfig(vmin=0.0, vmax=10.0),
     SpatiotemporalOutput.WSPD_WDIR10_SIN: VarConfig(
         vmin=-1.0, vmax=1.0, norm_vmin=-1.0
     ),

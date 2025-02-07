@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import seaborn as sbn
 import numpy as np
 import tensorflow as tf
-
 from usl_models.atmo_ml import vars
 
 
@@ -129,7 +128,6 @@ def plot(
             t_interval=1.0,
         )
     )
-
     sto_var_config = vars.STO_VAR_CONFIGS[sto_var]
     if label is not None:
         figs.append(
@@ -153,5 +151,4 @@ def plot(
                 t_interval=0.5,
             )
         )
-
     return figs

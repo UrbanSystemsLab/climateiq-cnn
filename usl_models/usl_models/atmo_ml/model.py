@@ -33,6 +33,8 @@ class AtmoModel:
         # This value is passed to keras.optimizers.get to build the optimizer object.
         optimizer_config: Mapping[str, Any]
 
+        output_timesteps: int
+
     @classmethod
     def default_params(cls) -> Params:
         """Returns the default params for the model."""
@@ -46,6 +48,7 @@ class AtmoModel:
             lstm_kernel_size=5,
             lstm_dropout=0.2,
             lstm_recurrent_dropout=0.2,
+            output_timesteps=1,
         )
 
     class Input(TypedDict):
@@ -442,6 +445,7 @@ class AtmoConvLSTM(keras.Model):
         H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
         STF = constants.NUM_SPATIOTEMPORAL_FEATURES
         T = constants.INPUT_TIME_STEPS
+        T_O = self._params["output_timesteps"]
 
         tf.ensure_shape(spatial_input, (B, H, W, C))
         tf.ensure_shape(st_input, (B, None, H, W, STF))
