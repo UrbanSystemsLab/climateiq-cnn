@@ -126,3 +126,11 @@ def try_download_tensor(bucket: storage.Bucket, path: str) -> tf.Tensor | None:
         logging.warning("blob does not exist: %s", path)
         return None
     return blob_to_tensor(blob)
+
+
+def try_download_array(bucket: storage.Bucket, path: str) -> np.ndarray | None:
+    blob = bucket.blob(path)
+    if not blob.exists():
+        logging.warning("blob does not exist: %s", path)
+        return None
+    return blob_to_array(blob)

@@ -91,17 +91,17 @@ def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
     return sorted(all_dates)
 
 
-def make_dataset(generator, output_channels: int) -> tf.data.Dataset:
+def make_dataset(generator, output_timesteps: int = 1) -> tf.data.Dataset:
     return tf.data.Dataset.from_generator(
         lambda: generator(),
         output_signature=(
             constants.INPUT_SPEC,
             tf.TensorSpec(
                 shape=(
-                    constants.OUTPUT_TIME_STEPS,
+                    output_timesteps,
                     constants.MAP_HEIGHT,
                     constants.MAP_WIDTH,
-                    output_channels,
+                    constants.OUTPUT_CHANNELS,
                 ),
                 dtype=tf.float32,
             ),
@@ -113,13 +113,11 @@ def load_dataset_cached(
     filecache_dir: pathlib.Path,
     hash_range=(0.0, 1.0),
     example_keys: list[ExampleKey] | None = None,
-    output_vars: list[vars.SpatiotemporalOutput] | None = None,
     shuffle: bool = True,
+    output_timesteps: int = 1,
 ):
     """Loads a dataset from a filecache."""
     example_keys = example_keys or get_cached_sim_dates(filecache_dir)
-    output_vars = output_vars or list(vars.SpatiotemporalOutput)
-    output_mask = tf.constant([var in output_vars for var in vars.SpatiotemporalOutput])
 
     if shuffle:
         random.shuffle(example_keys)
@@ -133,8 +131,10 @@ def load_dataset_cached(
                 continue
 
             load_result = load_day_cached(
-                filecache_dir / sim_name,
+                filecache_dir,
+                sim_name,
                 datetime.strptime(day, DATE_FORMAT),
+                output_timesteps=output_timesteps,
             )
             if load_result is None:
                 missing_days += 1
@@ -142,13 +142,13 @@ def load_dataset_cached(
 
             generated_count += 1
             inputs, labels = load_result
-            yield inputs, tf.boolean_mask(labels, output_mask, axis=3)
+            yield inputs, labels
 
         logging.info("Total generated samples: %d", generated_count)
         if missing_days > 0:
             logging.warning("Total days with missing data: %d", missing_days)
 
-    return make_dataset(generator, len(output_vars))
+    return make_dataset(generator, output_timesteps=output_timesteps)
 
 
 def load_dataset(
@@ -159,11 +159,9 @@ def load_dataset(
     shuffle: bool = True,
     hash_range=(0.0, 1.0),
     dates: list[str] | None = None,
-    output_vars: list[vars.SpatiotemporalOutput] | None = None,
+    output_timesteps: int = 1,
 ) -> tf.data.Dataset:
     storage_client = storage_client or storage.Client()
-    output_vars = output_vars or list(vars.SpatiotemporalOutput)
-    output_mask = [var in output_vars for var in vars.SpatiotemporalOutput]
 
     # Early validation
     assert storage_client.bucket(
@@ -220,6 +218,7 @@ def load_dataset(
                 datetime.strptime(day, DATE_FORMAT),
                 feature_bucket=feature_bucket,
                 label_bucket=label_bucket,
+                output_timesteps=output_timesteps,
             )
             if load_result is None:
                 missing_days += 1
@@ -227,13 +226,13 @@ def load_dataset(
 
             generated_count += 1
             inputs, labels = load_result
-            yield inputs, tf.boolean_mask(labels, output_mask, axis=3)
+            yield inputs, labels
 
         logging.info("Total generated samples: %d", generated_count)
         if missing_days > 0:
             logging.warning("Total days with missing data: %d", missing_days)
 
-    return make_dataset(generator, output_channels=len(output_vars))
+    return make_dataset(generator)
 
 
 def load_day(
@@ -241,6 +240,7 @@ def load_day(
     date: datetime,
     feature_bucket: storage.Bucket,
     label_bucket: storage.Bucket,
+    output_timesteps: int = 1,
 ) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
     """Loads a single example from (sim_name, date)."""
     logging.info("load_day('%s', '%s')" % (sim_name, date.strftime(DATE_FORMAT)))
@@ -250,6 +250,7 @@ def load_day(
         feature_bucket, f"{sim_name}/lu_index/{start_filename}"
     )
     if lu_index_data is None:
+        print("No lu index")
         return None
 
     spatial_data = downloader.try_download_tensor(
@@ -257,23 +258,31 @@ def load_day(
         f"{sim_name}/spatial/{start_filename}",
     )
     if spatial_data is None:
+        print("No spatial data")
         return None
 
     spatiotemporal_data = load_day_spatiotemporal(sim_name, date, feature_bucket)
     if spatiotemporal_data is None:
+        print("No spatiotemporal_data")
         return None
 
-    label_data = load_day_label(sim_name, date, label_bucket)
+    label_data = load_day_label(
+        sim_name, date, label_bucket, output_timesteps=output_timesteps
+    )
     if label_data is None:
+        print("No label_data")
         return None
 
-    return {
-        "spatiotemporal": spatiotemporal_data,
-        "spatial": spatial_data,
-        "lu_index": tf.reshape(
-            lu_index_data, shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH)
+    return (
+        dict(
+            spatiotemporal=spatiotemporal_data,
+            spatial=spatial_data,
+            lu_index=lu_index_data,
+            sim_name=sim_name,
+            date=date.strftime(DATE_FORMAT),
         ),
-    }, label_data
+        label_data,
+    )
 
 
 def load_day_spatiotemporal(
@@ -299,40 +308,49 @@ def load_day_spatiotemporal(
 
 
 def load_day_label(
-    sim_name: str,
-    date: datetime,
-    bucket: storage.Bucket,
+    sim_name: str, date: datetime, bucket: storage.Bucket, output_timesteps: int = 1
 ) -> tf.Tensor | None:
     """Load label tensor for a day."""
-    label_path = f"{sim_name}/"
-    label_timestep_interval = timedelta(hours=3)
-    label_timestamps = [date + label_timestep_interval * i for i in range(8)]
-    label_tensors = [
-        downloader.try_download_tensor(
-            bucket, ts.strftime(label_path + LABEL_FILENAME_FORMAT)
-        )
-        for ts in label_timestamps
-    ]
-    if None in label_tensors:
-        logging.warning(
-            "Missing label timestamp(s) for date %s",
-            date.strftime(label_path + DATE_FORMAT),
-        )
-        return None
+    path = f"{sim_name}/"
+    timestep_interval = timedelta(hours=3)
+    timestamps = [date + timestep_interval * i for i in range(8)][-output_timesteps:]
+    arrays = []
 
-    return tf.stack(label_tensors)
+    for ts in timestamps:
+        label = downloader.try_download_array(
+            bucket, ts.strftime(path + LABEL_FILENAME_FORMAT)
+        )
+        if label is None:
+            logging.warning(
+                "Missing label timestamp(s) for date %s",
+                date.strftime(path + DATE_FORMAT),
+            )
+            return None
+
+        for sto_var in vars.SpatiotemporalOutput:
+            label[:, :, sto_var.value] = sto_var.scale(label[:, :, sto_var.value])
+        arrays.append(label)
+
+    return tf.stack(arrays)
 
 
 def load_day_cached(
-    path: pathlib.Path, date: datetime
+    filecache_dir: pathlib.Path,
+    sim_name: str,
+    date: datetime,
+    output_timesteps: int = 1,
 ) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
-    spatiotemporal = load_day_spatiotemporal_cached(path / "spatiotemporal", date)
+    spatiotemporal = load_day_spatiotemporal_cached(
+        filecache_dir / sim_name / "spatiotemporal", date
+    )
     if spatiotemporal is None:
         return None
-    labels = load_day_label_cached(path / "labels", date)
-    if labels is None:
+    label = load_day_label_cached(
+        filecache_dir / sim_name / "labels", date, output_timesteps=output_timesteps
+    )
+    if label is None:
         return None
-    static_data = np.load(path / STATIC_FILENAME_NPZ)
+    static_data = np.load(filecache_dir / sim_name / STATIC_FILENAME_NPZ)
     if static_data is None:
         return None
     return (
@@ -344,8 +362,10 @@ def load_day_cached(
                     (constants.MAP_HEIGHT, constants.MAP_WIDTH)
                 )
             ),
+            sim_name=sim_name,
+            date=date.strftime(DATE_FORMAT),
         ),
-        labels,
+        label,
     )
 
 
@@ -384,10 +404,12 @@ def load_day_spatiotemporal_cached(
     return tf.stack(arrays)
 
 
-def load_day_label_cached(path: pathlib.Path, date: datetime) -> tf.Tensor | None:
+def load_day_label_cached(
+    path: pathlib.Path, date: datetime, output_timesteps: int = 1
+) -> tf.Tensor | None:
     """Load label tensor for a day."""
     timestep_interval = timedelta(hours=3)
-    timestamps = [date + timestep_interval * i for i in range(8)]
+    timestamps = [date + timestep_interval * i for i in range(8)][-output_timesteps:]
 
     arrays = []
     for ts in timestamps:
@@ -395,7 +417,12 @@ def load_day_label_cached(path: pathlib.Path, date: datetime) -> tf.Tensor | Non
         if npz is None:
             return None
 
-        arrays.append(npz["arr_0"])
+        label = npz["arr_0"]
+
+        # Apply output variable scaling
+        for sto_var in vars.SpatiotemporalOutput:
+            label[:, :, sto_var.value] = sto_var.scale(label[:, :, sto_var.value])
+        arrays.append(label)
 
     return tf.stack(arrays)
 

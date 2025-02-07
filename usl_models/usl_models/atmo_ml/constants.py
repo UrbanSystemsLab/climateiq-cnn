@@ -62,6 +62,8 @@ INPUT_SPEC = {
         ),
         dtype=tf.int32,
     ),
+    "sim_name": tf.TensorSpec(shape=(), dtype=tf.string),
+    "date": tf.TensorSpec(shape=(), dtype=tf.string),
 }
 
 OUTPUT_SPEC = tf.TensorSpec(

@@ -14,7 +14,7 @@ H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
 F_S = constants.NUM_SAPTIAL_FEATURES
 F_ST = constants.NUM_SPATIOTEMPORAL_FEATURES
 C = constants.OUTPUT_CHANNELS
-T_I, T_O = constants.INPUT_TIME_STEPS, constants.OUTPUT_TIME_STEPS
+T_I, T_O = constants.INPUT_TIME_STEPS, 1
 
 
 class TestAtmoMLDataset(usl_models.testing.TestCase):
@@ -91,18 +91,22 @@ class TestAtmoMLDataset(usl_models.testing.TestCase):
 
     def test_load_day(self):
         """Test loading a single example with expected structure and shapes."""
-        inputs, label = dataset.load_day(
+        load_result = dataset.load_day(
             date=datetime.strptime("2000-05-25", dataset.DATE_FORMAT),
             sim_name=self.sim_name,
             feature_bucket=self.client.bucket(self.feature_bucket_name),
             label_bucket=self.client.bucket(self.label_bucket_name),
         )
+        self.assertNotEqual(load_result, None)
+        inputs, label = load_result
         self.assertShapesRecursive(
             inputs,
             {
                 "spatiotemporal": (T_I, H, W, F_ST),
                 "spatial": (H, W, F_S),
                 "lu_index": (H, W),
+                "date": "",
+                "sim_name": "",
             },
         )
         self.assertShape(label, (T_O, H, W, C))
@@ -127,6 +131,8 @@ class TestAtmoMLDataset(usl_models.testing.TestCase):
                     "spatiotemporal": (B, T_I, H, W, F_ST),
                     "spatial": (B, H, W, F_S),
                     "lu_index": (B, H, W),
+                    "date": (B,),
+                    "sim_name": (B,),
                 }
             ]
             * num_batches,
