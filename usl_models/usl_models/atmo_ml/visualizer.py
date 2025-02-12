@@ -133,7 +133,7 @@ def plot(
         figs.append(
             plot_2d_timeseries(
                 label[:, :, :, sto_var.value],
-                title=sto_var.name + f" ({sim_name} {date})",
+                title=sto_var.name + f" [true] ({sim_name} {date})",
                 vmin=sto_var_config.norm_vmin,
                 vmax=sto_var_config.norm_vmax,
                 t_start=0.0,
