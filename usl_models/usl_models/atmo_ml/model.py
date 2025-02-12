@@ -113,7 +113,7 @@ class AtmoModel:
         loaded_model = keras.models.load_model(
             artifact_uri,
             custom_objects={
-                "OutputVarMeanSquaredError": metrics.OutputVarMeanSquaredError
+                "OutputVarMeanSquaredError": metrics.OutputVarMeanSquaredError,
             },
         )
         assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"

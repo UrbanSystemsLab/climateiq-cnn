@@ -61,6 +61,10 @@ class SpatiotemporalOutput(Enum):
     WSPD_WDIR10_SIN = 3
     WSPD_WDIR10_COS = 4
 
+    def get_config(self) -> dict:
+        """Get config for tensorflow serialization."""
+        return {"value": self.value}
+
     def scale(self, x: np.ndarray | tf.Tensor):
         """Apply min max scaling."""
         return STO_VAR_CONFIGS[self].scale(x)
