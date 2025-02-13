@@ -3,6 +3,7 @@ import dataclasses
 
 import numpy as np
 import tensorflow as tf
+import keras
 
 
 @dataclasses.dataclass
@@ -52,6 +53,7 @@ ST_VAR_CONFIGS: dict[Spatiotemporal, VarConfig] = {
 }
 
 
+@keras.saving.register_keras_serializable()
 class SpatiotemporalOutput(Enum):
     """Spatiotemporal output channels used by the ML model."""
 

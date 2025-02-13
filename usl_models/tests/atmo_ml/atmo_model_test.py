@@ -1,8 +1,11 @@
 """Tests for Atmo model."""
 
-import tensorflow as tf
 import tempfile
+
 import numpy as np
+import tensorflow as tf
+import keras
+
 from usl_models.atmo_ml import model as atmo_model
 from usl_models.atmo_ml import constants
 
@@ -17,7 +20,18 @@ _EMBEDDING_DIM = 8
 def pytest_model_params() -> atmo_model.AtmoModel.Params:
     """Defines AtmoModel.Params for testing."""
     params = atmo_model.AtmoModel.default_params()
-    params.update({"batch_size": 4, "lstm_units": 32, "lstm_kernel_size": 3})
+    params.update(
+        {
+            "batch_size": 4,
+            "lstm_units": 32,
+            "lstm_kernel_size": 3,
+            # Use faster optimizer setting for early stopping.
+            "optimizer_config": keras.optimizers.Adam(
+                learning_rate=1e-3,
+                global_clipnorm=0.1,
+            ),
+        }
+    )
     return params
 
 
@@ -182,24 +196,8 @@ def test_early_stopping():
         )
     ).batch(batch_size)
 
-    val_dataset = tf.data.Dataset.from_tensor_slices(
-        (
-            fake_input_batch(batch_size),
-            tf.random.normal(
-                [
-                    batch_size,
-                    constants.OUTPUT_TIME_STEPS,
-                    _TEST_MAP_HEIGHT,
-                    _TEST_MAP_WIDTH,
-                    constants.OUTPUT_CHANNELS,
-                ]
-            ),
-        )
-    ).batch(batch_size)
-
     history = model.fit(
         train_dataset,
-        val_dataset=val_dataset,
         early_stopping=1,
         epochs=epochs,
         steps_per_epoch=1,
@@ -210,16 +208,16 @@ def test_early_stopping():
 def test_model_checkpoint():
     """Tests saving and loading a model checkpoint."""
     batch_size = 16
-    params = pytest_model_params()
-
-    model = atmo_model.AtmoModel(
-        params,
+    model_kwargs = dict(
+        params=pytest_model_params(),
         spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
         num_spatial_features=_TEST_SPATIAL_FEATURES,
         num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
         lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
         embedding_dim=_EMBEDDING_DIM,
     )
+
+    model = atmo_model.AtmoModel(**model_kwargs)
 
     # Create fake training and validation datasets
     train_dataset = tf.data.Dataset.from_tensor_slices(
@@ -254,29 +252,11 @@ def test_model_checkpoint():
 
     model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
 
-    with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
-        model._model.save(tmp.name, overwrite=True)
-        new_model = atmo_model.AtmoModel(
-            params,
-            spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
-            num_spatial_features=_TEST_SPATIAL_FEATURES,
-            num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
-            lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
-            embedding_dim=_EMBEDDING_DIM,
-        )
-        new_model._model = tf.keras.models.load_model(tmp.name, compile=False)
+    with tempfile.TemporaryDirectory(suffix="model") as tmp:
+        model.save_model(tmp)
+        loaded_model = atmo_model.AtmoModel.from_checkpoint(tmp, **model_kwargs)
 
-        # Recompile the model with the optimizer and loss
-        new_model._model.compile(
-            optimizer=tf.keras.optimizers.get(params["optimizer_config"]),
-            loss=tf.keras.losses.MeanSquaredError(),
-            metrics=[
-                tf.keras.metrics.MeanAbsoluteError(),
-                tf.keras.metrics.RootMeanSquaredError(),
-            ],
-        )
-
-    old_weights = model._model.get_weights()
-    new_weights = new_model._model.get_weights()
-    for old, new in zip(old_weights, new_weights):
-        np.testing.assert_array_equal(old, new)
+    for weights, loaded_weights in zip(
+        model._model.get_weights(), loaded_model._model.get_weights()
+    ):
+        np.testing.assert_array_equal(weights, loaded_weights)

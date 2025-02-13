@@ -10,6 +10,7 @@ import keras
 from usl_models.atmo_ml import vars
 
 
+@keras.saving.register_keras_serializable()
 class OutputVarMeanSquaredError(keras.metrics.MeanMetricWrapper):
     """Output variable mean squared error."""
 

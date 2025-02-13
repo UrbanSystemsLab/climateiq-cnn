@@ -1,7 +1,7 @@
 """AtmoML model definition."""
 
 import logging
-from typing import TypedDict, List, Callable, Mapping, Any
+from typing import TypedDict, List, Callable
 
 import keras
 from keras import layers
@@ -31,7 +31,7 @@ class AtmoModel:
         # The optimizer configuration.
         # We use the dictionary definition to ensure the model is serializable.
         # This value is passed to keras.optimizers.get to build the optimizer object.
-        optimizer_config: Mapping[str, Any]
+        optimizer_config: keras.optimizers.Adam | keras.optimizers.SGD
 
         output_timesteps: int
 
@@ -39,10 +39,14 @@ class AtmoModel:
     def default_params(cls) -> Params:
         """Returns the default params for the model."""
         return cls.Params(
-            optimizer_config={
-                "class_name": "Adam",
-                "config": {"learning_rate": 1e-4},
-            },
+            optimizer_config=keras.optimizers.Adam(
+                learning_rate=1e-3,
+                beta_1=0.99,
+                beta_2=0.9999,
+                epsilon=1e-07,
+                amsgrad=False,
+                global_clipnorm=0.001,
+            ),
             batch_size=4,
             lstm_units=256,
             lstm_kernel_size=5,
@@ -110,12 +114,7 @@ class AtmoModel:
             The loaded AtmoModel.
         """
         model = cls(**kwargs)
-        loaded_model = keras.models.load_model(
-            artifact_uri,
-            custom_objects={
-                "OutputVarMeanSquaredError": metrics.OutputVarMeanSquaredError,
-            },
-        )
+        loaded_model = keras.models.load_model(artifact_uri)
         assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
         model._model.set_weights(loaded_model.get_weights())
         return model
@@ -131,7 +130,7 @@ class AtmoModel:
             embedding_dim=self._embedding_dim,
         )
         model.compile(
-            optimizer=keras.optimizers.get(self._model_params["optimizer_config"]),
+            optimizer=self._model_params["optimizer_config"],
             loss=keras.losses.MeanSquaredError(),
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
