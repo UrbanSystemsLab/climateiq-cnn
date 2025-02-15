@@ -9,8 +9,8 @@ from keras.layers import Embedding
 import tensorflow as tf
 
 from usl_models.atmo_ml import constants
-from usl_models.atmo_ml import vars
 from usl_models.atmo_ml import metrics
+from usl_models.atmo_ml import vars
 
 
 class AtmoModel:

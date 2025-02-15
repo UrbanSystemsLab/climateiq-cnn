@@ -2,9 +2,9 @@
 
 import tempfile
 
-import numpy as np
-import tensorflow as tf
 import keras
+import tensorflow as tf
+import numpy as np
 
 from usl_models.atmo_ml import model as atmo_model
 from usl_models.atmo_ml import constants
@@ -216,6 +216,7 @@ def test_model_checkpoint():
         lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
         embedding_dim=_EMBEDDING_DIM,
     )
+    model = atmo_model.AtmoModel(**model_kwargs)
 
     model = atmo_model.AtmoModel(**model_kwargs)
 
@@ -251,12 +252,11 @@ def test_model_checkpoint():
     ).batch(batch_size)
 
     model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
-
     with tempfile.TemporaryDirectory(suffix="model") as tmp:
         model.save_model(tmp)
         loaded_model = atmo_model.AtmoModel.from_checkpoint(tmp, **model_kwargs)
 
-    for weights, loaded_weights in zip(
-        model._model.get_weights(), loaded_model._model.get_weights()
-    ):
-        np.testing.assert_array_equal(weights, loaded_weights)
+        for weights, loaded_weights in zip(
+            model._model.get_weights(), loaded_model._model.get_weights()
+        ):
+            np.testing.assert_array_equal(weights, loaded_weights)
