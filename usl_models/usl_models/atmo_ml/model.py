@@ -8,8 +8,10 @@ from keras import layers
 from keras.layers import Embedding
 import tensorflow as tf
 
-from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import data_utils
+from usl_models.atmo_ml import constants
+from usl_models.atmo_ml import metrics
+from usl_models.atmo_ml import vars
 
 
 class AtmoModel:
@@ -130,6 +132,17 @@ class AtmoModel:
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),
+                metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.RH2),
+                metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.T2),
+                metrics.OutputVarMeanSquaredError(
+                    vars.SpatiotemporalOutput.WSPD_WDIR10
+                ),
+                metrics.OutputVarMeanSquaredError(
+                    vars.SpatiotemporalOutput.WSPD_WDIR10_COS
+                ),
+                metrics.OutputVarMeanSquaredError(
+                    vars.SpatiotemporalOutput.WSPD_WDIR10_SIN
+                ),
             ],
         )
         model.build(constants.INPUT_SHAPE_BATCHED)

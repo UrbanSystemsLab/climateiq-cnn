@@ -3,6 +3,7 @@ import dataclasses
 
 import numpy as np
 import tensorflow as tf
+import keras
 
 
 @dataclasses.dataclass
@@ -52,6 +53,7 @@ ST_VAR_CONFIGS: dict[Spatiotemporal, VarConfig] = {
 }
 
 
+@keras.saving.register_keras_serializable()
 class SpatiotemporalOutput(Enum):
     """Spatiotemporal output channels used by the ML model."""
 
@@ -60,6 +62,10 @@ class SpatiotemporalOutput(Enum):
     WSPD_WDIR10 = 2
     WSPD_WDIR10_SIN = 3
     WSPD_WDIR10_COS = 4
+
+    def get_config(self) -> dict:
+        """Get config for tensorflow serialization."""
+        return {"value": self.value}
 
     def scale(self, x: np.ndarray | tf.Tensor):
         """Apply min max scaling."""
