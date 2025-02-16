@@ -9,6 +9,7 @@ from keras.layers import Embedding
 import tensorflow as tf
 
 from usl_models.atmo_ml import constants
+from usl_models.atmo_ml import dataset
 from usl_models.atmo_ml import metrics
 from usl_models.atmo_ml import vars
 
@@ -33,27 +34,63 @@ class AtmoModel:
         # This value is passed to keras.optimizers.get to build the optimizer object.
         optimizer_config: keras.optimizers.Adam | keras.optimizers.SGD
 
+        input_width: int
+        input_height: int
+
         output_timesteps: int
+        output_width: int
+        output_height: int
+
+        num_spatial_features: int
+        num_spatiotemporal_features: int
+        lu_index_vocab_size: int  # Nb of unique classes in lu_index
+        embedding_dim: int  # Size of the embedding vectors for lu_index
 
     @classmethod
     def default_params(cls) -> Params:
         """Returns the default params for the model."""
+        lstm_kernel_size = 5
+        input_width = constants.MAP_WIDTH
+        input_height = constants.MAP_HEIGHT
         return cls.Params(
             optimizer_config=keras.optimizers.Adam(
-                learning_rate=1e-3,
-                beta_1=0.99,
-                beta_2=0.9999,
+                learning_rate=2e-3,
+                beta_1=0.999,
+                beta_2=0.99999,
                 epsilon=1e-07,
                 amsgrad=False,
-                global_clipnorm=0.001,
+                clipnorm=0.001,
             ),
             batch_size=4,
             lstm_units=256,
-            lstm_kernel_size=5,
-            lstm_dropout=0.2,
-            lstm_recurrent_dropout=0.2,
+            lstm_kernel_size=lstm_kernel_size,
+            lstm_dropout=0.0,
+            lstm_recurrent_dropout=0.0,
             output_timesteps=1,
+            input_width=input_width,
+            input_height=input_height,
+            output_width=input_width,
+            output_height=input_height,
+            num_spatial_features=constants.NUM_SAPTIAL_FEATURES,
+            num_spatiotemporal_features=constants.NUM_SPATIOTEMPORAL_FEATURES,
+            lu_index_vocab_size=constants.LU_INDEX_VOCAB_SIZE,
+            embedding_dim=constants.EMBEDDING_DIM,
         )
+
+    @classmethod
+    def dataset_config_params(cls, config: dataset.Config) -> Params:
+        """Construct model params from a dataset config."""
+        params = cls.default_params()
+        params.update(
+            {
+                "input_height": config.input_height,
+                "input_width": config.input_width,
+                "output_height": config.output_height,
+                "output_width": config.output_width,
+                "output_timesteps": config.output_timesteps,
+            }
+        )
+        return params
 
     class Input(TypedDict):
         """Input tensors dictionary."""
@@ -68,15 +105,7 @@ class AtmoModel:
         prediction: tf.Tensor
         chunk_id: str | tf.Tensor
 
-    def __init__(
-        self,
-        params: Params | None = None,
-        spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
-        num_spatial_features: int = constants.NUM_SAPTIAL_FEATURES,
-        num_spatiotemporal_features: int = constants.NUM_SPATIOTEMPORAL_FEATURES,
-        lu_index_vocab_size: int = constants.LU_INDEX_VOCAB_SIZE,
-        embedding_dim: int = constants.EMBEDDING_DIM,
-    ):
+    def __init__(self, params: Params | None = None):
         """Creates the Atmo model.
 
         Args:
@@ -90,12 +119,7 @@ class AtmoModel:
             feature.
             embedding_dim: Size of the embedding vectors for lu_index.
         """
-        self._model_params = params or self.default_params()
-        self._spatial_dims = spatial_dims
-        self._spatial_features = num_spatial_features
-        self._spatiotemporal_features = num_spatiotemporal_features
-        self._lu_index_vocab_size = lu_index_vocab_size
-        self._embedding_dim = embedding_dim
+        self._params = params or self.default_params()
         self._model = self._build_model()
 
     @classmethod
@@ -121,16 +145,9 @@ class AtmoModel:
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
-        model = AtmoConvLSTM(
-            self._model_params,
-            spatial_dims=self._spatial_dims,
-            num_spatial_features=self._spatial_features,
-            num_spatiotemporal_features=self._spatiotemporal_features,
-            lu_index_vocab_size=self._lu_index_vocab_size,
-            embedding_dim=self._embedding_dim,
-        )
+        model = AtmoConvLSTM(self._params)
         model.compile(
-            optimizer=self._model_params["optimizer_config"],
+            optimizer=self._params["optimizer_config"],
             loss=keras.losses.MeanSquaredError(),
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
@@ -149,7 +166,12 @@ class AtmoModel:
                 ),
             ],
         )
-        model.build(constants.INPUT_SHAPE_BATCHED)
+        model.build(
+            constants.get_input_shape_batched(
+                height=self._params["input_height"],
+                width=self._params["input_width"],
+            )
+        )
         return model
 
     def summary(self, expand_nested: bool = False):
@@ -249,41 +271,29 @@ class AtmoConvLSTM(keras.Model):
     def __init__(
         self,
         params: AtmoModel.Params,
-        spatial_dims: tuple[int, int],
-        num_spatial_features: int,
-        num_spatiotemporal_features: int,
-        lu_index_vocab_size: int = 61,  # Nb of unique classes in lu_index
-        embedding_dim: int = 8,  # Size of the embedding vectors for lu_index
     ):
         """Creates the Atmo ConvLSTM model.
 
         Args:
             params: An dictionary of configurable model parameters.
-            spatial_dims: Tuple of spatial height and width input dimensions.
-                Needed for defining input shapes.
-            num_spatial_features: Total dimensionality of the spatial features.
-                Needed for defining input shapes.
-            num_spatiotemporal_features: Total dimensionality of the spatiotemporal
-                features. Needed for defining input shapes.
-            lu_index_vocab_size (int): The number of unique values in the lu_index
-                feature. This is used to define the size of the vocabulary for the
-                embedding layer.
-            embedding_dim (int): Size of the embedding vectors for the lu_index
-            feature. This determines the dimensionality of the embedding space.
         """
         super().__init__()
 
         self._params = params
-        self._spatial_height, self._spatial_width = spatial_dims
-        self._spatial_features = num_spatial_features
-        self._spatiotemporal_features = num_spatiotemporal_features
-        self._embedding_dim = embedding_dim  # Save embedding_dim as a class attribute
+
+        T = None
+        H, W = self._params["input_height"], self._params["input_width"]
+        H_O, W_O = self._params["output_height"], self._params["output_width"]
+        V_LU = self._params["lu_index_vocab_size"]
+        F_S = self._params["num_spatial_features"]
+        F_LU = self._params["embedding_dim"]
+        F_ST = self._params["num_spatiotemporal_features"]
 
         # Define Embedding Layer for lu_index
         self.lu_index_embedding = Embedding(
-            input_dim=lu_index_vocab_size,
-            output_dim=embedding_dim,
-            input_length=self._spatial_height * self._spatial_width,
+            input_dim=V_LU,
+            output_dim=F_LU,
+            input_length=H * W,
         )
 
         # Model definition
@@ -293,13 +303,7 @@ class AtmoConvLSTM(keras.Model):
         self._spatial_cnn = keras.Sequential(
             [
                 # Input shape: (height, width, channels)
-                layers.InputLayer(
-                    (
-                        self._spatial_height,
-                        self._spatial_width,
-                        self._spatial_features + embedding_dim,
-                    )
-                ),
+                layers.InputLayer((H, W, F_S + F_LU)),
                 # layers.Conv2D(64, 5, **spatial_cnn_params),
                 # layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
                 # layers.Conv2D(128, 5, **spatial_cnn_params),
@@ -313,14 +317,7 @@ class AtmoConvLSTM(keras.Model):
         self._st_cnn = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
-                layers.InputLayer(
-                    (
-                        None,
-                        self._spatial_height,
-                        self._spatial_width,
-                        self._spatiotemporal_features,
-                    )
-                ),
+                layers.InputLayer((T, H, W, F_ST)),
                 # Remaining layers are TimeDistributed and are applied to each
                 # temporal slice
                 # layers.TimeDistributed(layers.Conv2D(16, 5, **st_cnn_params)),
@@ -339,22 +336,11 @@ class AtmoConvLSTM(keras.Model):
         # The spatial dimensions have been reduced 4x by the CNNs.
         # The "channel" dimension is double the sum of the channels from the CNNs,
         # due to stacking two boundary condition pairs.
-        conv_lstm_height = self._spatial_height // 1
-        conv_lstm_width = self._spatial_width // 1
         # conv_lstm_channels = 128 + 64
         self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
-                layers.InputLayer(
-                    (
-                        None,
-                        conv_lstm_height,
-                        conv_lstm_width,
-                        self._spatiotemporal_features
-                        + self._spatial_features
-                        + embedding_dim,
-                    )
-                ),
+                layers.InputLayer((T, H, W, F_ST + F_S + F_LU)),
                 layers.ConvLSTM2D(
                     self._params["lstm_units"],
                     self._params["lstm_kernel_size"],
@@ -373,12 +359,7 @@ class AtmoConvLSTM(keras.Model):
         # We return separate sub-models (i.e., branches) for each output.
         output_cnn_params = {"padding": "same", "activation": "relu"}
         # Input shape: (time, height, width, channels)
-        output_cnn_input_shape = (
-            None,
-            conv_lstm_height,
-            conv_lstm_width,
-            self._params["lstm_units"],
-        )
+        output_cnn_input_shape = (T, H_O, W_O, self._params["lstm_units"])
 
         # Output: RH2 (2m relative humidity)
         self._rh2_output_cnn = keras.Sequential(
@@ -439,47 +420,25 @@ class AtmoConvLSTM(keras.Model):
         st_input = inputs["spatiotemporal"]
         lu_index_input = inputs["lu_index"]  # lu_index is passed separately
 
-        B = st_input.shape[0]
-        C = constants.NUM_SAPTIAL_FEATURES
-        H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
-        STF = constants.NUM_SPATIOTEMPORAL_FEATURES
-        T = constants.INPUT_TIME_STEPS
-        T_O = self._params["output_timesteps"]
+        B, T, *_ = st_input.shape
+        F_S = self._params["num_spatial_features"]
+        F_ST = self._params["num_spatiotemporal_features"]
+        H, W = self._params["input_height"], self._params["input_width"]
+        T_O = st_input.shape[1] - T + 1
+        F_LU = self._params["embedding_dim"]
 
-        tf.ensure_shape(spatial_input, (B, H, W, C))
-        tf.ensure_shape(st_input, (B, None, H, W, STF))
+        tf.ensure_shape(spatial_input, (B, H, W, F_S))
+        tf.ensure_shape(st_input, (B, T, H, W, F_ST))
         tf.ensure_shape(lu_index_input, (B, H, W))
 
-        T_O = st_input.shape[1] - T + 1
-
-        # Ensure all spatial features are present; if not, replace with zeros
-        if spatial_input.shape[-1] < self._spatial_features:
-            missing_channels = self._spatial_features - spatial_input.shape[-1]
-            spatial_input = tf.pad(
-                spatial_input,
-                paddings=[[0, 0], [0, 0], [0, 0], [0, missing_channels]],
-                constant_values=0,
-            )
-
-        # Ensure all spatiotemporal features are present; if not, replace with zeros
-        if st_input.shape[-1] < self._spatiotemporal_features:
-            missing_channels = self._spatiotemporal_features - st_input.shape[-1]
-            st_input = tf.pad(
-                st_input,
-                paddings=[[0, 0], [0, 0], [0, 0], [0, 0], [0, missing_channels]],
-                constant_values=0,
-            )
-
         # Reshape lu_index matrix for embedding
-        lu_index_input_flat = tf.reshape(
-            lu_index_input, (-1, self._spatial_height * self._spatial_width)
-        )
+        lu_index_input_flat = tf.reshape(lu_index_input, (-1, H * W))
         lu_index_embedded_flat = self.lu_index_embedding(lu_index_input_flat)
 
         # Reshape back to matrix form (200, 200, ?, ?)
         lu_index_embedded = tf.reshape(
             lu_index_embedded_flat,
-            (-1, self._spatial_height, self._spatial_width, self._embedding_dim),
+            (-1, H, W, F_LU),
         )
 
         # Concatenate lu_index embedding with other spatial features
