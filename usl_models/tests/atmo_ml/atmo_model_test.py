@@ -196,24 +196,8 @@ def test_early_stopping():
         )
     ).batch(batch_size)
 
-    val_dataset = tf.data.Dataset.from_tensor_slices(
-        (
-            fake_input_batch(batch_size),
-            tf.random.normal(
-                [
-                    batch_size,
-                    constants.OUTPUT_TIME_STEPS,
-                    _TEST_MAP_HEIGHT,
-                    _TEST_MAP_WIDTH,
-                    constants.OUTPUT_CHANNELS,
-                ]
-            ),
-        )
-    ).batch(batch_size)
-
     history = model.fit(
         train_dataset,
-        val_dataset=val_dataset,
         early_stopping=1,
         epochs=epochs,
         steps_per_epoch=1,
@@ -232,6 +216,8 @@ def test_model_checkpoint():
         lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
         embedding_dim=_EMBEDDING_DIM,
     )
+    model = atmo_model.AtmoModel(**model_kwargs)
+
     model = atmo_model.AtmoModel(**model_kwargs)
 
     # Create fake training and validation datasets

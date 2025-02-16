@@ -7,5 +7,6 @@
     "python.testing.pytestEnabled": true,
     "python.testing.pytestPath": "pytest",
     "editor.formatOnSave": true,
-    "notebook.formatOnSave.enabled": true
+    "notebook.formatOnSave.enabled": true,
+    "tensorBoard.logDirectory": "usl_models/logs"
 }
