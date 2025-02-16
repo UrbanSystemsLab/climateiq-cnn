@@ -5,7 +5,6 @@ from typing import TypedDict, List, Callable, Mapping, Any
 
 import keras
 from keras import layers
-from keras.layers import Embedding
 import tensorflow as tf
 
 from usl_models.atmo_ml import data_utils
@@ -68,7 +67,6 @@ class AtmoModel:
     def __init__(
         self,
         params: Params | None = None,
-        spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
         num_spatial_features: int = constants.NUM_SAPTIAL_FEATURES,
         num_spatiotemporal_features: int = constants.NUM_SPATIOTEMPORAL_FEATURES,
         lu_index_vocab_size: int = constants.LU_INDEX_VOCAB_SIZE,
@@ -88,7 +86,6 @@ class AtmoModel:
             embedding_dim: Size of the embedding vectors for lu_index.
         """
         self._model_params = params or self.default_params()
-        self._spatial_dims = spatial_dims
         self._spatial_features = num_spatial_features
         self._spatiotemporal_features = num_spatiotemporal_features
         self._lu_index_vocab_size = lu_index_vocab_size
@@ -120,7 +117,6 @@ class AtmoModel:
         """Creates the correct internal (Keras) model architecture."""
         model = AtmoConvLSTM(
             self._model_params,
-            spatial_dims=self._spatial_dims,
             num_spatial_features=self._spatial_features,
             num_spatiotemporal_features=self._spatiotemporal_features,
             lu_index_vocab_size=self._lu_index_vocab_size,
@@ -145,7 +141,7 @@ class AtmoModel:
                 ),
             ],
         )
-        model.build(constants.INPUT_SHAPE_BATCHED)
+        model.build(constants.get_input_shape_batched(height=None, width=None))
         return model
 
     def summary(self, expand_nested: bool = False):
@@ -245,7 +241,6 @@ class AtmoConvLSTM(keras.Model):
     def __init__(
         self,
         params: AtmoModel.Params,
-        spatial_dims: tuple[int, int],
         num_spatial_features: int,
         num_spatiotemporal_features: int,
         lu_index_vocab_size: int = 61,  # Nb of unique classes in lu_index
@@ -255,8 +250,6 @@ class AtmoConvLSTM(keras.Model):
 
         Args:
             params: An dictionary of configurable model parameters.
-            spatial_dims: Tuple of spatial height and width input dimensions.
-                Needed for defining input shapes.
             num_spatial_features: Total dimensionality of the spatial features.
                 Needed for defining input shapes.
             num_spatiotemporal_features: Total dimensionality of the spatiotemporal
@@ -270,35 +263,35 @@ class AtmoConvLSTM(keras.Model):
         super().__init__()
 
         self._params = params
-        self._spatial_height, self._spatial_width = spatial_dims
         self._spatial_features = num_spatial_features
         self._spatiotemporal_features = num_spatiotemporal_features
         self._embedding_dim = embedding_dim  # Save embedding_dim as a class attribute
 
+        # Model definition
+        T, H, W = None, None, None
+        K_SIZE = self._params["lstm_kernel_size"]  # Conv kernel size
+
         # Define Embedding Layer for lu_index
-        self.lu_index_embedding = Embedding(
-            input_dim=lu_index_vocab_size,
-            output_dim=embedding_dim,
-            input_length=self._spatial_height * self._spatial_width,
+        self.lu_index_embedding = keras.Sequential(
+            [
+                layers.InputLayer((H, W)),
+                layers.Embedding(
+                    input_dim=lu_index_vocab_size,
+                    output_dim=embedding_dim,
+                ),
+            ]
         )
 
-        # Model definition
-
         # Spatial CNN
+        C_S = self._spatial_features + embedding_dim  # Spatial channels
+        F_S = 128  # Spatial conv filters
         spatial_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
         self._spatial_cnn = keras.Sequential(
             [
-                # Input shape: (height, width, channels)
-                layers.InputLayer(
-                    (
-                        self._spatial_height,
-                        self._spatial_width,
-                        self._spatial_features + embedding_dim,
-                    )
-                ),
-                layers.Conv2D(64, 5, **spatial_cnn_params),
+                layers.InputLayer((H, W, C_S)),
+                layers.Conv2D(F_S // 2, K_SIZE, **spatial_cnn_params),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
-                layers.Conv2D(128, 5, **spatial_cnn_params),
+                layers.Conv2D(F_S, K_SIZE, **spatial_cnn_params),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
             ],
             name="spatial_cnn",
@@ -306,24 +299,19 @@ class AtmoConvLSTM(keras.Model):
 
         # Spatiotemporal CNN
         st_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
+        F_ST = 64
         self._st_cnn = keras.Sequential(
             [
-                # Input shape: (time_steps, height, width, channels)
-                layers.InputLayer(
-                    (
-                        None,
-                        self._spatial_height,
-                        self._spatial_width,
-                        self._spatiotemporal_features,
-                    )
-                ),
+                layers.InputLayer((T, H, W, self._spatiotemporal_features)),
                 # Remaining layers are TimeDistributed and are applied to each
                 # temporal slice
-                layers.TimeDistributed(layers.Conv2D(16, 5, **st_cnn_params)),
+                layers.TimeDistributed(
+                    layers.Conv2D(F_ST // 4, K_SIZE, **st_cnn_params)
+                ),
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
-                layers.TimeDistributed(layers.Conv2D(64, 5, **st_cnn_params)),
+                layers.TimeDistributed(layers.Conv2D(F_ST, K_SIZE, **st_cnn_params)),
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
@@ -335,18 +323,16 @@ class AtmoConvLSTM(keras.Model):
         # The spatial dimensions have been reduced 4x by the CNNs.
         # The "channel" dimension is double the sum of the channels from the CNNs,
         # due to stacking two boundary condition pairs.
-        conv_lstm_height = self._spatial_height // 4
-        conv_lstm_width = self._spatial_width // 4
-        conv_lstm_channels = 2 * (128 + 64)
+        C_LSTM = 2 * (F_S + F_ST)  # LSTM channels
+        H_LSTM, W_LSTM = None, None  # LSTM height and width
+        F_LSTM = self._params["lstm_units"]  # LSTM Filters
         self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
-                layers.InputLayer(
-                    (None, conv_lstm_height, conv_lstm_width, conv_lstm_channels)
-                ),
+                layers.InputLayer((T, H_LSTM, W_LSTM, C_LSTM)),
                 layers.ConvLSTM2D(
-                    self._params["lstm_units"],
-                    self._params["lstm_kernel_size"],
+                    F_LSTM,
+                    K_SIZE,
                     return_sequences=True,
                     strides=1,
                     padding="same",
@@ -361,43 +347,37 @@ class AtmoConvLSTM(keras.Model):
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
         output_cnn_params = {"padding": "same", "activation": "relu"}
-        # Input shape: (time, height, width, channels)
-        output_cnn_input_shape = (
-            None,
-            conv_lstm_height,
-            conv_lstm_width,
-            self._params["lstm_units"] // 2,
-        )
+        output_cnn_input_shape = (T, H_LSTM, W_LSTM, F_LSTM // 2)
 
         # Output: T2 (2m temperature)
-        self._t2_output_cnn = tf.keras.Sequential(
+        self._t2_output_cnn = keras.Sequential(
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
+                    layers.Conv2DTranspose(64, K_SIZE, strides=2, **output_cnn_params)
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
+                    layers.Conv2DTranspose(16, K_SIZE, strides=2, **output_cnn_params)
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
+                    layers.Conv2DTranspose(1, K_SIZE, strides=1, **output_cnn_params)
                 ),
             ],
             name="t2_output_cnn",
         )
 
         # Output: RH2 (2m relative humidity)
-        self._rh2_output_cnn = tf.keras.Sequential(
+        self._rh2_output_cnn = keras.Sequential(
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
+                    layers.Conv2DTranspose(64, K_SIZE, strides=2, **output_cnn_params)
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
+                    layers.Conv2DTranspose(16, K_SIZE, strides=2, **output_cnn_params)
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
+                    layers.Conv2DTranspose(1, K_SIZE, strides=1, **output_cnn_params)
                 ),
             ],
             name="rh2_output_cnn",
@@ -408,13 +388,13 @@ class AtmoConvLSTM(keras.Model):
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
+                    layers.Conv2DTranspose(64, K_SIZE, strides=2, **output_cnn_params)
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
+                    layers.Conv2DTranspose(16, K_SIZE, strides=2, **output_cnn_params)
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params)
+                    layers.Conv2DTranspose(1, K_SIZE, strides=1, **output_cnn_params)
                 ),
             ],
             name="wspd10_output_cnn",
@@ -425,13 +405,13 @@ class AtmoConvLSTM(keras.Model):
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(64, 2, strides=2, **output_cnn_params)
+                    layers.Conv2DTranspose(64, K_SIZE, strides=2, **output_cnn_params)
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(16, 2, strides=2, **output_cnn_params)
+                    layers.Conv2DTranspose(16, K_SIZE, strides=2, **output_cnn_params)
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(2, 1, strides=1, **output_cnn_params)
+                    layers.Conv2DTranspose(2, K_SIZE, strides=1, **output_cnn_params)
                 ),
             ],
             name="wdir10_output_cnn",
@@ -452,9 +432,8 @@ class AtmoConvLSTM(keras.Model):
         st_input = inputs["spatiotemporal"]
         lu_index_input = inputs["lu_index"]  # lu_index is passed separately
 
-        B = st_input.shape[0]
+        B, T, H, W, *_ = st_input.shape
         C = constants.NUM_SAPTIAL_FEATURES
-        H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
         STF = constants.NUM_SPATIOTEMPORAL_FEATURES
         T = constants.INPUT_TIME_STEPS
         T_O = self._params["output_timesteps"]
@@ -481,17 +460,7 @@ class AtmoConvLSTM(keras.Model):
                 constant_values=0,
             )
 
-        # Reshape lu_index matrix for embedding
-        lu_index_input_flat = tf.reshape(
-            lu_index_input, (-1, self._spatial_height * self._spatial_width)
-        )
-        lu_index_embedded_flat = self.lu_index_embedding(lu_index_input_flat)
-
-        # Reshape back to matrix form (200, 200, ?, ?)
-        lu_index_embedded = tf.reshape(
-            lu_index_embedded_flat,
-            (-1, self._spatial_height, self._spatial_width, self._embedding_dim),
-        )
+        lu_index_embedded = self.lu_index_embedding(lu_index_input)
 
         # Concatenate lu_index embedding with other spatial features
         spatial_input = tf.concat([spatial_input, lu_index_embedded], axis=-1)
@@ -502,8 +471,7 @@ class AtmoConvLSTM(keras.Model):
         # Concatenate spatial CNN outputs with all spatiotemporal tensors
         # and transform time sequence into boundary condition pairs.
         spatial_cnn_output = spatial_cnn_output[:, tf.newaxis, :, :, :]
-        n = st_input.shape[1]
-        spatial_cnn_output = tf.repeat(spatial_cnn_output, [n], axis=1)
+        spatial_cnn_output = tf.repeat(spatial_cnn_output, [T], axis=1)
         concat_inputs = tf.concat([st_cnn_output, spatial_cnn_output], axis=-1)
 
         lstm_input = data_utils.boundary_pairs(concat_inputs)

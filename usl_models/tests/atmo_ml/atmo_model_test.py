@@ -85,7 +85,6 @@ def test_atmo_convlstm():
 
     model = atmo_model.AtmoConvLSTM(
         params,
-        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
         num_spatial_features=_TEST_SPATIAL_FEATURES,
         num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
         lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,  # Added for lu_index
@@ -119,7 +118,6 @@ def test_train():
 
     model = atmo_model.AtmoModel(
         params,
-        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
         lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
         embedding_dim=_EMBEDDING_DIM,
     )
@@ -175,7 +173,6 @@ def test_early_stopping():
 
     model = atmo_model.AtmoModel(
         params,
-        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
         lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
         embedding_dim=_EMBEDDING_DIM,
     )
@@ -226,7 +223,6 @@ def test_model_checkpoint():
     batch_size = 16
     model_kwargs = dict(
         params=pytest_model_params(),
-        spatial_dims=(_TEST_MAP_HEIGHT, _TEST_MAP_WIDTH),
         num_spatial_features=_TEST_SPATIAL_FEATURES,
         num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
         lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
