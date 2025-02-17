@@ -1,15 +1,19 @@
-import logging
 import dataclasses
+from datetime import datetime, timedelta
+import functools
+import hashlib
+import itertools
+import logging
+import pathlib
 import random
 from typing import Iterable
-import pathlib
-import itertools
-from datetime import datetime, timedelta
-import hashlib  # For hashing days
+
 import tensorflow as tf
 import numpy as np
+
 from google.cloud import storage  # type: ignore
 from google.cloud.storage import transfer_manager  # type: ignore
+
 from usl_models.atmo_ml import constants, vars
 from usl_models.shared import downloader
 
@@ -29,7 +33,7 @@ LABEL_FILENAME_FORMAT_NPZ = "wrfout_d03_%Y-%m-%d_%H:%M:%S.npz"
 ExampleKey = tuple[str, str]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(kw_only=True, frozen=True)
 class Config:
     input_width: int = 200
     input_height: int = 200
@@ -131,6 +135,9 @@ def load_dataset_cached(
     def generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
         missing_days: int = 0
         generated_count: int = 0
+        if example_keys is None:
+            return
+
         for sim_name, day in example_keys:
             # Skip days not in this dataset
             if not (hash_range[0] <= hash_day(sim_name, day) < hash_range[1]):
@@ -155,7 +162,6 @@ def load_dataset_cached(
         if missing_days > 0:
             logging.warning("Total days with missing data: %d", missing_days)
 
-    print("output_signature", get_output_signature(config))
     return tf.data.Dataset.from_generator(
         generator, output_signature=get_output_signature(config)
     )
@@ -344,6 +350,7 @@ def load_day_label(
     return tf.stack(arrays)
 
 
+@functools.lru_cache(maxsize=128)
 def load_day_cached(
     filecache_dir: pathlib.Path, sim_name: str, date: datetime, config: Config
 ) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
