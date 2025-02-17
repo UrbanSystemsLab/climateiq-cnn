@@ -9,8 +9,8 @@ import numpy as np
 from usl_models.atmo_ml import model as atmo_model
 from usl_models.atmo_ml import constants
 
-_TEST_MAP_HEIGHT = 200
-_TEST_MAP_WIDTH = 200
+_TEST_MAP_HEIGHT = 50
+_TEST_MAP_WIDTH = 50
 _TEST_SPATIAL_FEATURES = 22  # lu_index is now separate
 _TEST_SPATIOTEMPORAL_FEATURES = 12
 _LU_INDEX_VOCAB_SIZE = 61
@@ -105,7 +105,7 @@ def test_train():
 
     Expected labels and outputs: tf.Tensor[shape=(B, T, H, W, output_channels)]
     """
-    batch_size = 16
+    batch_size = 8
     epochs = 2
     params = pytest_model_params()
 

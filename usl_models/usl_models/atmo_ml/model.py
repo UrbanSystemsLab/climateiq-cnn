@@ -55,7 +55,7 @@ class AtmoModel:
         return cls.Params(
             optimizer_config={
                 "class_name": "Adam",
-                "config": {"learning_rate": 1e-4},
+                "config": {"learning_rate": 2e-4},
             },
             batch_size=4,
             lstm_units=512,
