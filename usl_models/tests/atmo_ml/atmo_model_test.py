@@ -83,13 +83,7 @@ def test_atmo_convlstm():
 
     fake_input = fake_input_batch(batch_size)
 
-    model = atmo_model.AtmoConvLSTM(
-        params,
-        num_spatial_features=_TEST_SPATIAL_FEATURES,
-        num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
-        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,  # Added for lu_index
-        embedding_dim=_EMBEDDING_DIM,  # Added for lu_index embedding
-    )
+    model = atmo_model.AtmoConvLSTM(params)
     prediction = model(fake_input)
 
     expected_output_shape = (
@@ -116,11 +110,7 @@ def test_train():
     epochs = 2
     params = pytest_model_params()
 
-    model = atmo_model.AtmoModel(
-        params,
-        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
-        embedding_dim=_EMBEDDING_DIM,
-    )
+    model = atmo_model.AtmoModel(params)
 
     # Create fake training and validation datasets
     train_dataset = tf.data.Dataset.from_tensor_slices(
@@ -171,11 +161,7 @@ def test_early_stopping():
     params = pytest_model_params()
     epochs = 20
 
-    model = atmo_model.AtmoModel(
-        params,
-        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
-        embedding_dim=_EMBEDDING_DIM,
-    )
+    model = atmo_model.AtmoModel(params)
 
     # Create fake training and validation datasets
     train_dataset = tf.data.Dataset.from_tensor_slices(
@@ -221,14 +207,8 @@ def test_early_stopping():
 def test_model_checkpoint():
     """Tests saving and loading a model checkpoint."""
     batch_size = 16
-    model_kwargs = dict(
-        params=pytest_model_params(),
-        num_spatial_features=_TEST_SPATIAL_FEATURES,
-        num_spatiotemporal_features=_TEST_SPATIOTEMPORAL_FEATURES,
-        lu_index_vocab_size=_LU_INDEX_VOCAB_SIZE,
-        embedding_dim=_EMBEDDING_DIM,
-    )
-    model = atmo_model.AtmoModel(**model_kwargs)
+    params = pytest_model_params()
+    model = atmo_model.AtmoModel(params)
 
     # Create fake training and validation datasets
     train_dataset = tf.data.Dataset.from_tensor_slices(
@@ -264,7 +244,7 @@ def test_model_checkpoint():
     model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
     with tempfile.TemporaryDirectory(suffix="model") as tmp:
         model.save_model(tmp)
-        loaded_model = atmo_model.AtmoModel.from_checkpoint(tmp, **model_kwargs)
+        loaded_model = atmo_model.AtmoModel.from_checkpoint(tmp, params=params)
 
         for weights, loaded_weights in zip(
             model._model.get_weights(), loaded_model._model.get_weights()
