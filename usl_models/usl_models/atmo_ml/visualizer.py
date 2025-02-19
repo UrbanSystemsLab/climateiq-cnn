@@ -14,14 +14,15 @@ def init_plt():
 
 def plot_2d_timeseries(
     data: np.ndarray,
-    vmin: float,
-    vmax: float,
+    vmin: float | None = None,
+    vmax: float | None = None,
     spatial_ticks: int = 5,
     title: str = "2d Timeseries Plot",
     t_interval: float = 1.0,
     t_start: float = 0.0,
+    normalize: bool = False,  # Set to False to disable normalization
 ) -> matplotlib.figure.Figure:
-    """Plot a map of atmo data."""
+    """Plot a timeseries of 2D maps without normalization if desired."""
     T, H, W, *_ = data.shape
 
     fig, axs = plt.subplots(1, T, figsize=(2 * (T + 0.2), 2), sharey=True)
@@ -36,6 +37,7 @@ def plot_2d_timeseries(
             vmax=vmax,
             title=f"t={t_start + (t * t_interval)}",
             cbar_ax=cbar_ax,
+            normalize=normalize,
         )
 
     fig.subplots_adjust(top=0.85)
@@ -53,18 +55,22 @@ def _plot_2d(
     vmax: float | None = None,
     title: str = "2d Plot",
     cbar_ax: matplotlib.axes.Axes | None = None,
+    normalize: bool = True,  # When False, plot raw data
 ) -> matplotlib.axes.Axes:
     H, W, *_ = data.shape
+    if normalize:
+        heatmap_kwargs = dict(vmin=vmin, vmax=vmax, robust=True)
+    else:
+        # When not normalizing, let seaborn use the raw data range.
+        heatmap_kwargs = dict(vmin=None, vmax=None, robust=False)
     sbn.heatmap(
         data,
-        vmin=vmin,
-        vmax=vmax,
         ax=ax,
         square=True,
-        robust=True,
         xticklabels=False,
         yticklabels=False,
         cbar_ax=cbar_ax,
+        **heatmap_kwargs,
     )
     xticks = np.linspace(0, W, spatial_ticks, dtype=np.int32)
     yticks = np.linspace(0, H, spatial_ticks, dtype=np.int32)
@@ -77,7 +83,10 @@ def _plot_2d(
 
 
 def plot_spatial(
-    data: np.ndarray, features: list[int], spatial_ticks: int = 5
+    data: np.ndarray,
+    features: list[int],
+    spatial_ticks: int = 5,
+    normalize: bool = True,
 ) -> matplotlib.figure.Figure:
     F = len(features)
     fig, axs = plt.subplots(1, F, figsize=(2 * (F + 1), 2), sharey=True)
@@ -87,6 +96,7 @@ def plot_spatial(
             ax=axs[i],
             title=f"Spatial feature {f}",
             spatial_ticks=spatial_ticks,
+            normalize=normalize,
         )
     fig.subplots_adjust(top=0.85)
     fig.suptitle("Spatial features")
@@ -102,8 +112,9 @@ def plot(
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
     spatial_features: list[int] | None = None,
     spatial_ticks: int = 6,
+    normalize: bool = True,  # Set normalize to False to plot raw data
 ) -> list[matplotlib.figure.Figure]:
-    """Plots an inputs, label pair for debugging."""
+    """Plots inputs, label, prediction, and difference maps for debugging."""
     sim_name = inputs["sim_name"].numpy().decode("utf-8")
     date = inputs["date"].numpy().decode("utf-8")
     figs = []
@@ -114,6 +125,7 @@ def plot(
                     inputs["spatial"],
                     spatial_ticks=spatial_ticks,
                     features=spatial_features[5 * i : 5 * (i + 1)],
+                    normalize=normalize,
                 )
             )
 
@@ -126,6 +138,7 @@ def plot(
             vmax=st_var_config.vmax,
             t_start=-1.0,
             t_interval=1.0,
+            normalize=normalize,
         )
     )
     sto_var_config = vars.STO_VAR_CONFIGS[sto_var]
@@ -138,6 +151,7 @@ def plot(
                 vmax=sto_var_config.norm_vmax,
                 t_start=0.0,
                 t_interval=0.5,
+                normalize=normalize,
             )
         )
     if pred is not None:
@@ -149,6 +163,34 @@ def plot(
                 vmax=sto_var_config.norm_vmax,
                 t_start=0.0,
                 t_interval=0.5,
+                normalize=normalize,
+            )
+        )
+    # Plot the difference between prediction and ground truth
+    if label is not None and pred is not None:
+        diff = pred[:, :, :, sto_var.value] - label[:, :, :, sto_var.value]
+        # Use symmetric limits centered at zero for the difference
+        diff_range = max(
+            (
+                abs(sto_var_config.norm_vmin)
+                if sto_var_config.norm_vmin is not None
+                else 0
+            ),
+            (
+                abs(sto_var_config.norm_vmax)
+                if sto_var_config.norm_vmax is not None
+                else 0
+            ),
+        )
+        figs.append(
+            plot_2d_timeseries(
+                diff,
+                title=sto_var.name + f" [diff] ({sim_name} {date})",
+                vmin=-diff_range,
+                vmax=diff_range,
+                t_start=0.0,
+                t_interval=0.5,
+                normalize=normalize,
             )
         )
     return figs
