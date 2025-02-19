@@ -8,7 +8,6 @@ import numpy as np
 
 from usl_models.atmo_ml import model as atmo_model
 from usl_models.atmo_ml import constants
-from usl_models.atmo_ml import metrics
 
 _TEST_MAP_HEIGHT = 200
 _TEST_MAP_WIDTH = 200
@@ -269,14 +268,7 @@ def test_model_checkpoint():
     model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
     with tempfile.TemporaryDirectory(suffix="model") as tmp:
         model.save_model(tmp)
-
-        custom_objects = {
-            "NormalizedRootMeanSquaredError": metrics.NormalizedRootMeanSquaredError,
-        }
-
-        loaded_model = atmo_model.AtmoModel.from_checkpoint(
-            tmp, custom_objects=custom_objects, **model_kwargs
-        )
+        loaded_model = atmo_model.AtmoModel.from_checkpoint(tmp, **model_kwargs)
 
         for weights, loaded_weights in zip(
             model._model.get_weights(), loaded_model._model.get_weights()
