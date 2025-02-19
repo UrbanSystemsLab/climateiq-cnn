@@ -69,6 +69,7 @@ def psnr_metric(y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
     return tf.reduce_mean(psnr)
 
 
+@keras.saving.register_keras_serializable()
 class NormalizedRootMeanSquaredError(keras.metrics.Metric):
     """Compute the Normalized Root Mean Squared Error (NRMSE).
 
