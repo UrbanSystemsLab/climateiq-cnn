@@ -71,18 +71,18 @@ def psnr_metric(y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
 
 @keras.saving.register_keras_serializable()
 class NormalizedRootMeanSquaredError(keras.metrics.Metric):
-    """Compute the Normalized Root Mean Squared Error (NRMSE).
+    """Computes the Normalized Root Mean Squared Error (NRMSE).
 
-    This metric calculates the RMSE and normalizes it by the range (max-min)
-    of the ground truth values over all batches.
+    This metric calculates the RMSE normalized by the range (max-min) of the
+    ground truth values over all batches.
     """
 
     def __init__(self, name="nrmse", **kwargs):
-        """Initialize the Normalized RMSE metric.
+        """Initializes the NormalizedRootMeanSquaredError metric.
 
         Args:
-            name (str, optional): Name of the metric. Defaults to "nrmse".
-            **kwargs: Additional arguments for the base class.
+            name (str): Name of the metric.
+            **kwargs: Additional keyword arguments passed to the base class.
         """
         super().__init__(name=name, **kwargs)
         self.rmse = keras.metrics.RootMeanSquaredError()
@@ -91,31 +91,33 @@ class NormalizedRootMeanSquaredError(keras.metrics.Metric):
         self.count = self.add_weight(name="count", initializer="zeros")
 
     def update_state(self, y_true: tf.Tensor, y_pred: tf.Tensor, sample_weight=None):
-        """Update the state variables for computing the metric.
+        """Accumulates state for the metric for a given batch.
+
+        Updates the internal RMSE and tracks the minimum and maximum values
+        from the ground truth.
 
         Args:
-            y_true (tf.Tensor): Ground truth values.
-            y_pred (tf.Tensor): Predicted values.
-            sample_weight (tf.Tensor, optional): Optional weight for samples.
+            y_true (tf.Tensor): The ground truth values.
+            y_pred (tf.Tensor): The predicted values.
+            sample_weight (tf.Tensor, optional): Optional sample weights.
         """
         self.rmse.update_state(y_true, y_pred, sample_weight)
         current_min = tf.reduce_min(y_true)
         current_max = tf.reduce_max(y_true)
-
         if tf.equal(self.count, 0):
             self.min_val.assign(current_min)
             self.max_val.assign(current_max)
         else:
             self.min_val.assign(tf.minimum(self.min_val, current_min))
             self.max_val.assign(tf.maximum(self.max_val, current_max))
-
         self.count.assign_add(1)
 
     def result(self) -> tf.Tensor:
-        """Compute the final NRMSE value.
+        """Computes and returns the normalized RMSE.
 
         Returns:
-            tf.Tensor: The normalized RMSE value.
+            tf.Tensor:normalized RMSE, computed as RMSE divided by the range (max - min)
+            of the ground truth. If the range is zero, returns 0.
         """
         range_val = self.max_val - self.min_val
         return tf.cond(
@@ -124,9 +126,30 @@ class NormalizedRootMeanSquaredError(keras.metrics.Metric):
             lambda: self.rmse.result() / range_val,
         )
 
-    def reset_states(self):
-        """Reset the metric state."""
-        self.rmse.reset_states()
+    def reset_state(self):
+        """Resets the state of the metric variables."""
+        self.rmse.reset_state()
         self.min_val.assign(0.0)
         self.max_val.assign(0.0)
         self.count.assign(0.0)
+
+    def get_config(self):
+        """Returns the configuration of the metric for serialization.
+
+        Returns:
+            dict: A dictionary containing the configuration of the metric.
+        """
+        base_config = super().get_config()
+        return {**base_config}
+
+    @classmethod
+    def from_config(cls, config):
+        """Creates an instance of the metric from its configuration.
+
+        Args:
+            config (dict): A dictionary of configuration parameters.
+
+        Returns:
+            NormalizedRootMeanSquaredError: A new instance of the metric.
+        """
+        return cls(**config)
