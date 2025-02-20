@@ -428,6 +428,7 @@ def load_day_spatiotemporal_cached(
 
 
 def crop_2d(arr: np.ndarray, height: int, width: int) -> np.ndarray:
+    """Crop a 2d array."""
     H, W, *_ = arr.shape
     pad_x = (W - width) // 2
     pad_y = (H - height) // 2
@@ -447,9 +448,11 @@ def preprocess_label(label: np.ndarray, config: Config) -> np.ndarray:
     # Scale vars.
     for sto_var in vars.SpatiotemporalOutput:
         label[:, :, sto_var.value] = sto_var.scale(label[:, :, sto_var.value])
-    # Apply padding if required.
+    # Apply cropping if required.
     H, W, _ = label.shape
-    return crop_2d(label, config.output_height, config.output_width)
+    if (config.output_height, config.output_width) != (H, W):
+        label = crop_2d(label, config.output_height, config.output_width)
+    return label
 
 
 def load_day_label_cached(
