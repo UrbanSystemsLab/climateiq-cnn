@@ -430,8 +430,15 @@ def load_day_spatiotemporal_cached(
 def crop_2d(arr: np.ndarray, height: int, width: int) -> np.ndarray:
     """Crop a 2d array."""
     H, W, *_ = arr.shape
+
+    if height > H:
+        raise ValueError(f"Crop target height {height} exceeds array height {H}.")
+    if width > W:
+        raise ValueError(f"Crop target width {width} exceeds array width {W}.")
+
     pad_x = (W - width) // 2
     pad_y = (H - height) // 2
+
     if pad_x and pad_y:
         return arr[
             pad_y:-pad_y,
@@ -441,17 +448,21 @@ def crop_2d(arr: np.ndarray, height: int, width: int) -> np.ndarray:
         return arr[pad_y:-pad_y]
     elif pad_x:
         return arr[:, pad_x:-pad_x]
+
     return arr
 
 
 def preprocess_label(label: np.ndarray, config: Config) -> np.ndarray:
+    """Preprocess label tensor based on the dataset config."""
     # Scale vars.
     for sto_var in vars.SpatiotemporalOutput:
         label[:, :, sto_var.value] = sto_var.scale(label[:, :, sto_var.value])
+
     # Apply cropping if required.
     H, W, _ = label.shape
     if (config.output_height, config.output_width) != (H, W):
         label = crop_2d(label, config.output_height, config.output_width)
+
     return label
 
 
