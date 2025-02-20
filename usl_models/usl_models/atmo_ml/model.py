@@ -134,8 +134,8 @@ class AtmoModel:
                 keras.metrics.RootMeanSquaredError(),
                 keras.metrics.MeanAbsolutePercentageError(),
                 metrics.NormalizedRootMeanSquaredError(),
-                metrics.ssim_metric,
-                metrics.psnr_metric,
+                metrics.SSIMMetric(),
+                metrics.PSNRMetric(),
                 metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.RH2),
                 metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.T2),
                 metrics.OutputVarMeanSquaredError(
