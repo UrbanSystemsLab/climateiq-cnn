@@ -110,7 +110,6 @@ def plot(
     """Plots an inputs, label pair for debugging."""
     sim_name = inputs["sim_name"].numpy().decode("utf-8")
     date = inputs["date"].numpy().decode("utf-8")
-    figs = []
     if spatial_features is not None:
         for i in range(len(spatial_features) // 5):
             yield plot_spatial(
