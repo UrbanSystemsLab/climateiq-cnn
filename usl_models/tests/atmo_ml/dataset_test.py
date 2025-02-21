@@ -96,6 +96,7 @@ class TestAtmoMLDataset(usl_models.testing.TestCase):
             sim_name=self.sim_name,
             feature_bucket=self.client.bucket(self.feature_bucket_name),
             label_bucket=self.client.bucket(self.label_bucket_name),
+            config=dataset.Config(),
         )
         self.assertNotEqual(load_result, None)
         inputs, label = load_result
@@ -118,6 +119,7 @@ class TestAtmoMLDataset(usl_models.testing.TestCase):
             label_bucket_name=self.label_bucket_name,
             sim_names=[self.sim_name],
             storage_client=self.client,
+            config=dataset.Config(),
         ).batch(batch_size=B)
 
         inputs, labels = zip(*ds)

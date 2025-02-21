@@ -17,61 +17,50 @@ TIME_STEPS_PER_DAY = 4
 LU_INDEX_VOCAB_SIZE = 61
 EMBEDDING_DIM = 8
 
-INPUT_SHAPE = {
-    "spatiotemporal": (
-        INPUT_TIME_STEPS,
-        MAP_HEIGHT,
-        MAP_WIDTH,
-        NUM_SPATIOTEMPORAL_FEATURES,
-    ),
-    "spatial": (
-        MAP_HEIGHT,
-        MAP_WIDTH,
-        NUM_SAPTIAL_FEATURES,
-    ),
-    "lu_index": (
-        MAP_HEIGHT,
-        MAP_WIDTH,
-    ),
-}
 
-INPUT_SHAPE_BATCHED = {k: (None, *v) for k, v in INPUT_SHAPE.items()}
+def get_input_shape_batched(height, width):
+    spec = get_input_spec(height, width)
+    return {k: (None, *v.shape) for k, v in spec.items()}
 
-INPUT_SPEC = {
-    "spatiotemporal": tf.TensorSpec(
+
+def get_input_spec(height: int | None, width: int | None) -> dict[str, tf.TypeSpec]:
+    return {
+        "spatiotemporal": tf.TensorSpec(
+            shape=(
+                INPUT_TIME_STEPS,
+                height,
+                width,
+                NUM_SPATIOTEMPORAL_FEATURES,
+            ),
+            dtype=tf.float32,
+        ),
+        "spatial": tf.TensorSpec(
+            shape=(
+                height,
+                width,
+                NUM_SAPTIAL_FEATURES,
+            ),
+            dtype=tf.float32,
+        ),
+        "lu_index": tf.TensorSpec(
+            shape=(
+                height,
+                width,
+            ),
+            dtype=tf.int32,
+        ),
+        "sim_name": tf.TensorSpec(shape=(), dtype=tf.string),
+        "date": tf.TensorSpec(shape=(), dtype=tf.string),
+    }
+
+
+def get_output_spec(height: int, width: int, timesteps: int) -> tf.TensorSpec:
+    return tf.TensorSpec(
         shape=(
-            INPUT_TIME_STEPS,
-            MAP_HEIGHT,
-            MAP_WIDTH,
-            NUM_SPATIOTEMPORAL_FEATURES,
+            timesteps,
+            height,
+            width,
+            OUTPUT_CHANNELS,
         ),
         dtype=tf.float32,
-    ),
-    "spatial": tf.TensorSpec(
-        shape=(
-            MAP_HEIGHT,
-            MAP_WIDTH,
-            NUM_SAPTIAL_FEATURES,
-        ),
-        dtype=tf.float32,
-    ),
-    "lu_index": tf.TensorSpec(
-        shape=(
-            MAP_HEIGHT,
-            MAP_WIDTH,
-        ),
-        dtype=tf.int32,
-    ),
-    "sim_name": tf.TensorSpec(shape=(), dtype=tf.string),
-    "date": tf.TensorSpec(shape=(), dtype=tf.string),
-}
-
-OUTPUT_SPEC = tf.TensorSpec(
-    shape=(
-        OUTPUT_TIME_STEPS,
-        MAP_HEIGHT,
-        MAP_WIDTH,
-        OUTPUT_CHANNELS,
-    ),
-    dtype=tf.float32,
-)
+    )
