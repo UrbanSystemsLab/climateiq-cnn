@@ -29,8 +29,10 @@ def test_psnr_metric_identical():
     metric = metrics.PSNRMetric(max_val=1.0)
     metric.update_state(x, x)
     result = metric.result().numpy()
-    # tf.image.psnr returns 100 for identical images when max_val is 1.0.
-    np.testing.assert_allclose(result, 100.0, atol=1e-5)
+    # For identical images, tf.image.psnr returns inf.
+    assert np.isinf(
+        result
+    ), f"Expected PSNR to be inf for identical images, got {result}"
 
 
 # Different images should yield a PSNR lower than for identical images.
