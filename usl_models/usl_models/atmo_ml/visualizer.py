@@ -24,7 +24,7 @@ def plot_2d_timeseries(
     title: str = "2d Timeseries Plot",
     t_interval: float = 1.0,
     t_start: float = 0.0,
-    normalize: bool = False,  # Set to False to disable normalization
+    normalize: bool = False,
 ) -> matplotlib.figure.Figure:
     """Plot a timeseries of 2D maps without normalization if desired."""
     T, H, W, *_ = data.shape
@@ -59,7 +59,7 @@ def _plot_2d(
     vmax: float | None = None,
     title: str = "2d Plot",
     cbar_ax: matplotlib.axes.Axes | None = None,
-    normalize: bool = True,  # When False, plot raw data
+    normalize: bool = False,
 ) -> matplotlib.axes.Axes:
     H, W, *_ = data.shape
     if normalize:
@@ -90,7 +90,7 @@ def plot_spatial(
     data: np.ndarray,
     features: list[int],
     spatial_ticks: int = 5,
-    normalize: bool = True,
+    normalize: bool = False,
 ) -> matplotlib.figure.Figure:
     F = len(features)
     fig, axs = plt.subplots(1, F, figsize=(2 * (F + 1), 2), sharey=True)
@@ -116,9 +116,9 @@ def plot(
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
     spatial_features: list[int] | None = None,
     spatial_ticks: int = 6,
-    normalize: bool = True,  # Set normalize to False to plot raw data
+    normalize: bool = False,  # Set normalize to False to plot raw data
 ) -> Iterator[matplotlib.figure.Figure]:
-    """Plots an inputs, label pair for debugging."""
+    """Plots inputs, label, prediction, and difference maps for debugging."""
     sim_name = inputs["sim_name"].numpy().decode("utf-8")
     date = inputs["date"].numpy().decode("utf-8")
     if spatial_features is not None:
@@ -188,6 +188,7 @@ def plot_batch(
     pred_batch: tf.Tensor,
     st_var: vars.Spatiotemporal = vars.Spatiotemporal.RH,
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
+    normalize: bool = False,
     max_examples: int | None = None,
 ) -> Iterator[matplotlib.figure.Figure]:
     """Plot a batch of AtmoML Examples."""
@@ -198,5 +199,6 @@ def plot_batch(
             pred=pred_batch[b],
             st_var=st_var,
             sto_var=sto_var,
+            normalize=normalize,
         ):
             yield fig
