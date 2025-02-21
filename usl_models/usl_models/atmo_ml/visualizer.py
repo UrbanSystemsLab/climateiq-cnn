@@ -1,9 +1,13 @@
+from typing import Iterator
+
+import itertools
 import matplotlib.figure
 import matplotlib.axes
 import matplotlib.pyplot as plt
 import seaborn as sbn
 import numpy as np
 import tensorflow as tf
+
 from usl_models.atmo_ml import vars
 
 
@@ -102,53 +106,65 @@ def plot(
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
     spatial_features: list[int] | None = None,
     spatial_ticks: int = 6,
-) -> list[matplotlib.figure.Figure]:
+) -> Iterator[matplotlib.figure.Figure]:
     """Plots an inputs, label pair for debugging."""
     sim_name = inputs["sim_name"].numpy().decode("utf-8")
     date = inputs["date"].numpy().decode("utf-8")
     figs = []
     if spatial_features is not None:
         for i in range(len(spatial_features) // 5):
-            figs.append(
-                plot_spatial(
-                    inputs["spatial"],
-                    spatial_ticks=spatial_ticks,
-                    features=spatial_features[5 * i : 5 * (i + 1)],
-                )
+            yield plot_spatial(
+                inputs["spatial"],
+                spatial_ticks=spatial_ticks,
+                features=spatial_features[5 * i : 5 * (i + 1)],
             )
 
     st_var_config = vars.ST_VAR_CONFIGS[st_var]
-    figs.append(
-        plot_2d_timeseries(
-            inputs["spatiotemporal"][:, :, :, st_var.value],
-            title=st_var.name + f" ({sim_name} {date})",
-            vmin=st_var_config.vmin,
-            vmax=st_var_config.vmax,
-            t_start=-1.0,
-            t_interval=1.0,
-        )
+    yield plot_2d_timeseries(
+        inputs["spatiotemporal"][:, :, :, st_var.value],
+        title=st_var.name + f" ({sim_name} {date})",
+        vmin=st_var_config.vmin,
+        vmax=st_var_config.vmax,
+        t_start=-1.0,
+        t_interval=1.0,
     )
     sto_var_config = vars.STO_VAR_CONFIGS[sto_var]
     if label is not None:
-        figs.append(
-            plot_2d_timeseries(
-                label[:, :, :, sto_var.value],
-                title=sto_var.name + f" [true] ({sim_name} {date})",
-                vmin=sto_var_config.norm_vmin,
-                vmax=sto_var_config.norm_vmax,
-                t_start=0.0,
-                t_interval=0.5,
-            )
+        yield plot_2d_timeseries(
+            label[:, :, :, sto_var.value],
+            title=sto_var.name + f" [true] ({sim_name} {date})",
+            vmin=sto_var_config.norm_vmin,
+            vmax=sto_var_config.norm_vmax,
+            t_start=0.0,
+            t_interval=0.5,
         )
+
     if pred is not None:
-        figs.append(
-            plot_2d_timeseries(
-                pred[:, :, :, sto_var.value],
-                title=sto_var.name + f" [pred] ({sim_name} {date})",
-                vmin=sto_var_config.norm_vmin,
-                vmax=sto_var_config.norm_vmax,
-                t_start=0.0,
-                t_interval=0.5,
-            )
+        yield plot_2d_timeseries(
+            pred[:, :, :, sto_var.value],
+            title=sto_var.name + f" [pred] ({sim_name} {date})",
+            vmin=sto_var_config.norm_vmin,
+            vmax=sto_var_config.norm_vmax,
+            t_start=0.0,
+            t_interval=0.5,
         )
-    return figs
+
+
+def plot_batch(
+    input_batch: tf.Tensor,
+    label_batch: tf.Tensor,
+    pred_batch: tf.Tensor,
+    st_var: vars.Spatiotemporal = vars.Spatiotemporal.RH,
+    sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
+    max_examples: int | None = None,
+) -> Iterator[matplotlib.figure.Figure]:
+    """Plot a batch of AtmoML Examples."""
+    for b, _ in itertools.islice(enumerate(label_batch), max_examples):
+        for fig in plot(
+            inputs={k: v[b] for k, v in input_batch.items()},
+            label=label_batch[b],
+            pred=pred_batch[b],
+            st_var=st_var,
+            sto_var=sto_var,
+        ):
+            yield fig
