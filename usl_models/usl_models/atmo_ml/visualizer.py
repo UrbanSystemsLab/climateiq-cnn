@@ -1,9 +1,13 @@
+from typing import Iterator
+
+import itertools
 import matplotlib.figure
 import matplotlib.axes
 import matplotlib.pyplot as plt
 import seaborn as sbn
 import numpy as np
 import tensorflow as tf
+
 from usl_models.atmo_ml import vars
 
 
@@ -20,7 +24,7 @@ def plot_2d_timeseries(
     title: str = "2d Timeseries Plot",
     t_interval: float = 1.0,
     t_start: float = 0.0,
-    normalize: bool = False,  # Set to False to disable normalization
+    normalize: bool = False,
 ) -> matplotlib.figure.Figure:
     """Plot a timeseries of 2D maps without normalization if desired."""
     T, H, W, *_ = data.shape
@@ -55,7 +59,7 @@ def _plot_2d(
     vmax: float | None = None,
     title: str = "2d Plot",
     cbar_ax: matplotlib.axes.Axes | None = None,
-    normalize: bool = True,  # When False, plot raw data
+    normalize: bool = False,
 ) -> matplotlib.axes.Axes:
     H, W, *_ = data.shape
     if normalize:
@@ -86,7 +90,7 @@ def plot_spatial(
     data: np.ndarray,
     features: list[int],
     spatial_ticks: int = 5,
-    normalize: bool = True,
+    normalize: bool = False,
 ) -> matplotlib.figure.Figure:
     F = len(features)
     fig, axs = plt.subplots(1, F, figsize=(2 * (F + 1), 2), sharey=True)
@@ -112,85 +116,89 @@ def plot(
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
     spatial_features: list[int] | None = None,
     spatial_ticks: int = 6,
-    normalize: bool = True,  # Set normalize to False to plot raw data
-) -> list[matplotlib.figure.Figure]:
+    normalize: bool = False,  # Set normalize to False to plot raw data
+) -> Iterator[matplotlib.figure.Figure]:
     """Plots inputs, label, prediction, and difference maps for debugging."""
     sim_name = inputs["sim_name"].numpy().decode("utf-8")
     date = inputs["date"].numpy().decode("utf-8")
-    figs = []
     if spatial_features is not None:
         for i in range(len(spatial_features) // 5):
-            figs.append(
-                plot_spatial(
-                    inputs["spatial"],
-                    spatial_ticks=spatial_ticks,
-                    features=spatial_features[5 * i : 5 * (i + 1)],
-                    normalize=normalize,
-                )
+            yield plot_spatial(
+                inputs["spatial"],
+                spatial_ticks=spatial_ticks,
+                features=spatial_features[5 * i : 5 * (i + 1)],
+                normalize=normalize,
             )
 
     st_var_config = vars.ST_VAR_CONFIGS[st_var]
-    figs.append(
-        plot_2d_timeseries(
-            inputs["spatiotemporal"][:, :, :, st_var.value],
-            title=st_var.name + f" ({sim_name} {date})",
-            vmin=st_var_config.vmin,
-            vmax=st_var_config.vmax,
-            t_start=-1.0,
-            t_interval=1.0,
-            normalize=normalize,
-        )
+    yield plot_2d_timeseries(
+        inputs["spatiotemporal"][:, :, :, st_var.value],
+        title=st_var.name + f" ({sim_name} {date})",
+        vmin=st_var_config.vmin,
+        vmax=st_var_config.vmax,
+        t_start=-1.0,
+        t_interval=1.0,
+        normalize=normalize,
     )
     sto_var_config = vars.STO_VAR_CONFIGS[sto_var]
     if label is not None:
-        figs.append(
-            plot_2d_timeseries(
-                label[:, :, :, sto_var.value],
-                title=sto_var.name + f" [true] ({sim_name} {date})",
-                vmin=sto_var_config.norm_vmin,
-                vmax=sto_var_config.norm_vmax,
-                t_start=0.0,
-                t_interval=0.5,
-                normalize=normalize,
-            )
+        yield plot_2d_timeseries(
+            label[:, :, :, sto_var.value],
+            title=sto_var.name + f" [true] ({sim_name} {date})",
+            vmin=sto_var_config.norm_vmin,
+            vmax=sto_var_config.norm_vmax,
+            t_start=0.0,
+            t_interval=0.5,
+            normalize=normalize,
         )
+
     if pred is not None:
-        figs.append(
-            plot_2d_timeseries(
-                pred[:, :, :, sto_var.value],
-                title=sto_var.name + f" [pred] ({sim_name} {date})",
-                vmin=sto_var_config.norm_vmin,
-                vmax=sto_var_config.norm_vmax,
-                t_start=0.0,
-                t_interval=0.5,
-                normalize=normalize,
-            )
+        yield plot_2d_timeseries(
+            pred[:, :, :, sto_var.value],
+            title=sto_var.name + f" [pred] ({sim_name} {date})",
+            vmin=sto_var_config.norm_vmin,
+            vmax=sto_var_config.norm_vmax,
+            t_start=0.0,
+            t_interval=0.5,
+            normalize=normalize,
         )
+
     # Plot the difference between prediction and ground truth
     if label is not None and pred is not None:
         diff = pred[:, :, :, sto_var.value] - label[:, :, :, sto_var.value]
         # Use symmetric limits centered at zero for the difference
         diff_range = max(
-            (
-                abs(sto_var_config.norm_vmin)
-                if sto_var_config.norm_vmin is not None
-                else 0
-            ),
-            (
-                abs(sto_var_config.norm_vmax)
-                if sto_var_config.norm_vmax is not None
-                else 0
-            ),
+            abs(sto_var_config.norm_vmin),
+            abs(sto_var_config.norm_vmax),
         )
-        figs.append(
-            plot_2d_timeseries(
-                diff,
-                title=sto_var.name + f" [diff] ({sim_name} {date})",
-                vmin=-diff_range,
-                vmax=diff_range,
-                t_start=0.0,
-                t_interval=0.5,
-                normalize=normalize,
-            )
+        yield plot_2d_timeseries(
+            diff,
+            title=sto_var.name + f" [diff] ({sim_name} {date})",
+            vmin=-diff_range,
+            vmax=diff_range,
+            t_start=0.0,
+            t_interval=0.5,
+            normalize=normalize,
         )
-    return figs
+
+
+def plot_batch(
+    input_batch: tf.Tensor,
+    label_batch: tf.Tensor,
+    pred_batch: tf.Tensor,
+    st_var: vars.Spatiotemporal = vars.Spatiotemporal.RH,
+    sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
+    normalize: bool = False,
+    max_examples: int | None = None,
+) -> Iterator[matplotlib.figure.Figure]:
+    """Plot a batch of AtmoML Examples."""
+    for b, _ in itertools.islice(enumerate(label_batch), max_examples):
+        for fig in plot(
+            inputs={k: v[b] for k, v in input_batch.items()},
+            label=label_batch[b],
+            pred=pred_batch[b],
+            st_var=st_var,
+            sto_var=sto_var,
+            normalize=normalize,
+        ):
+            yield fig
