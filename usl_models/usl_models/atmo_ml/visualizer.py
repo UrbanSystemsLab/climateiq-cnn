@@ -168,16 +168,8 @@ def plot(
         diff = pred[:, :, :, sto_var.value] - label[:, :, :, sto_var.value]
         # Use symmetric limits centered at zero for the difference
         diff_range = max(
-            (
-                abs(sto_var_config.norm_vmin)
-                if sto_var_config.norm_vmin is not None
-                else 0
-            ),
-            (
-                abs(sto_var_config.norm_vmax)
-                if sto_var_config.norm_vmax is not None
-                else 0
-            ),
+            abs(sto_var_config.norm_vmin),
+            abs(sto_var_config.norm_vmax),
         )
         yield plot_2d_timeseries(
             diff,
