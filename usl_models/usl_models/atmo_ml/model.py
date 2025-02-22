@@ -62,7 +62,7 @@ class AtmoModel:
             lstm_kernel_size=5,
             lstm_dropout=0.2,
             lstm_recurrent_dropout=0.2,
-            output_timesteps=1,
+            output_timesteps=constants.OUTPUT_TIME_STEPS,
             conv1_stride=1,
             conv2_stride=1,
             lu_index_vocab_size=constants.LU_INDEX_VOCAB_SIZE,
