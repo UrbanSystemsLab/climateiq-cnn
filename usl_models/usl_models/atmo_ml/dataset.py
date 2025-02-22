@@ -14,7 +14,7 @@ import numpy as np
 from google.cloud import storage  # type: ignore
 from google.cloud.storage import transfer_manager  # type: ignore
 
-from usl_models.atmo_ml import constants, vars
+from usl_models.atmo_ml import constants, vars, model
 from usl_models.shared import downloader
 
 
@@ -107,14 +107,11 @@ def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
 
 def get_output_signature(
     config: Config,
-) -> tuple[dict[str, tf.TypeSpec], tf.TensorSpec]:
+) -> tuple[model.AtmoModel.InputSpec, tf.TensorSpec]:
+    params = model.AtmoModel.Params(output_timesteps=config.output_timesteps)
     return (
-        constants.get_input_spec(height=config.input_height, width=config.input_width),
-        constants.get_output_spec(
-            height=config.output_height,
-            width=config.output_width,
-            timesteps=config.output_timesteps,
-        ),
+        model.AtmoModel.get_input_spec(params),
+        model.AtmoModel.get_output_spec(params),
     )
 
 
@@ -291,7 +288,7 @@ def load_day(
         return None
 
     return (
-        dict(
+        model.AtmoModel.Input(
             spatiotemporal=spatiotemporal_data,
             spatial=spatial_data,
             lu_index=lu_index_data,
@@ -377,7 +374,7 @@ def load_day_cached(
     )
 
     return (
-        dict(
+        model.AtmoModel.Input(
             spatiotemporal=spatiotemporal,
             spatial=tf.convert_to_tensor(spatial, dtype=tf.float32),
             lu_index=tf.convert_to_tensor(lu_index, dtype=tf.int32),

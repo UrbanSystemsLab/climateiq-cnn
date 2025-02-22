@@ -1,5 +1,6 @@
 """AtmoML model definition."""
 
+import dataclasses
 import logging
 from typing import TypedDict, List, Callable, Mapping, Any, Literal
 
@@ -14,6 +15,8 @@ from usl_models.atmo_ml import vars
 
 
 class ConvParams(TypedDict):
+    """Conv layer parameters."""
+
     activation: Literal["relu", "sigmoid", "tanh", "softmax"]
     padding: Literal["valid", "same"]
 
@@ -21,70 +24,99 @@ class ConvParams(TypedDict):
 class AtmoModel:
     """Atmo model class."""
 
-    class Params(TypedDict):
-        """Model parameters dictionary."""
-
-        # General parameters.
-        batch_size: int
+    @keras.saving.register_keras_serializable()
+    @dataclasses.dataclass(kw_only=True)
+    class Params:
+        """Model parameters."""
 
         # Layer-specific parameters.
-        lstm_units: int
-        lstm_kernel_size: int
-        lstm_dropout: float
-        lstm_recurrent_dropout: float
+        lstm_units: int = 64
+        lstm_kernel_size: int = 5
+        lstm_dropout: float = 0.2
+        lstm_recurrent_dropout: float = 0.2
 
         # The optimizer configuration.
-        # We use the dictionary definition to ensure the model is serializable.
-        # This value is passed to keras.optimizers.get to build the optimizer object.
-        optimizer_config: Mapping[str, Any]
-
-        output_timesteps: int
-        conv1_stride: int
-        conv2_stride: int
-
-        lu_index_vocab_size: int
-        lu_index_embedding_dim: int
-        spatial_features: int
-        spatiotemporal_features: int
-        spatial_filters: int
-        spatiotemporal_filters: int
-
-    @classmethod
-    def default_params(cls) -> Params:
-        """Returns the default params for the model."""
-        return cls.Params(
-            optimizer_config={
-                "class_name": "Adam",
-                "config": {"learning_rate": 1e-3},
-            },
-            batch_size=4,
-            lstm_units=512,
-            lstm_kernel_size=5,
-            lstm_dropout=0.2,
-            lstm_recurrent_dropout=0.2,
-            output_timesteps=1,
-            conv1_stride=1,
-            conv2_stride=1,
-            lu_index_vocab_size=constants.LU_INDEX_VOCAB_SIZE,
-            lu_index_embedding_dim=constants.EMBEDDING_DIM,
-            spatial_features=constants.NUM_SAPTIAL_FEATURES,
-            spatiotemporal_features=constants.NUM_SPATIOTEMPORAL_FEATURES,
-            spatial_filters=128,
-            spatiotemporal_filters=64,
+        optimizer: keras.optimizers.Optimizer | None = keras.optimizers.Adam(
+            learning_rate=1e-3
         )
 
+        output_timesteps: int = 2
+        conv1_stride: int = 1
+        conv2_stride: int = 1
+
+        lu_index_vocab_size: int = constants.LU_INDEX_VOCAB_SIZE
+        lu_index_embedding_dim: int = constants.EMBEDDING_DIM
+        spatial_features: int = constants.NUM_SAPTIAL_FEATURES
+        spatiotemporal_features: int = constants.NUM_SPATIOTEMPORAL_FEATURES
+        spatial_filters: int = 128
+        spatiotemporal_filters: int = 64
+
+        def get_config(self) -> dict:
+            optimizer_config = keras.optimizers.serialize(self.optimizer)
+            self.optimizer = None
+            config = dataclasses.asdict(self)
+            config["optimizer"] = optimizer_config
+            return config
+
+        @classmethod
+        def from_config(cls, config: dict) -> "AtmoModel.Params":
+            optimizer = keras.optimizers.get(config["optimizer"])
+            return cls.__init__(optimizer=optimizer, **config)
+
     class Input(TypedDict):
-        """Input tensors dictionary."""
+        """Input tensors."""
 
         spatial: tf.Tensor
         spatiotemporal: tf.Tensor
         lu_index: tf.Tensor
+        sim_name: str
+        date: str
 
-    class Result(TypedDict):
-        """Prediction result dictionary."""
+    class InputSpec(TypedDict):
 
-        prediction: tf.Tensor
-        chunk_id: str | tf.Tensor
+        spatial: tf.TensorSpec
+        spatiotemporal: tf.TensorSpec
+        lu_index: tf.TensorSpec
+        sim_name: tf.TensorSpec
+        date: tf.TensorSpec
+
+    @classmethod
+    def get_input_spec(cls, params: Params) -> InputSpec:
+        T, H, W = None, None, None
+        return cls.InputSpec(
+            spatiotemporal=tf.TensorSpec(
+                shape=(T, H, W, params.spatiotemporal_features),
+                dtype=tf.float32,
+            ),
+            spatial=tf.TensorSpec(
+                shape=(H, W, params.spatial_features),
+                dtype=tf.float32,
+            ),
+            lu_index=tf.TensorSpec(
+                shape=(H, W),
+                dtype=tf.int32,
+            ),
+            sim_name=tf.TensorSpec(shape=(), dtype=tf.string),
+            date=tf.TensorSpec(shape=(), dtype=tf.string),
+        )
+
+    @classmethod
+    def get_input_shape_batched(cls, params: Params) -> dict[str, tf.TypeSpec]:
+        spec = cls.get_input_spec(params)
+        return {k: (None, *v.shape) for k, v in spec.items()}
+
+    @classmethod
+    def get_output_spec(cls, params: Params) -> tf.TensorSpec:
+        H, W = None, None
+        return tf.TensorSpec(
+            shape=(
+                params.output_timesteps,
+                H,
+                W,
+                constants.OUTPUT_CHANNELS,
+            ),
+            dtype=tf.float32,
+        )
 
     def __init__(
         self,
@@ -103,7 +135,7 @@ class AtmoModel:
             feature.
             embedding_dim: Size of the embedding vectors for lu_index.
         """
-        self._model_params = params or self.default_params()
+        self._params = params or self.Params()
         self._model = self._build_model()
 
     @classmethod
@@ -129,9 +161,9 @@ class AtmoModel:
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
-        model = AtmoConvLSTM(self._model_params)
+        model = AtmoConvLSTM(self._params)
         model.compile(
-            optimizer=keras.optimizers.get(self._model_params["optimizer_config"]),
+            optimizer=self._params.optimizer,
             loss=keras.losses.MeanSquaredError(),
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
@@ -153,7 +185,7 @@ class AtmoModel:
                 ),
             ],
         )
-        model.build(constants.get_input_shape_batched(height=None, width=None))
+        model.build(self.get_input_shape_batched(self._params))
         return model
 
     def summary(self, expand_nested: bool = False):
@@ -271,17 +303,17 @@ class AtmoConvLSTM(keras.Model):
 
         # Model definition
         T, H, W = None, None, None
-        K_SIZE = self._params["lstm_kernel_size"]  # Conv kernel size
+        K_SIZE = self._params.lstm_kernel_size  # Conv kernel size
         C1_STRIDE, C2_STRIDE = (
-            self._params["conv1_stride"],
-            self._params["conv2_stride"],
+            self._params.conv1_stride,
+            self._params.conv2_stride,
         )
-        F_S = self._params["spatial_features"]
-        F_ST = self._params["spatiotemporal_features"]
-        LUI_VOCAB = self._params["lu_index_vocab_size"]
-        LUI_DIM = self._params["lu_index_embedding_dim"]
-        S_FILTERS = self._params["spatial_filters"]
-        ST_FILTERS = self._params["spatiotemporal_filters"]
+        F_S = self._params.spatial_features
+        F_ST = self._params.spatiotemporal_features
+        LUI_VOCAB = self._params.lu_index_vocab_size
+        LUI_DIM = self._params.lu_index_embedding_dim
+        S_FILTERS = self._params.spatial_filters
+        ST_FILTERS = self._params.spatiotemporal_filters
 
         # Define Embedding Layer for lu_index
         self.lu_index_embedding = keras.Sequential(
@@ -341,7 +373,7 @@ class AtmoConvLSTM(keras.Model):
         # due to stacking two boundary condition pairs.
         LSTM_C = 2 * (S_FILTERS + ST_FILTERS)  # LSTM channels
         LSTM_H, LSTM_W = None, None  # LSTM height and width
-        LSTM_FILTERS = self._params["lstm_units"]  # LSTM Filters
+        LSTM_FILTERS = self._params.lstm_units  # LSTM Filters
         self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
@@ -353,8 +385,8 @@ class AtmoConvLSTM(keras.Model):
                     strides=1,
                     padding="same",
                     activation="tanh",
-                    dropout=self._params["lstm_dropout"],
-                    recurrent_dropout=self._params["lstm_recurrent_dropout"],
+                    dropout=self._params.lstm_dropout,
+                    recurrent_dropout=self._params.lstm_recurrent_dropout,
                 ),
             ],
             name="conv_lstm",
@@ -453,22 +485,20 @@ class AtmoConvLSTM(keras.Model):
         """Makes a forward pass of the model.
 
         Args:
-            inputs: A dictionary of input tensors, with the following key/value pairs:
-                "spatial": rank-4 tensor
-                "spatiotemporal": rank-5 tensor
+            inputs: AtmoModel input tensors. See `AtmoModel.Input`.
 
         Returns:
             A rank-5 tensor of all output predictions.
         """
-        spatial_input = inputs["spatial"]  # (B, H, W, C)
+        spatial_input = inputs["spatial"]
         st_input = inputs["spatiotemporal"]
-        lu_index_input = inputs["lu_index"]  # lu_index is passed separately
+        lu_index_input = inputs["lu_index"]
 
         B, T, H, W, *_ = st_input.shape
-        C = constants.NUM_SAPTIAL_FEATURES
-        STF = constants.NUM_SPATIOTEMPORAL_FEATURES
+        C = self._params.spatial_features
+        STF = self._params.spatiotemporal_features
         T = constants.INPUT_TIME_STEPS
-        T_O = self._params["output_timesteps"]
+        T_O = self._params.output_timesteps
 
         tf.ensure_shape(spatial_input, (B, H, W, C))
         tf.ensure_shape(st_input, (B, T, H, W, STF))
@@ -505,3 +535,10 @@ class AtmoConvLSTM(keras.Model):
             outputs.append(self._wdir10_output_cnn(trconv_input))
 
         return tf.concat(outputs, axis=-1)
+
+    def get_config(self) -> dict:
+        return self._params.get_config()
+
+    @classmethod
+    def from_config(cls, config: dict) -> "AtmoConvLSTM":
+        return cls.__init__(params=AtmoModel.Params.from_config(config))
