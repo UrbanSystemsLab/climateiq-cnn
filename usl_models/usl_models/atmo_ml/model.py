@@ -40,7 +40,7 @@ class AtmoModel:
             learning_rate=1e-3
         )
 
-        output_timesteps: int = 2
+        output_timesteps: int = constants.OUTPUT_TIME_STEPS
         conv1_stride: int = 1
         conv2_stride: int = 1
 
