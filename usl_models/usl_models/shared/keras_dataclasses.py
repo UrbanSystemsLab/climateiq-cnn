@@ -11,7 +11,20 @@ class DataclassInstance(Protocol):
     __dataclass_fields__: ClassVar[dict[str, dataclasses.Field[Any]]]
 
 
-class KerasDataclass(DataclassInstance):
+class Base(DataclassInstance):
+    """Base Keras Dataclass.
+
+    Usage:
+    ```
+    import keras_dataclasses
+
+    @keras_dataclasses.dataclass()
+    class Params(keras_dataclasses.Base):
+      field1: int
+      field2: float
+    ```
+    """
+
     def get_config(self) -> dict[str, Any]:
         """Get config for keras serialization."""
         # Make a shallow copy so we can replace fields without
@@ -52,7 +65,7 @@ class KerasDataclass(DataclassInstance):
         return cls(**config_copy)
 
 
-T = TypeVar("T")
+T = TypeVar("T", bound=Base)
 
 
 @dataclass_transform(field_specifiers=(dataclasses.Field,))

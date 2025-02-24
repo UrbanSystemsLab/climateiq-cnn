@@ -26,7 +26,7 @@ class AtmoModel:
     """Atmo model class."""
 
     @keras_dataclasses.dataclass(kw_only=True)
-    class Params(keras_dataclasses.KerasDataclass):
+    class Params(keras_dataclasses.Base):
         """Model parameters."""
 
         # Layer-specific parameters.
