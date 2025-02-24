@@ -11,6 +11,7 @@ from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import metrics
 from usl_models.atmo_ml import vars
+
 from usl_models.shared import keras_dataclasses
 
 
@@ -25,7 +26,7 @@ class AtmoModel:
     """Atmo model class."""
 
     @keras_dataclasses.dataclass(kw_only=True)
-    class Params:
+    class Params(keras_dataclasses.KerasDataclass):
         """Model parameters."""
 
         # Layer-specific parameters.
@@ -93,7 +94,7 @@ class AtmoModel:
     def get_input_shape_batched(cls, params: Params) -> dict[str, tf.TypeSpec]:
         """Returns the batched input shape."""
         spec = cls.get_input_spec(params)
-        return {k: (None, *v.shape) for k, v in spec.items()}
+        return {k: (None, *v.shape) for k, v in spec.items()}  # type: ignore
 
     @classmethod
     def get_output_spec(cls, params: Params) -> tf.TensorSpec:
@@ -534,4 +535,4 @@ class AtmoConvLSTM(keras.Model):
     @classmethod
     def from_config(cls, config: dict) -> "AtmoConvLSTM":
         """Keras deserialization."""
-        return cls.__init__(params=AtmoModel.Params.from_config(config))
+        return cls(params=AtmoModel.Params.from_config(config))

@@ -129,7 +129,7 @@ def load_dataset_cached(
     if shuffle:
         random.shuffle(example_keys)
 
-    def generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
+    def generator() -> Iterable[tuple[model.AtmoModel.Input, tf.Tensor]]:
         missing_days: int = 0
         generated_count: int = 0
         if example_keys is None:
@@ -216,7 +216,7 @@ def load_dataset(
         hash_range,
     )
 
-    def generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
+    def generator() -> Iterable[tuple[model.AtmoModel.Input, tf.Tensor]]:
         missing_days: int = 0
         generated_count: int = 0
 
@@ -257,7 +257,7 @@ def load_day(
     feature_bucket: storage.Bucket,
     label_bucket: storage.Bucket,
     config: Config,
-) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
+) -> tuple[model.AtmoModel.Input, tf.Tensor] | None:
     """Loads a single example from (sim_name, date)."""
     logging.info("load_day('%s', '%s')" % (sim_name, date.strftime(DATE_FORMAT)))
     start_filename = date.strftime(FEATURE_FILENAME_FORMAT)
@@ -350,7 +350,7 @@ def load_day_label(
 @functools.lru_cache(maxsize=128)
 def load_day_cached(
     filecache_dir: pathlib.Path, sim_name: str, date: datetime, config: Config
-) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
+) -> tuple[model.AtmoModel.Input, tf.Tensor] | None:
     spatiotemporal = load_day_spatiotemporal_cached(
         filecache_dir / sim_name / "spatiotemporal", date, config
     )
