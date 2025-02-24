@@ -13,14 +13,18 @@ def get_config(self) -> dict[str, Any]:
     # the mutating original.
     self_copy = copy.copy(self)
 
+    serialized_configs = {}
     # Update fields that need keras specific serialization.
     for f in dataclasses.fields(self):
         if issubclass(f.type, keras.optimizers.Optimizer):
             serialized = keras.optimizers.serialize(getattr(self, f.name))
-            setattr(self_copy, f.name, serialized)
+            setattr(self_copy, f.name, None)
+            serialized_configs[f.name] = serialized
 
     # Run standard dataclass asdict.
-    return dataclasses.asdict(self_copy)
+    config = dataclasses.asdict(self_copy)
+    config.update(serialized_configs)
+    return config
 
 
 def from_config(cls, config: dict[str, Any]) -> Any:
@@ -32,7 +36,8 @@ def from_config(cls, config: dict[str, Any]) -> Any:
     # Update fields that need keras specific deserialization.
     for f in dataclasses.fields(cls):
         if issubclass(f.type, keras.optimizers.Optimizer):
-            config_copy[f.name] = keras.optimizers.deserialize(config[f.name])
+            deserialized = keras.optimizers.get(config[f.name])
+            config_copy[f.name] = deserialized
 
     # Run standard constructor.
     return cls(**config_copy)

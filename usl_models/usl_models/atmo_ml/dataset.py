@@ -35,11 +35,11 @@ ExampleKey = tuple[str, str]
 
 @dataclasses.dataclass(kw_only=True, frozen=True)
 class Config:
-    input_width: int = 200
-    input_height: int = 200
-    output_width: int = 200
-    output_height: int = 200
-    output_timesteps: int = 1
+    input_width: int = constants.MAP_WIDTH
+    input_height: int = constants.MAP_HEIGHT
+    output_width: int = constants.MAP_WIDTH
+    output_height: int = constants.MAP_HEIGHT
+    output_timesteps: int = constants.OUTPUT_TIME_STEPS
 
 
 def get_date(filename: str) -> str:

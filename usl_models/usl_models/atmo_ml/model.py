@@ -35,7 +35,7 @@ class AtmoModel:
         lstm_recurrent_dropout: float = 0.2
 
         # The optimizer configuration.
-        optimizer: keras.optimizers.Optimizer | None = keras.optimizers.Adam(
+        optimizer: keras.optimizers.Optimizer = keras.optimizers.Adam(
             learning_rate=1e-3
         )
 
