@@ -18,20 +18,14 @@ _LU_INDEX_VOCAB_SIZE = 61
 
 def pytest_model_params() -> atmo_model.AtmoModel.Params:
     """Defines AtmoModel.Params for testing."""
-    params = atmo_model.AtmoModel.default_params()
-    params.update(
-        {
-            "batch_size": 4,
-            "lstm_units": 32,
-            "lstm_kernel_size": 3,
-            # Use faster optimizer setting for early stopping.
-            "optimizer_config": keras.optimizers.Adam(
-                learning_rate=1e-3,
-                global_clipnorm=0.1,
-            ),
-        }
+    return atmo_model.AtmoModel.Params(
+        output_timesteps=2,
+        lstm_units=32,
+        lstm_kernel_size=3,
+        optimizer=keras.optimizers.Adam(
+            learning_rate=1e-3,
+        ),
     )
-    return params
 
 
 def fake_input_batch(
@@ -68,11 +62,13 @@ def fake_input_batch(
         maxval=_LU_INDEX_VOCAB_SIZE,
         dtype=tf.int32,
     )
-    return {
-        "spatial": spatial,
-        "spatiotemporal": spatiotemporal,
-        "lu_index": lu_index,
-    }
+    return atmo_model.AtmoModel.Input(
+        spatial=spatial,
+        spatiotemporal=spatiotemporal,
+        lu_index=lu_index,
+        sim_name=tf.constant(["test"] * batch_size),
+        date=tf.constant(["test"] * batch_size),
+    )
 
 
 def test_atmo_convlstm():
@@ -87,7 +83,7 @@ def test_atmo_convlstm():
 
     expected_output_shape = (
         batch_size,
-        params["output_timesteps"],
+        params.output_timesteps,
         _TEST_MAP_HEIGHT,
         _TEST_MAP_WIDTH,
         constants.OUTPUT_CHANNELS,  # T2, RH2, WSPD10, WDIR10_SIN, WDIR10_COS

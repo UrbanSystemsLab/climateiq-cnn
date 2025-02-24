@@ -14,7 +14,7 @@ H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
 F_S = constants.NUM_SAPTIAL_FEATURES
 F_ST = constants.NUM_SPATIOTEMPORAL_FEATURES
 C = constants.OUTPUT_CHANNELS
-T_I, T_O = constants.INPUT_TIME_STEPS, 1
+T_I, T_O = constants.INPUT_TIME_STEPS, 2
 
 
 class TestAtmoMLDataset(usl_models.testing.TestCase):

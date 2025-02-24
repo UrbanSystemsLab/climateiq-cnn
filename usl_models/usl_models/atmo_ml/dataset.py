@@ -14,7 +14,7 @@ import numpy as np
 from google.cloud import storage  # type: ignore
 from google.cloud.storage import transfer_manager  # type: ignore
 
-from usl_models.atmo_ml import constants, vars
+from usl_models.atmo_ml import constants, vars, model
 from usl_models.shared import downloader
 
 
@@ -35,11 +35,11 @@ ExampleKey = tuple[str, str]
 
 @dataclasses.dataclass(kw_only=True, frozen=True)
 class Config:
-    input_width: int = 200
-    input_height: int = 200
-    output_width: int = 200
-    output_height: int = 200
-    output_timesteps: int = 1
+    input_width: int = constants.MAP_WIDTH
+    input_height: int = constants.MAP_HEIGHT
+    output_width: int = constants.MAP_WIDTH
+    output_height: int = constants.MAP_HEIGHT
+    output_timesteps: int = constants.OUTPUT_TIME_STEPS
 
 
 def get_date(filename: str) -> str:
@@ -107,14 +107,11 @@ def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
 
 def get_output_signature(
     config: Config,
-) -> tuple[dict[str, tf.TypeSpec], tf.TensorSpec]:
+) -> tuple[model.AtmoModel.InputSpec, tf.TensorSpec]:
+    params = model.AtmoModel.Params(output_timesteps=config.output_timesteps)
     return (
-        constants.get_input_spec(height=config.input_height, width=config.input_width),
-        constants.get_output_spec(
-            height=config.output_height,
-            width=config.output_width,
-            timesteps=config.output_timesteps,
-        ),
+        model.AtmoModel.get_input_spec(params),
+        model.AtmoModel.get_output_spec(params),
     )
 
 
@@ -132,7 +129,7 @@ def load_dataset_cached(
     if shuffle:
         random.shuffle(example_keys)
 
-    def generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
+    def generator() -> Iterable[tuple[model.AtmoModel.Input, tf.Tensor]]:
         missing_days: int = 0
         generated_count: int = 0
         if example_keys is None:
@@ -219,7 +216,7 @@ def load_dataset(
         hash_range,
     )
 
-    def generator() -> Iterable[tuple[dict[str, tf.Tensor], tf.Tensor]]:
+    def generator() -> Iterable[tuple[model.AtmoModel.Input, tf.Tensor]]:
         missing_days: int = 0
         generated_count: int = 0
 
@@ -260,7 +257,7 @@ def load_day(
     feature_bucket: storage.Bucket,
     label_bucket: storage.Bucket,
     config: Config,
-) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
+) -> tuple[model.AtmoModel.Input, tf.Tensor] | None:
     """Loads a single example from (sim_name, date)."""
     logging.info("load_day('%s', '%s')" % (sim_name, date.strftime(DATE_FORMAT)))
     start_filename = date.strftime(FEATURE_FILENAME_FORMAT)
@@ -291,7 +288,7 @@ def load_day(
         return None
 
     return (
-        dict(
+        model.AtmoModel.Input(
             spatiotemporal=spatiotemporal_data,
             spatial=spatial_data,
             lu_index=lu_index_data,
@@ -353,7 +350,7 @@ def load_day_label(
 @functools.lru_cache(maxsize=128)
 def load_day_cached(
     filecache_dir: pathlib.Path, sim_name: str, date: datetime, config: Config
-) -> tuple[dict[str, tf.Tensor], tf.Tensor] | None:
+) -> tuple[model.AtmoModel.Input, tf.Tensor] | None:
     spatiotemporal = load_day_spatiotemporal_cached(
         filecache_dir / sim_name / "spatiotemporal", date, config
     )
@@ -377,7 +374,7 @@ def load_day_cached(
     )
 
     return (
-        dict(
+        model.AtmoModel.Input(
             spatiotemporal=spatiotemporal,
             spatial=tf.convert_to_tensor(spatial, dtype=tf.float32),
             lu_index=tf.convert_to_tensor(lu_index, dtype=tf.int32),
