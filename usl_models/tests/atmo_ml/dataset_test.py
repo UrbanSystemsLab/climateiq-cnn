@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 
 import numpy as np
-import tensorflow as tf
 
 import usl_models.testing
 from usl_models.testing import MockBlob, MockStorageClient, MockBucket

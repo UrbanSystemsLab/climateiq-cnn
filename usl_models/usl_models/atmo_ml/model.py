@@ -1,8 +1,7 @@
 """AtmoML model definition."""
 
-import dataclasses
 import logging
-from typing import TypedDict, List, Callable, Mapping, Any, Literal
+from typing import TypedDict, List, Callable, Literal
 
 import keras
 from keras import layers
@@ -12,6 +11,7 @@ from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import metrics
 from usl_models.atmo_ml import vars
+from usl_models.shared import keras_dataclasses
 
 
 class ConvParams(TypedDict):
@@ -24,8 +24,7 @@ class ConvParams(TypedDict):
 class AtmoModel:
     """Atmo model class."""
 
-    @keras.saving.register_keras_serializable()
-    @dataclasses.dataclass(kw_only=True)
+    @keras_dataclasses.dataclass(kw_only=True)
     class Params:
         """Model parameters."""
 
@@ -51,18 +50,6 @@ class AtmoModel:
         spatial_filters: int = 128
         spatiotemporal_filters: int = 64
 
-        def get_config(self) -> dict:
-            optimizer_config = keras.optimizers.serialize(self.optimizer)
-            self.optimizer = None
-            config = dataclasses.asdict(self)
-            config["optimizer"] = optimizer_config
-            return config
-
-        @classmethod
-        def from_config(cls, config: dict) -> "AtmoModel.Params":
-            optimizer = keras.optimizers.get(config["optimizer"])
-            return cls.__init__(optimizer=optimizer, **config)
-
     class Input(TypedDict):
         """Input tensors."""
 
@@ -73,6 +60,7 @@ class AtmoModel:
         date: str
 
     class InputSpec(TypedDict):
+        """TensorSpec for Input."""
 
         spatial: tf.TensorSpec
         spatiotemporal: tf.TensorSpec
@@ -82,6 +70,7 @@ class AtmoModel:
 
     @classmethod
     def get_input_spec(cls, params: Params) -> InputSpec:
+        """Input spec for given params."""
         T, H, W = None, None, None
         return cls.InputSpec(
             spatiotemporal=tf.TensorSpec(
@@ -102,11 +91,13 @@ class AtmoModel:
 
     @classmethod
     def get_input_shape_batched(cls, params: Params) -> dict[str, tf.TypeSpec]:
+        """Returns the batched input shape."""
         spec = cls.get_input_spec(params)
         return {k: (None, *v.shape) for k, v in spec.items()}
 
     @classmethod
     def get_output_spec(cls, params: Params) -> tf.TensorSpec:
+        """Returns the output shape for the given params."""
         H, W = None, None
         return tf.TensorSpec(
             shape=(
@@ -537,8 +528,10 @@ class AtmoConvLSTM(keras.Model):
         return tf.concat(outputs, axis=-1)
 
     def get_config(self) -> dict:
+        """Keras serialization."""
         return self._params.get_config()
 
     @classmethod
     def from_config(cls, config: dict) -> "AtmoConvLSTM":
+        """Keras deserialization."""
         return cls.__init__(params=AtmoModel.Params.from_config(config))
