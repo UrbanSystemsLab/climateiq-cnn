@@ -122,7 +122,16 @@ class AtmoModel:
             The loaded AtmoModel.
         """
         model = cls(**kwargs)
-        loaded_model = keras.models.load_model(artifact_uri)
+        NRMSE = metrics.NormalizedRootMeanSquaredError
+        loaded_model = keras.models.load_model(
+            artifact_uri,
+            custom_objects={
+                "NormalizedRootMeanSquaredError": NRMSE,
+                "SSIMMetric": metrics.SSIMMetric,
+                "PSNRMetric": metrics.PSNRMetric,
+                "OutputVarMeanSquaredError": metrics.OutputVarMeanSquaredError,
+            },
+        )
         assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
         model._model.set_weights(loaded_model.get_weights())
         return model
@@ -130,9 +139,17 @@ class AtmoModel:
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
         model = AtmoConvLSTM(self._model_params)
+        # Use an exponential decay schedule for a smoother learning rate reduction.
+        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=1e-3,
+            decay_steps=1000,
+            decay_rate=0.9,
+            staircase=True,
+        )
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
         model.compile(
-            optimizer=keras.optimizers.get(self._model_params["optimizer_config"]),
-            loss=keras.losses.MeanSquaredError(),
+            optimizer=optimizer,
+            loss=tf.keras.losses.MeanSquaredError(),
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),
