@@ -153,7 +153,7 @@ class AtmoModel:
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
-         # Use an exponential decay schedule for a smoother learning rate reduction.
+        # Use an exponential decay schedule for a smoother learning rate reduction.
         lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
             initial_learning_rate=1e-3,
             decay_steps=1000,
