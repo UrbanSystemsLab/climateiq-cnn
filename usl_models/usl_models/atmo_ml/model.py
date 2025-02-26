@@ -153,9 +153,17 @@ class AtmoModel:
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
+         # Use an exponential decay schedule for a smoother learning rate reduction.
+        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=1e-3,
+            decay_steps=1000,
+            decay_rate=0.9,
+            staircase=True,
+        )
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
         model = AtmoConvLSTM(self._params)
         model.compile(
-            optimizer=self._params.optimizer,
+            optimizer=optimizer,
             loss=keras.losses.MeanSquaredError(),
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
