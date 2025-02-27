@@ -35,6 +35,12 @@ class AtmoModel:
         lstm_dropout: float = 0.2
         lstm_recurrent_dropout: float = 0.2
 
+        # Learning rate schedule parameters.
+        initial_learning_rate: float = 1e-3
+        decay_steps: int = 1000
+        decay_rate: float = 0.9
+        staircase: bool = True
+
         # The optimizer configuration.
         optimizer: keras.optimizers.Optimizer = keras.optimizers.Adam(
             learning_rate=1e-3
@@ -154,11 +160,12 @@ class AtmoModel:
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
         # Use an exponential decay schedule for a smoother learning rate reduction.
+        # Create a learning rate schedule based on the parameters.
         lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=1e-3,
-            decay_steps=1000,
-            decay_rate=0.9,
-            staircase=True,
+            initial_learning_rate=self._params.initial_learning_rate,
+            decay_steps=self._params.decay_steps,
+            decay_rate=self._params.decay_rate,
+            staircase=self._params.staircase,
         )
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
         model = AtmoConvLSTM(self._params)
