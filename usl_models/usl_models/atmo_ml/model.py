@@ -29,7 +29,10 @@ class AtmoModel:
     class Params(keras_dataclasses.Base):
         """Model parameters."""
 
-        # Layer-specific parameters.
+        # Input CNN params
+        input_cnn_kernel_size: int = 5
+
+        # LSTM parameters.
         lstm_units: int = 64
         lstm_kernel_size: int = 5
         lstm_dropout: float = 0.2
@@ -295,7 +298,7 @@ class AtmoConvLSTM(keras.Model):
 
         # Model definition
         T, H, W = None, None, None
-        K_SIZE = self._params.lstm_kernel_size  # Conv kernel size
+        K_SIZE = self._params.input_cnn_kernel_size
         C1_STRIDE, C2_STRIDE = (
             self._params.conv1_stride,
             self._params.conv2_stride,
@@ -372,7 +375,7 @@ class AtmoConvLSTM(keras.Model):
                 layers.InputLayer((T, LSTM_H, LSTM_W, LSTM_C)),
                 layers.ConvLSTM2D(
                     LSTM_FILTERS,
-                    K_SIZE,
+                    self._params.lstm_kernel_size,
                     return_sequences=True,
                     strides=1,
                     padding="same",
