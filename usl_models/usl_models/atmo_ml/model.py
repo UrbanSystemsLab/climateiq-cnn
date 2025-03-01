@@ -115,9 +115,7 @@ class AtmoModel:
             dtype=tf.float32,
         )
 
-    def __init__(
-        self, params: Params | None = None, model: "AtmoConvLSTM" | None = None
-    ):
+    def __init__(self, params: Params | None = None, model: keras.Model | None = None):
         """Creates the Atmo model.
 
         Args:
@@ -125,7 +123,7 @@ class AtmoModel:
             model: If you already have a keras.Model constructed, pass it here.
         """
         if model is not None:
-            self._params = model._params
+            self._params = model._params  # type: ignore
             self._model = model
         else:
             self._params = params or self.Params()
