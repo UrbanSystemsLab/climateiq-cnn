@@ -18,7 +18,7 @@ setup(
         # firestore is not present in the image, but we match the cloud-storage version.
         "google-cloud-firestore==2.15.0",
         "seaborn==0.13.2",
-        "keras-tuner[bayesian]=2.32.3",
+        "keras-tuner[bayesian]=1.4.7",
     ],
     extras_require={
         "dev": [
