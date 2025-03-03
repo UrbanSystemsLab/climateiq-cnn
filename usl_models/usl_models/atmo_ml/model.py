@@ -1,10 +1,12 @@
 """AtmoML model definition."""
 
 import logging
+import dataclasses
 from typing import TypedDict, List, Callable, Literal
 
 import keras
 from keras import layers
+import keras_tuner
 import tensorflow as tf
 
 from usl_models.atmo_ml import data_utils
@@ -29,15 +31,18 @@ class AtmoModel:
     class Params(keras_dataclasses.Base):
         """Model parameters."""
 
-        # Layer-specific parameters.
+        # Input CNN params
+        input_cnn_kernel_size: int = 5
+
+        # LSTM parameters.
         lstm_units: int = 64
         lstm_kernel_size: int = 5
         lstm_dropout: float = 0.2
         lstm_recurrent_dropout: float = 0.2
 
         # The optimizer configuration.
-        optimizer: keras.optimizers.Optimizer = keras.optimizers.Adam(
-            learning_rate=1e-3
+        optimizer: keras.optimizers.Optimizer = dataclasses.field(
+            default_factory=lambda: keras.optimizers.Adam(learning_rate=1e-3)
         )
 
         output_timesteps: int = constants.OUTPUT_TIME_STEPS
@@ -110,25 +115,19 @@ class AtmoModel:
             dtype=tf.float32,
         )
 
-    def __init__(
-        self,
-        params: Params | None = None,
-    ):
+    def __init__(self, params: Params | None = None, model: keras.Model | None = None):
         """Creates the Atmo model.
 
         Args:
-            params: A dictionary of configurable model parameters.
-            spatial_dims: Tuple of spatial height and width input dimensions.
-                Needed for defining input shapes. This is an optional arg that
-                can be changed (primarily for testing/debugging).
-            num_spatial_features: nb of spt features
-            num_spatiotemporal_features: nb of spatiotemp feat.
-            lu_index_vocab_size: Number of unique values in the lu_index
-            feature.
-            embedding_dim: Size of the embedding vectors for lu_index.
+            params: Model parameters
+            model: If you already have a keras.Model constructed, pass it here.
         """
-        self._params = params or self.Params()
-        self._model = self._build_model()
+        if model is not None:
+            self._params = model._params  # type: ignore
+            self._model = model
+        else:
+            self._params = params or self.Params()
+            self._model = self._build_model()
 
     @classmethod
     def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "AtmoModel":
@@ -150,6 +149,16 @@ class AtmoModel:
         assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
         model._model.set_weights(loaded_model.get_weights())
         return model
+
+    @classmethod
+    def get_hypermodel(cls, **kwargs) -> keras_tuner.HyperModel:
+        """Returns a hypermodel with the given param overrides."""
+
+        def hypermodel(hp: keras_tuner.HyperParameters):
+            hp_kwargs = {k: hp.Choice(k, v) for k, v in kwargs.items()}
+            return cls(cls.Params(**hp_kwargs))._model
+
+        return hypermodel
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
@@ -295,7 +304,7 @@ class AtmoConvLSTM(keras.Model):
 
         # Model definition
         T, H, W = None, None, None
-        K_SIZE = self._params.lstm_kernel_size  # Conv kernel size
+        K_SIZE = self._params.input_cnn_kernel_size
         C1_STRIDE, C2_STRIDE = (
             self._params.conv1_stride,
             self._params.conv2_stride,
@@ -372,7 +381,7 @@ class AtmoConvLSTM(keras.Model):
                 layers.InputLayer((T, LSTM_H, LSTM_W, LSTM_C)),
                 layers.ConvLSTM2D(
                     LSTM_FILTERS,
-                    K_SIZE,
+                    self._params.lstm_kernel_size,
                     return_sequences=True,
                     strides=1,
                     padding="same",
