@@ -56,6 +56,12 @@ class AtmoModel:
         spatial_filters: int = 128
         spatiotemporal_filters: int = 64
 
+        # New activation parameters for each block.
+        spatial_activation: Literal["relu", "tanh", "sigmoid"] = "relu"
+        st_activation: Literal["relu", "tanh", "sigmoid"] = "relu"
+        lstm_activation: Literal["tanh", "relu", "sigmoid"] = "tanh"
+        output_activation: Literal["relu", "linear"] = "relu"
+
     class Input(TypedDict):
         """Input tensors."""
 
