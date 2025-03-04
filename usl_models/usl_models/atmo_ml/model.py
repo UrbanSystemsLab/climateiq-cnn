@@ -55,7 +55,7 @@ class AtmoModel:
         spatiotemporal_features: int = constants.NUM_SPATIOTEMPORAL_FEATURES
         spatial_filters: int = 128
         spatiotemporal_filters: int = 64
-        
+
         # New activation parameters for each block.
         spatial_activation: Literal["relu", "tanh", "sigmoid"] = "relu"
         st_activation: Literal["relu", "tanh", "sigmoid"] = "relu"
@@ -331,7 +331,9 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Spatial CNN
-        spatial_cnn_params = ConvParams(padding="same", activation= self._params.spatial_activation)
+        spatial_cnn_params = ConvParams(
+            padding="same", activation=self._params.spatial_activation
+        )
         self._spatial_cnn = keras.Sequential(
             [
                 layers.InputLayer((H, W, F_S + LUI_DIM)),
@@ -348,7 +350,9 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Spatiotemporal CNN
-        st_cnn_params = ConvParams(padding="same",   activation=self._params.st_activation)
+        st_cnn_params = ConvParams(
+            padding="same", activation=self._params.st_activation
+        )
         self._st_cnn = keras.Sequential(
             [
                 layers.InputLayer((T, H, W, F_ST)),
@@ -401,7 +405,9 @@ class AtmoConvLSTM(keras.Model):
 
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
-        output_cnn_params = ConvParams(padding="same", activation = self._params.output_activation)
+        output_cnn_params = ConvParams(
+            padding="same", activation=self._params.output_activation
+        )
         output_cnn_input_shape = (T, LSTM_H, LSTM_W, LSTM_FILTERS // 2)
 
         # Output: T2 (2m temperature)
