@@ -20,7 +20,7 @@ from usl_models.shared import keras_dataclasses
 class ConvParams(TypedDict):
     """Conv layer parameters."""
 
-    activation: Literal["relu", "sigmoid", "tanh", "softmax"]
+    activation: Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
     padding: Literal["valid", "same"]
 
 
