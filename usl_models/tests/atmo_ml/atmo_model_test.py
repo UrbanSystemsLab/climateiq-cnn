@@ -21,7 +21,7 @@ def pytest_model_params() -> atmo_model.AtmoModel.Params:
     return atmo_model.AtmoModel.Params(
         output_timesteps=2,
         lstm_units=32,
-        lstm_kernel_size=3,
+        lstm_kernel_size=5,
         optimizer=keras.optimizers.Adam(
             learning_rate=1e-3,
         ),

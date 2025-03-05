@@ -46,8 +46,8 @@ class AtmoModel:
         )
 
         output_timesteps: int = constants.OUTPUT_TIME_STEPS
-        conv1_stride: int = 2
-        conv2_stride: int = 2
+        conv1_stride: int = 1
+        conv2_stride: int = 1
         convlstm_stride: int = 1
 
         lu_index_vocab_size: int = constants.LU_INDEX_VOCAB_SIZE
