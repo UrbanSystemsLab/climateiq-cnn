@@ -119,7 +119,7 @@ class AtmoModel:
         """Creates the Atmo model.
 
         Args:
-            params: Model parameters
+            params: Model parameters.
             model: If you already have a keras.Model constructed, pass it here.
         """
         if model is not None:
@@ -144,8 +144,9 @@ class AtmoModel:
         Returns:
             The loaded AtmoModel.
         """
-        model = cls(**kwargs)
         loaded_model = keras.models.load_model(artifact_uri)
+        params = loaded_model._params  # type: ignore
+        model = cls(params=params, **kwargs)
         assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
         model._model.set_weights(loaded_model.get_weights())
         return model
