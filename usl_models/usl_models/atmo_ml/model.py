@@ -46,8 +46,9 @@ class AtmoModel:
         )
 
         output_timesteps: int = constants.OUTPUT_TIME_STEPS
-        conv1_stride: int = 1
-        conv2_stride: int = 1
+        conv1_stride: int = 2
+        conv2_stride: int = 2
+        convlstm_stride: int = 1
 
         lu_index_vocab_size: int = constants.LU_INDEX_VOCAB_SIZE
         lu_index_embedding_dim: int = constants.EMBEDDING_DIM
@@ -199,7 +200,7 @@ class AtmoModel:
         """Print the model summary."""
         self._model.summary(expand_nested=expand_nested)
 
-    def call(self, input: Input) -> tf.Tensor:
+    def call(self, input: "AtmoModel.Input") -> tf.Tensor:
         """Forward pass for predictions. See `AtmoConvLSTM.call`."""
         return self._model.call(input)
 
@@ -315,6 +316,7 @@ class AtmoConvLSTM(keras.Model):
             self._params.conv1_stride,
             self._params.conv2_stride,
         )
+        C3_STRIDE = self._params.convlstm_stride
         F_S = self._params.spatial_features
         F_ST = self._params.spatiotemporal_features
         LUI_VOCAB = self._params.lu_index_vocab_size
@@ -393,7 +395,7 @@ class AtmoConvLSTM(keras.Model):
                     LSTM_FILTERS,
                     self._params.lstm_kernel_size,
                     return_sequences=True,
-                    strides=1,
+                    strides=C3_STRIDE,
                     padding="same",
                     activation=self._params.lstm_activation,
                     dropout=self._params.lstm_dropout,
@@ -425,7 +427,9 @@ class AtmoConvLSTM(keras.Model):
                     )
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, K_SIZE, strides=1, **output_cnn_params)
+                    layers.Conv2DTranspose(
+                        1, K_SIZE, strides=C3_STRIDE, **output_cnn_params
+                    )
                 ),
             ],
             name="t2_output_cnn",
@@ -446,7 +450,9 @@ class AtmoConvLSTM(keras.Model):
                     )
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, K_SIZE, strides=1, **output_cnn_params)
+                    layers.Conv2DTranspose(
+                        1, K_SIZE, strides=C3_STRIDE, **output_cnn_params
+                    )
                 ),
             ],
             name="rh2_output_cnn",
@@ -467,7 +473,9 @@ class AtmoConvLSTM(keras.Model):
                     )
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, K_SIZE, strides=1, **output_cnn_params)
+                    layers.Conv2DTranspose(
+                        1, K_SIZE, strides=C3_STRIDE, **output_cnn_params
+                    )
                 ),
             ],
             name="wspd10_output_cnn",
@@ -488,7 +496,9 @@ class AtmoConvLSTM(keras.Model):
                     )
                 ),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(2, K_SIZE, strides=1, **output_cnn_params)
+                    layers.Conv2DTranspose(
+                        2, K_SIZE, strides=C3_STRIDE, **output_cnn_params
+                    )
                 ),
             ],
             name="wdir10_output_cnn",
