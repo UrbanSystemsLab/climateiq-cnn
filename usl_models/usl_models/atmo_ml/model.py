@@ -145,7 +145,7 @@ class AtmoModel:
             The loaded AtmoModel.
         """
         loaded_model = keras.models.load_model(artifact_uri)
-        params = loaded_model._params  # type: ignore
+        params = AtmoModel.Params.from_config(loaded_model.get_config())
         model = cls(params=params, **kwargs)
         assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
         model._model.set_weights(loaded_model.get_weights())
