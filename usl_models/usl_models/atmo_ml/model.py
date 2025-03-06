@@ -2,7 +2,7 @@
 
 import logging
 import dataclasses
-from typing import TypedDict, List, Callable, Literal
+from typing import TypedDict, TypeAlias, List, Callable, Literal
 
 import keras
 from keras import layers
@@ -17,10 +17,13 @@ from usl_models.atmo_ml import vars
 from usl_models.shared import keras_dataclasses
 
 
+Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
+
+
 class ConvParams(TypedDict):
     """Conv layer parameters."""
 
-    activation: Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
+    activation: Activation
     padding: Literal["valid", "same"]
 
 
@@ -58,10 +61,10 @@ class AtmoModel:
         spatiotemporal_filters: int = 64
 
         # New activation parameters for each block.
-        spatial_activation: Literal["relu", "tanh", "sigmoid"] = "relu"
-        st_activation: Literal["relu", "tanh", "sigmoid"] = "relu"
-        lstm_activation: Literal["tanh", "relu", "sigmoid"] = "tanh"
-        output_activation: Literal["relu", "linear"] = "relu"
+        spatial_activation: Activation = "relu"
+        st_activation: Activation = "relu"
+        lstm_activation: Activation = "tanh"
+        output_activation: Activation = "relu"
 
     class Input(TypedDict):
         """Input tensors."""
