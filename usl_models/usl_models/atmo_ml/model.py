@@ -56,6 +56,8 @@ class AtmoModel:
         spatial_filters: int = 128
         spatiotemporal_filters: int = 64
 
+        num_lstm: int = 1
+
     class Input(TypedDict):
         """Input tensors."""
 
@@ -394,6 +396,28 @@ class AtmoConvLSTM(keras.Model):
             name="conv_lstm",
         )
 
+        self.conv_lstm2 = (
+            keras.Sequential(
+                [
+                    # Input shape: (time_steps, height, width, channels)
+                    layers.InputLayer((T, LSTM_H, LSTM_W, LSTM_FILTERS)),
+                    layers.ConvLSTM2D(
+                        LSTM_FILTERS,
+                        self._params.lstm_kernel_size,
+                        return_sequences=True,
+                        strides=1,
+                        padding="same",
+                        activation="tanh",
+                        dropout=self._params.lstm_dropout,
+                        recurrent_dropout=self._params.lstm_recurrent_dropout,
+                    ),
+                ],
+                name="conv_lstm",
+            )
+            if self._params.num_lstm == 2
+            else None
+        )
+
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
         output_cnn_params = ConvParams(padding="same", activation="relu")
@@ -522,6 +546,8 @@ class AtmoConvLSTM(keras.Model):
 
         lstm_input = data_utils.boundary_pairs(concat_inputs)
         lstm_output = self.conv_lstm(lstm_input)
+        if self.conv_lstm2 is not None:
+            lstm_output = self.conv_lstm2(lstm_output)
 
         # Split up paired tensors into individual time steps.
         trconv_input = data_utils.split_time_step_pairs(lstm_output)[:, -T_O:]
