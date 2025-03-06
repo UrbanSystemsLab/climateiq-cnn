@@ -239,7 +239,7 @@ def test_model_checkpoint():
     model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
     with tempfile.TemporaryDirectory(suffix="model") as tmp:
         model.save_model(tmp)
-        loaded_model = atmo_model.AtmoModel.from_checkpoint(tmp, params=params)
+        loaded_model = atmo_model.AtmoModel.from_checkpoint(tmp)
 
         for weights, loaded_weights in zip(
             model._model.get_weights(), loaded_model._model.get_weights()
