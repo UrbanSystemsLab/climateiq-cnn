@@ -203,7 +203,7 @@ class AtmoModel:
         """Print the model summary."""
         self._model.summary(expand_nested=expand_nested)
 
-    def call(self, input: "AtmoModel.Input") -> tf.Tensor:
+    def call(self, input: Input) -> tf.Tensor:
         """Forward pass for predictions. See `AtmoConvLSTM.call`."""
         return self._model.call(input)
 
