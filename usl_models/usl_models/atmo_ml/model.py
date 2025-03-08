@@ -178,25 +178,31 @@ class AtmoModel:
         model.compile(
             optimizer=self._params.optimizer,
             loss=keras.losses.MeanSquaredError(),
-            metrics=[
-                keras.metrics.MeanAbsoluteError(),
-                keras.metrics.RootMeanSquaredError(),
-                keras.metrics.MeanAbsolutePercentageError(),
-                metrics.NormalizedRootMeanSquaredError(),
-                metrics.SSIMMetric(),
-                metrics.PSNRMetric(),
-                metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.RH2),
-                metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.T2),
-                metrics.OutputVarMeanSquaredError(
-                    vars.SpatiotemporalOutput.WSPD_WDIR10
-                ),
-                metrics.OutputVarMeanSquaredError(
-                    vars.SpatiotemporalOutput.WSPD_WDIR10_COS
-                ),
-                metrics.OutputVarMeanSquaredError(
-                    vars.SpatiotemporalOutput.WSPD_WDIR10_SIN
-                ),
-            ],
+            metrics=(
+                [
+                    keras.metrics.MeanAbsoluteError(),
+                    keras.metrics.RootMeanSquaredError(),
+                    keras.metrics.MeanAbsolutePercentageError(),
+                    metrics.NormalizedRootMeanSquaredError(),
+                    metrics.SSIMMetric(),
+                    metrics.PSNRMetric(),
+                    metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.RH2),
+                    metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.T2),
+                    metrics.OutputVarMeanSquaredError(
+                        vars.SpatiotemporalOutput.WSPD_WDIR10
+                    ),
+                ]
+                + [
+                    metrics.OutputVarMeanSquaredError(
+                        vars.SpatiotemporalOutput.WSPD_WDIR10_COS
+                    ),
+                    metrics.OutputVarMeanSquaredError(
+                        vars.SpatiotemporalOutput.WSPD_WDIR10_SIN
+                    ),
+                ]
+                if self._params.include_sin_cos_vars
+                else []
+            ),
         )
         model.build(self.get_input_shape_batched(self._params))
         return model

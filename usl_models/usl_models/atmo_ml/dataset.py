@@ -40,6 +40,7 @@ class Config:
     output_width: int = constants.MAP_WIDTH
     output_height: int = constants.MAP_HEIGHT
     output_timesteps: int = constants.OUTPUT_TIME_STEPS
+    include_sin_cos_vars: bool = True
 
 
 def get_date(filename: str) -> str:
@@ -454,6 +455,10 @@ def preprocess_label(label: np.ndarray, config: Config) -> np.ndarray:
     # Scale vars.
     for sto_var in vars.SpatiotemporalOutput:
         label[:, :, sto_var.value] = sto_var.scale(label[:, :, sto_var.value])
+
+    # Drop WIN_DIR SIN/COS.
+    if not config.include_sin_cos_vars:
+        label = label[:, :, :-2]
 
     # Apply cropping if required.
     H, W, _ = label.shape
