@@ -2,7 +2,7 @@
 
 import logging
 import dataclasses
-from typing import TypedDict, List, Callable, Literal
+from typing import TypedDict, List, Callable, Literal, Tuple
 
 import keras
 from keras import layers
@@ -23,6 +23,14 @@ class ConvParams(TypedDict):
 
     activation: Literal["relu", "sigmoid", "tanh", "softmax"]
     padding: Literal["valid", "same"]
+
+
+class ConvTransposeParams(TypedDict):
+    """Conv transponse layer parameters."""
+
+    activation: Literal["relu", "sigmoid", "tanh", "softmax"]
+    padding: Literal["valid", "same"]
+    output_padding: Tuple[int, int] | None
 
 
 class AtmoModel:
@@ -56,6 +64,8 @@ class AtmoModel:
         spatiotemporal_features: int = constants.NUM_SPATIOTEMPORAL_FEATURES
         spatial_filters: int = 128
         spatiotemporal_filters: int = 64
+
+        include_sin_cos_vars: bool = True
 
     class Input(TypedDict):
         """Input tensors."""
@@ -400,7 +410,6 @@ class AtmoConvLSTM(keras.Model):
                     LSTM_K_SIZE,
                     return_sequences=True,
                     strides=1,
-                    padding="valid",
                     activation="tanh",
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
@@ -411,7 +420,9 @@ class AtmoConvLSTM(keras.Model):
 
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
-        output_cnn_params = ConvParams(padding="same", activation="relu")
+        output_cnn_params = ConvTransposeParams(
+            activation="relu", padding="same", output_padding=None
+        )
         output_cnn_input_shape = (T, LSTM_H, LSTM_W, LSTM_FILTERS // 2)
 
         # Output: T2 (2m temperature)
@@ -478,24 +489,30 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Output: WDIR10 (10m wind direction sine and cosine functions)
-        self._wdir10_output_cnn = keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(
-                        64, K_SIZE, strides=C1_STRIDE, **output_cnn_params
-                    )
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(
-                        16, K_SIZE, strides=C1_STRIDE, **output_cnn_params
-                    )
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(2, K_SIZE, strides=1, **output_cnn_params)
-                ),
-            ],
-            name="wdir10_output_cnn",
+        self._wdir10_output_cnn = (
+            keras.Sequential(
+                [
+                    layers.InputLayer(output_cnn_input_shape),
+                    layers.TimeDistributed(
+                        layers.Conv2DTranspose(
+                            64, K_SIZE, strides=C1_STRIDE, **output_cnn_params
+                        )
+                    ),
+                    layers.TimeDistributed(
+                        layers.Conv2DTranspose(
+                            16, K_SIZE, strides=C1_STRIDE, **output_cnn_params
+                        )
+                    ),
+                    layers.TimeDistributed(
+                        layers.Conv2DTranspose(
+                            2, K_SIZE, strides=1, **output_cnn_params
+                        )
+                    ),
+                ],
+                name="wdir10_output_cnn",
+            )
+            if self._params.include_sin_cos_vars
+            else None
         )
 
     def call(self, inputs: AtmoModel.Input) -> tf.Tensor:
@@ -551,7 +568,9 @@ class AtmoConvLSTM(keras.Model):
         if self._wdir10_output_cnn is not None:
             outputs.append(self._wdir10_output_cnn(trconv_input))
 
-        return tf.concat(outputs, axis=-1)
+        output = tf.concat(outputs, axis=-1)
+        tf.ensure_shape(output, (B, T_O, H, W, None))
+        return output
 
     def get_config(self) -> dict:
         """Keras serialization."""
