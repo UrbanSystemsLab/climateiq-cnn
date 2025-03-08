@@ -15,6 +15,7 @@ from usl_models.atmo_ml import metrics
 from usl_models.atmo_ml import vars
 
 from usl_models.shared import keras_dataclasses
+from usl_models.shared import reflection_padding
 
 
 class ConvParams(TypedDict):
@@ -306,6 +307,7 @@ class AtmoConvLSTM(keras.Model):
         # Model definition
         T, H, W = None, None, None
         K_SIZE = self._params.input_cnn_kernel_size
+        K_PAD = K_SIZE // 2
         C1_STRIDE, C2_STRIDE = (
             self._params.conv1_stride,
             self._params.conv2_stride,
@@ -326,14 +328,16 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Spatial CNN
-        spatial_cnn_params = ConvParams(padding="same", activation="relu")
+        spatial_cnn_params = ConvParams(padding="valid", activation="relu")
         self._spatial_cnn = keras.Sequential(
             [
                 layers.InputLayer((H, W, F_S + LUI_DIM)),
+                reflection_padding.ReflectionPadding2D((K_PAD, K_PAD)),
                 layers.Conv2D(
                     S_FILTERS // 2, K_SIZE, strides=C1_STRIDE, **spatial_cnn_params
                 ),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
+                reflection_padding.ReflectionPadding2D((K_PAD, K_PAD)),
                 layers.Conv2D(
                     S_FILTERS, K_SIZE, strides=C2_STRIDE, **spatial_cnn_params
                 ),
@@ -343,12 +347,15 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Spatiotemporal CNN
-        st_cnn_params = ConvParams(padding="same", activation="relu")
+        st_cnn_params = ConvParams(padding="valid", activation="relu")
         self._st_cnn = keras.Sequential(
             [
                 layers.InputLayer((T, H, W, F_ST)),
                 # Remaining layers are TimeDistributed and are applied to each
                 # temporal slice
+                layers.TimeDistributed(
+                    reflection_padding.ReflectionPadding2D((K_PAD, K_PAD))
+                ),
                 layers.TimeDistributed(
                     layers.Conv2D(
                         ST_FILTERS // 4, K_SIZE, strides=C1_STRIDE, **st_cnn_params
@@ -356,6 +363,9 @@ class AtmoConvLSTM(keras.Model):
                 ),
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
+                ),
+                layers.TimeDistributed(
+                    reflection_padding.ReflectionPadding2D((K_PAD, K_PAD))
                 ),
                 layers.TimeDistributed(
                     layers.Conv2D(
@@ -376,16 +386,21 @@ class AtmoConvLSTM(keras.Model):
         LSTM_C = 2 * (S_FILTERS + ST_FILTERS)  # LSTM channels
         LSTM_H, LSTM_W = None, None  # LSTM height and width
         LSTM_FILTERS = self._params.lstm_units  # LSTM Filters
+        LSTM_K_SIZE = self._params.lstm_kernel_size
+        LSTM_K_PAD = LSTM_K_SIZE // 2
         self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer((T, LSTM_H, LSTM_W, LSTM_C)),
+                layers.TimeDistributed(
+                    reflection_padding.ReflectionPadding2D((LSTM_K_PAD, LSTM_K_PAD))
+                ),
                 layers.ConvLSTM2D(
                     LSTM_FILTERS,
-                    self._params.lstm_kernel_size,
+                    LSTM_K_SIZE,
                     return_sequences=True,
                     strides=1,
-                    padding="same",
+                    padding="valid",
                     activation="tanh",
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
