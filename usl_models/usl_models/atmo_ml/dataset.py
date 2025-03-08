@@ -109,7 +109,10 @@ def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
 def get_output_signature(
     config: Config,
 ) -> tuple[model.AtmoModel.InputSpec, tf.TensorSpec]:
-    params = model.AtmoModel.Params(output_timesteps=config.output_timesteps)
+    params = model.AtmoModel.Params(
+        output_timesteps=config.output_timesteps,
+        include_sin_cos_vars=config.include_sin_cos_vars,
+    )
     return (
         model.AtmoModel.get_input_spec(params),
         model.AtmoModel.get_output_spec(params),

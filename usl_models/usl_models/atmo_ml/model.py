@@ -116,12 +116,16 @@ class AtmoModel:
     def get_output_spec(cls, params: Params) -> tf.TensorSpec:
         """Returns the output shape for the given params."""
         H, W = None, None
+        missing_vars = 0
+        if not params.include_sin_cos_vars:
+            missing_vars = 2
+
         return tf.TensorSpec(
             shape=(
                 params.output_timesteps,
                 H,
                 W,
-                constants.OUTPUT_CHANNELS,
+                constants.OUTPUT_CHANNELS - missing_vars,
             ),
             dtype=tf.float32,
         )
@@ -174,35 +178,32 @@ class AtmoModel:
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
+        eval_metrics = [
+            keras.metrics.MeanAbsoluteError(),
+            keras.metrics.RootMeanSquaredError(),
+            keras.metrics.MeanAbsolutePercentageError(),
+            metrics.NormalizedRootMeanSquaredError(),
+            metrics.SSIMMetric(),
+            metrics.PSNRMetric(),
+            metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.RH2),
+            metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.T2),
+            metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.WSPD_WDIR10),
+        ]
+        if self._params.include_sin_cos_vars:
+            eval_metrics += [
+                metrics.OutputVarMeanSquaredError(
+                    vars.SpatiotemporalOutput.WSPD_WDIR10_COS
+                ),
+                metrics.OutputVarMeanSquaredError(
+                    vars.SpatiotemporalOutput.WSPD_WDIR10_SIN
+                ),
+            ]
+
         model = AtmoConvLSTM(self._params)
         model.compile(
             optimizer=self._params.optimizer,
             loss=keras.losses.MeanSquaredError(),
-            metrics=(
-                [
-                    keras.metrics.MeanAbsoluteError(),
-                    keras.metrics.RootMeanSquaredError(),
-                    keras.metrics.MeanAbsolutePercentageError(),
-                    metrics.NormalizedRootMeanSquaredError(),
-                    metrics.SSIMMetric(),
-                    metrics.PSNRMetric(),
-                    metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.RH2),
-                    metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.T2),
-                    metrics.OutputVarMeanSquaredError(
-                        vars.SpatiotemporalOutput.WSPD_WDIR10
-                    ),
-                ]
-                + [
-                    metrics.OutputVarMeanSquaredError(
-                        vars.SpatiotemporalOutput.WSPD_WDIR10_COS
-                    ),
-                    metrics.OutputVarMeanSquaredError(
-                        vars.SpatiotemporalOutput.WSPD_WDIR10_SIN
-                    ),
-                ]
-                if self._params.include_sin_cos_vars
-                else []
-            ),
+            metrics=eval_metrics,
         )
         model.build(self.get_input_shape_batched(self._params))
         return model
