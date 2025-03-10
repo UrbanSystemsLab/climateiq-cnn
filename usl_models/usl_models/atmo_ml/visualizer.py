@@ -116,7 +116,11 @@ def plot(
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
     spatial_features: list[int] | None = None,
     spatial_ticks: int = 6,
-    normalize: bool = False,  # Set normalize to False to plot raw data
+    normalize: bool = False,
+    gt_vmin: float | None = None,
+    gt_vmax: float | None = None,
+    pred_vmin: float | None = None,
+    pred_vmax: float | None = None,
 ) -> Iterator[matplotlib.figure.Figure]:
     """Plots inputs, label, prediction, and difference maps for debugging."""
     sim_name = inputs["sim_name"].numpy().decode("utf-8")
@@ -145,8 +149,8 @@ def plot(
         yield plot_2d_timeseries(
             label[:, :, :, sto_var.value],
             title=sto_var.name + f" [true] ({sim_name} {date})",
-            vmin=sto_var_config.norm_vmin,
-            vmax=sto_var_config.norm_vmax,
+            vmin=gt_vmin if gt_vmin is not None else sto_var_config.norm_vmin,
+            vmax=gt_vmax if gt_vmax is not None else sto_var_config.norm_vmax,
             t_start=0.0,
             t_interval=0.5,
             normalize=normalize,
@@ -156,8 +160,8 @@ def plot(
         yield plot_2d_timeseries(
             pred[:, :, :, sto_var.value],
             title=sto_var.name + f" [pred] ({sim_name} {date})",
-            vmin=sto_var_config.norm_vmin,
-            vmax=sto_var_config.norm_vmax,
+            vmin=pred_vmin if pred_vmin is not None else sto_var_config.norm_vmin,
+            vmax=pred_vmax if pred_vmax is not None else sto_var_config.norm_vmax,
             t_start=0.0,
             t_interval=0.5,
             normalize=normalize,
@@ -167,10 +171,7 @@ def plot(
     if label is not None and pred is not None:
         diff = pred[:, :, :, sto_var.value] - label[:, :, :, sto_var.value]
         # Use symmetric limits centered at zero for the difference
-        diff_range = max(
-            abs(sto_var_config.norm_vmin),
-            abs(sto_var_config.norm_vmax),
-        )
+        diff_range = max(abs(sto_var_config.norm_vmin), abs(sto_var_config.norm_vmax))
         yield plot_2d_timeseries(
             diff,
             title=sto_var.name + f" [diff] ({sim_name} {date})",
@@ -183,15 +184,19 @@ def plot(
 
 
 def plot_batch(
-    input_batch: tf.Tensor,
+    input_batch: dict[str, tf.Tensor],
     label_batch: tf.Tensor,
     pred_batch: tf.Tensor,
     st_var: vars.Spatiotemporal = vars.Spatiotemporal.RH,
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
     normalize: bool = False,
     max_examples: int | None = None,
+    gt_vmin: float | None = None,
+    gt_vmax: float | None = None,
+    pred_vmin: float | None = None,
+    pred_vmax: float | None = None,
 ) -> Iterator[matplotlib.figure.Figure]:
-    """Plot a batch of AtmoML Examples."""
+    """Plot a batch of AtmoML Examples with separate vmin/vmax for ground truth and prediction."""
     for b, _ in itertools.islice(enumerate(label_batch), max_examples):
         for fig in plot(
             inputs={k: v[b] for k, v in input_batch.items()},
@@ -200,5 +205,9 @@ def plot_batch(
             st_var=st_var,
             sto_var=sto_var,
             normalize=normalize,
+            gt_vmin=gt_vmin,
+            gt_vmax=gt_vmax,
+            pred_vmin=pred_vmin,
+            pred_vmax=pred_vmax,
         ):
             yield fig
