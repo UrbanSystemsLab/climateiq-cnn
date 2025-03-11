@@ -170,7 +170,7 @@ class AtmoModel:
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),
-                keras.metrics.MeanAbsolutePercentageError(),
+                keras.metrics.MeanSquaredLogarithmicError(),
                 metrics.NormalizedRootMeanSquaredError(),
                 metrics.SSIMMetric(),
                 metrics.PSNRMetric(),
