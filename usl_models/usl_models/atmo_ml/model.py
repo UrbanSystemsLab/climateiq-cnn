@@ -2,7 +2,7 @@
 
 import logging
 import dataclasses
-from typing import TypedDict, List, Callable, Literal
+from typing import TypedDict, TypeAlias, List, Callable, Literal
 
 import keras
 from keras import layers
@@ -17,10 +17,13 @@ from usl_models.atmo_ml import vars
 from usl_models.shared import keras_dataclasses
 
 
+Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
+
+
 class ConvParams(TypedDict):
     """Conv layer parameters."""
 
-    activation: Literal["relu", "sigmoid", "tanh", "softmax"]
+    activation: Activation
     padding: Literal["valid", "same"]
 
 
@@ -39,6 +42,12 @@ class AtmoModel:
         lstm_kernel_size: int = 5
         lstm_dropout: float = 0.2
         lstm_recurrent_dropout: float = 0.2
+
+        # New activation parameters for each block.
+        spatial_activation: Activation = "relu"
+        st_activation: Activation = "relu"
+        lstm_activation: Activation = "tanh"
+        output_activation: Activation = "relu"
 
         # The optimizer configuration.
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
@@ -326,7 +335,9 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Spatial CNN
-        spatial_cnn_params = ConvParams(padding="same", activation="relu")
+        spatial_cnn_params = ConvParams(
+            padding="same", activation=self._params.spatial_activation
+        )
         self._spatial_cnn = keras.Sequential(
             [
                 layers.InputLayer((H, W, F_S + LUI_DIM)),
@@ -343,7 +354,9 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Spatiotemporal CNN
-        st_cnn_params = ConvParams(padding="same", activation="relu")
+        st_cnn_params = ConvParams(
+            padding="same", activation=self._params.st_activation
+        )
         self._st_cnn = keras.Sequential(
             [
                 layers.InputLayer((T, H, W, F_ST)),
@@ -386,7 +399,7 @@ class AtmoConvLSTM(keras.Model):
                     return_sequences=True,
                     strides=1,
                     padding="same",
-                    activation="tanh",
+                    activation=self._params.lstm_activation,
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
                 ),
@@ -396,7 +409,9 @@ class AtmoConvLSTM(keras.Model):
 
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
-        output_cnn_params = ConvParams(padding="same", activation="relu")
+        output_cnn_params = ConvParams(
+            padding="same", activation=self._params.output_activation
+        )
         output_cnn_input_shape = (T, LSTM_H, LSTM_W, LSTM_FILTERS // 2)
 
         # Output: T2 (2m temperature)
