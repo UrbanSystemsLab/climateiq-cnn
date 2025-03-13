@@ -23,12 +23,6 @@ class Pad2D(layers.Layer):
         self.mode = mode
         super(Pad2D, self).__init__(**kwargs)
 
-    def compute_output_shape(self, shape):
-        """Compute output shape."""
-        h_pad, w_pad = self.padding
-        B, H, W, *S = shape
-        return (B, H + 2 * h_pad, W + 2 * w_pad, *S)
-
     def call(self, x: tf.Tensor, mask=None):
         """Call layer."""
         h_pad, w_pad = self.padding

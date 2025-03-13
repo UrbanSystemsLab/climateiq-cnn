@@ -21,6 +21,9 @@ from usl_models.shared import pad_layers
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
 
 
+PadMode: TypeAlias = Literal["REFLECT", "CONSTANT"]
+
+
 class ConvParams(TypedDict):
     """Conv layer parameters."""
 
@@ -78,6 +81,8 @@ class AtmoModel:
         spatiotemporal_filters: int = 64
 
         include_sin_cos_vars: bool = True
+
+        pad_mode: PadMode = "REFLECT"
 
     class Input(TypedDict):
         """Input tensors."""
@@ -340,8 +345,7 @@ class AtmoConvLSTM(keras.Model):
         LUI_DIM = self._params.lu_index_embedding_dim
         S_FILTERS = self._params.spatial_filters
         ST_FILTERS = self._params.spatiotemporal_filters
-
-        PAD_MODE = "REFLECT"
+        PAD_MODE = self._params.pad_mode
 
         # Define Embedding Layer for lu_index
         self.lu_index_embedding = keras.Sequential(
