@@ -21,7 +21,7 @@ class Pad2D(layers.Layer):
         """Constructor."""
         self.padding = padding
         self.mode = mode
-        super(Pad2D, self).__init__(**kwargs)
+        layers.Layer.__init__(self, **kwargs)
 
     def call(self, x: tf.Tensor, mask=None):
         """Call layer."""
