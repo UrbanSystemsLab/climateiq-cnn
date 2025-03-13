@@ -86,7 +86,7 @@ def test_atmo_convlstm():
         params.output_timesteps,
         _TEST_MAP_HEIGHT,
         _TEST_MAP_WIDTH,
-        constants.OUTPUT_CHANNELS,  # T2, RH2, WSPD10, WDIR10_SIN, WDIR10_COS
+        len(params.sto_vars),  # T2, RH2, WSPD10
     )
 
     assert prediction.shape == expected_output_shape
@@ -117,7 +117,7 @@ def test_train():
                     constants.OUTPUT_TIME_STEPS,
                     _TEST_MAP_HEIGHT,
                     _TEST_MAP_WIDTH,
-                    constants.OUTPUT_CHANNELS,
+                    len(params.sto_vars),
                 ]
             ),
         )
@@ -132,7 +132,7 @@ def test_train():
                     constants.OUTPUT_TIME_STEPS,
                     _TEST_MAP_HEIGHT,
                     _TEST_MAP_WIDTH,
-                    constants.OUTPUT_CHANNELS,
+                    len(params.sto_vars),
                 ]
             ),
         )
@@ -168,7 +168,7 @@ def test_early_stopping():
                     constants.OUTPUT_TIME_STEPS,
                     _TEST_MAP_HEIGHT,
                     _TEST_MAP_WIDTH,
-                    constants.OUTPUT_CHANNELS,
+                    len(params.sto_vars),
                 ]
             ),
         )
@@ -183,7 +183,7 @@ def test_early_stopping():
                     constants.OUTPUT_TIME_STEPS,
                     _TEST_MAP_HEIGHT,
                     _TEST_MAP_WIDTH,
-                    constants.OUTPUT_CHANNELS,
+                    len(params.sto_vars),
                 ]
             ),
         )
@@ -215,7 +215,7 @@ def test_model_checkpoint():
                     constants.OUTPUT_TIME_STEPS,
                     _TEST_MAP_HEIGHT,
                     _TEST_MAP_WIDTH,
-                    constants.OUTPUT_CHANNELS,
+                    len(params.sto_vars),
                 ]
             ),
         )
@@ -230,7 +230,7 @@ def test_model_checkpoint():
                     constants.OUTPUT_TIME_STEPS,
                     _TEST_MAP_HEIGHT,
                     _TEST_MAP_WIDTH,
-                    constants.OUTPUT_CHANNELS,
+                    len(params.sto_vars),
                 ]
             ),
         )
