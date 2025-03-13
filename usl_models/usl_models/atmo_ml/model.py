@@ -2,7 +2,7 @@
 
 import logging
 import dataclasses
-from typing import TypedDict, TypeAlias, List, Callable, Literal
+from typing import TypedDict, TypeAlias, List, Callable, Literal, Tuple
 
 import keras
 from keras import layers
@@ -15,9 +15,13 @@ from usl_models.atmo_ml import metrics
 from usl_models.atmo_ml import vars
 
 from usl_models.shared import keras_dataclasses
+from usl_models.shared import pad_layers
 
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
+
+
+PadMode: TypeAlias = Literal["REFLECT", "CONSTANT"]
 
 
 class ConvParams(TypedDict):
@@ -25,6 +29,14 @@ class ConvParams(TypedDict):
 
     activation: Activation
     padding: Literal["valid", "same"]
+
+
+class ConvTransposeParams(TypedDict):
+    """Conv transponse layer parameters."""
+
+    activation: Literal["relu", "sigmoid", "tanh", "softmax"]
+    padding: Literal["valid", "same"]
+    output_padding: Tuple[int, int] | None
 
 
 class AtmoModel:
@@ -36,6 +48,9 @@ class AtmoModel:
 
         # Input CNN params
         input_cnn_kernel_size: int = 5
+
+        # Output CNN Params
+        output_cnn_kernel_size: int = 3
 
         # LSTM parameters.
         lstm_units: int = 64
@@ -64,6 +79,10 @@ class AtmoModel:
         spatiotemporal_features: int = constants.NUM_SPATIOTEMPORAL_FEATURES
         spatial_filters: int = 128
         spatiotemporal_filters: int = 64
+
+        include_sin_cos_vars: bool = True
+
+        pad_mode: PadMode = "REFLECT"
 
     class Input(TypedDict):
         """Input tensors."""
@@ -315,6 +334,7 @@ class AtmoConvLSTM(keras.Model):
         # Model definition
         T, H, W = None, None, None
         K_SIZE = self._params.input_cnn_kernel_size
+        K_PAD = K_SIZE // 2
         C1_STRIDE, C2_STRIDE = (
             self._params.conv1_stride,
             self._params.conv2_stride,
@@ -325,6 +345,7 @@ class AtmoConvLSTM(keras.Model):
         LUI_DIM = self._params.lu_index_embedding_dim
         S_FILTERS = self._params.spatial_filters
         ST_FILTERS = self._params.spatiotemporal_filters
+        PAD_MODE = self._params.pad_mode
 
         # Define Embedding Layer for lu_index
         self.lu_index_embedding = keras.Sequential(
@@ -336,15 +357,17 @@ class AtmoConvLSTM(keras.Model):
 
         # Spatial CNN
         spatial_cnn_params = ConvParams(
-            padding="same", activation=self._params.spatial_activation
+            padding="valid", activation=self._params.spatial_activation
         )
         self._spatial_cnn = keras.Sequential(
             [
                 layers.InputLayer((H, W, F_S + LUI_DIM)),
+                pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE),
                 layers.Conv2D(
                     S_FILTERS // 2, K_SIZE, strides=C1_STRIDE, **spatial_cnn_params
                 ),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
+                pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE),
                 layers.Conv2D(
                     S_FILTERS, K_SIZE, strides=C2_STRIDE, **spatial_cnn_params
                 ),
@@ -355,13 +378,14 @@ class AtmoConvLSTM(keras.Model):
 
         # Spatiotemporal CNN
         st_cnn_params = ConvParams(
-            padding="same", activation=self._params.st_activation
+            padding="valid", activation=self._params.st_activation
         )
         self._st_cnn = keras.Sequential(
             [
                 layers.InputLayer((T, H, W, F_ST)),
                 # Remaining layers are TimeDistributed and are applied to each
                 # temporal slice
+                layers.TimeDistributed(pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE)),
                 layers.TimeDistributed(
                     layers.Conv2D(
                         ST_FILTERS // 4, K_SIZE, strides=C1_STRIDE, **st_cnn_params
@@ -370,6 +394,7 @@ class AtmoConvLSTM(keras.Model):
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
+                layers.TimeDistributed(pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE)),
                 layers.TimeDistributed(
                     layers.Conv2D(
                         ST_FILTERS, K_SIZE, strides=C2_STRIDE, **st_cnn_params
@@ -389,16 +414,21 @@ class AtmoConvLSTM(keras.Model):
         LSTM_C = 2 * (S_FILTERS + ST_FILTERS)  # LSTM channels
         LSTM_H, LSTM_W = None, None  # LSTM height and width
         LSTM_FILTERS = self._params.lstm_units  # LSTM Filters
+        LSTM_K_SIZE = self._params.lstm_kernel_size
+        LSTM_K_PAD = LSTM_K_SIZE // 2
         self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer((T, LSTM_H, LSTM_W, LSTM_C)),
+                layers.TimeDistributed(
+                    pad_layers.Pad2D((LSTM_K_PAD, LSTM_K_PAD), mode=PAD_MODE)
+                ),
                 layers.ConvLSTM2D(
                     LSTM_FILTERS,
-                    self._params.lstm_kernel_size,
+                    LSTM_K_SIZE,
                     return_sequences=True,
                     strides=1,
-                    padding="same",
+                    padding="valid",
                     activation=self._params.lstm_activation,
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
@@ -407,10 +437,12 @@ class AtmoConvLSTM(keras.Model):
             name="conv_lstm",
         )
 
+        OUTPUT_K_SIZE = self._params.output_cnn_kernel_size
+
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
         output_cnn_params = ConvParams(
-            padding="same", activation=self._params.output_activation
+            padding="valid", activation=self._params.output_activation
         )
         output_cnn_input_shape = (T, LSTM_H, LSTM_W, LSTM_FILTERS // 2)
 
@@ -419,17 +451,28 @@ class AtmoConvLSTM(keras.Model):
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(
-                        64, K_SIZE, strides=C1_STRIDE, **output_cnn_params
+                    keras.Sequential(
+                        [
+                            layers.Conv2DTranspose(
+                                64,
+                                OUTPUT_K_SIZE,
+                                strides=C1_STRIDE,
+                                **output_cnn_params,
+                            ),
+                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
+                            layers.Conv2DTranspose(
+                                16,
+                                OUTPUT_K_SIZE,
+                                strides=C2_STRIDE,
+                                **output_cnn_params,
+                            ),
+                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
+                            layers.Conv2DTranspose(
+                                1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
+                            ),
+                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
+                        ]
                     )
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(
-                        16, K_SIZE, strides=C2_STRIDE, **output_cnn_params
-                    )
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, K_SIZE, strides=1, **output_cnn_params)
                 ),
             ],
             name="t2_output_cnn",
@@ -440,17 +483,28 @@ class AtmoConvLSTM(keras.Model):
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(
-                        64, K_SIZE, strides=C1_STRIDE, **output_cnn_params
+                    keras.Sequential(
+                        [
+                            layers.Conv2DTranspose(
+                                64,
+                                OUTPUT_K_SIZE,
+                                strides=C1_STRIDE,
+                                **output_cnn_params,
+                            ),
+                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
+                            layers.Conv2DTranspose(
+                                16,
+                                OUTPUT_K_SIZE,
+                                strides=C2_STRIDE,
+                                **output_cnn_params,
+                            ),
+                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
+                            layers.Conv2DTranspose(
+                                1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
+                            ),
+                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
+                        ]
                     )
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(
-                        16, K_SIZE, strides=C2_STRIDE, **output_cnn_params
-                    )
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, K_SIZE, strides=1, **output_cnn_params)
                 ),
             ],
             name="rh2_output_cnn",
@@ -461,41 +515,73 @@ class AtmoConvLSTM(keras.Model):
             [
                 layers.InputLayer(output_cnn_input_shape),
                 layers.TimeDistributed(
-                    layers.Conv2DTranspose(
-                        64, K_SIZE, strides=C1_STRIDE, **output_cnn_params
+                    keras.Sequential(
+                        [
+                            layers.Conv2DTranspose(
+                                64,
+                                OUTPUT_K_SIZE,
+                                strides=C1_STRIDE,
+                                **output_cnn_params,
+                            ),
+                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
+                            layers.Conv2DTranspose(
+                                16,
+                                OUTPUT_K_SIZE,
+                                strides=C2_STRIDE,
+                                **output_cnn_params,
+                            ),
+                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
+                            layers.Conv2DTranspose(
+                                1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
+                            ),
+                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
+                        ]
                     )
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(
-                        16, K_SIZE, strides=C2_STRIDE, **output_cnn_params
-                    )
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(1, K_SIZE, strides=1, **output_cnn_params)
                 ),
             ],
             name="wspd10_output_cnn",
         )
 
         # Output: WDIR10 (10m wind direction sine and cosine functions)
-        self._wdir10_output_cnn = keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(
-                        64, K_SIZE, strides=C1_STRIDE, **output_cnn_params
-                    )
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(
-                        16, K_SIZE, strides=C1_STRIDE, **output_cnn_params
-                    )
-                ),
-                layers.TimeDistributed(
-                    layers.Conv2DTranspose(2, K_SIZE, strides=1, **output_cnn_params)
-                ),
-            ],
-            name="wdir10_output_cnn",
+        self._wdir10_output_cnn = (
+            keras.Sequential(
+                [
+                    layers.InputLayer(output_cnn_input_shape),
+                    layers.TimeDistributed(
+                        keras.Sequential(
+                            [
+                                layers.Conv2DTranspose(
+                                    64,
+                                    OUTPUT_K_SIZE,
+                                    strides=C1_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                                layers.Conv2DTranspose(
+                                    16,
+                                    OUTPUT_K_SIZE,
+                                    strides=C2_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                                layers.Conv2DTranspose(
+                                    2, OUTPUT_K_SIZE, strides=1, **output_cnn_params
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                            ]
+                        )
+                    ),
+                ],
+                name="wdir10_output_cnn",
+            )
+            if self._params.include_sin_cos_vars
+            else None
         )
 
     def call(self, inputs: AtmoModel.Input) -> tf.Tensor:
@@ -551,7 +637,9 @@ class AtmoConvLSTM(keras.Model):
         if self._wdir10_output_cnn is not None:
             outputs.append(self._wdir10_output_cnn(trconv_input))
 
-        return tf.concat(outputs, axis=-1)
+        output = tf.concat(outputs, axis=-1)
+        tf.ensure_shape(output, (B, T_O, H, W, None))
+        return output
 
     def get_config(self) -> dict:
         """Keras serialization."""
