@@ -2,7 +2,17 @@
 
 import copy
 import dataclasses
-from typing import Any, TypeVar, Type, Callable, ClassVar, Protocol, dataclass_transform
+from typing import (
+    Any,
+    TypeVar,
+    Type,
+    Callable,
+    ClassVar,
+    Protocol,
+    dataclass_transform,
+)
+
+import keras.src.saving.legacy.saved_model.utils
 
 import keras
 
@@ -27,24 +37,17 @@ class Base(DataclassInstance):
 
     def get_config(self) -> dict[str, Any]:
         """Get config for keras serialization."""
-        # Make a shallow copy so we can replace fields without
-        # the mutating original.
-        self_copy = copy.copy(self)
+        config = {}
 
-        # Update fields that need keras specific serialization.
-        serialized_config = {}
-        for f in dataclasses.fields(self):
-            if isinstance(f.type, type) and issubclass(
-                f.type, keras.optimizers.Optimizer
-            ):
-                serialized_config[f.name] = keras.optimizers.serialize(
+        # Force non-legacy serialization.
+        with keras.src.saving.legacy.saved_model.utils.keras_option_scope(
+            save_traces=False, in_tf_saved_model_scope=False
+        ):
+            for f in dataclasses.fields(self):
+                config[f.name] = keras.saving.serialize_keras_object(
                     getattr(self, f.name)
                 )
-                setattr(self_copy, f.name, None)
 
-        # Run standard dataclass asdict.
-        config = dataclasses.asdict(self_copy)
-        config.update(serialized_config)
         return config
 
     @classmethod
@@ -56,10 +59,9 @@ class Base(DataclassInstance):
 
         # Update fields that need keras specific deserialization.
         for f in dataclasses.fields(cls):  # type: ignore
-            if isinstance(f.type, type) and issubclass(
-                f.type, keras.optimizers.Optimizer
-            ):
-                config_copy[f.name] = keras.optimizers.get(config[f.name])
+            config_copy[f.name] = keras.saving.deserialize_keras_object(
+                config_copy[f.name]
+            )
 
         # Run standard constructor.
         return cls(**config_copy)
