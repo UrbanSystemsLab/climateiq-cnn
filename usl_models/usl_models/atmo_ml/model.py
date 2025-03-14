@@ -80,7 +80,11 @@ class AtmoModel:
         spatial_filters: int = 128
         spatiotemporal_filters: int = 64
 
-        include_sin_cos_vars: bool = True
+        sto_vars: Tuple[vars.SpatiotemporalOutput, ...] = (
+            vars.SpatiotemporalOutput.RH2,
+            vars.SpatiotemporalOutput.T2,
+            vars.SpatiotemporalOutput.WSPD_WDIR10,
+        )
 
         pad_mode: PadMode = "REFLECT"
 
@@ -133,13 +137,9 @@ class AtmoModel:
     def get_output_spec(cls, params: Params) -> tf.TensorSpec:
         """Returns the output shape for the given params."""
         H, W = None, None
+
         return tf.TensorSpec(
-            shape=(
-                params.output_timesteps,
-                H,
-                W,
-                constants.OUTPUT_CHANNELS,
-            ),
+            shape=(params.output_timesteps, H, W, len(params.sto_vars)),
             dtype=tf.float32,
         )
 
@@ -191,29 +191,22 @@ class AtmoModel:
 
     def _build_model(self) -> keras.Model:
         """Creates the correct internal (Keras) model architecture."""
+        eval_metrics = [
+            keras.metrics.MeanAbsoluteError(),
+            keras.metrics.RootMeanSquaredError(),
+            keras.metrics.MeanAbsolutePercentageError(),
+            metrics.NormalizedRootMeanSquaredError(),
+            metrics.SSIMMetric(),
+            metrics.PSNRMetric(),
+        ]
+        for sto_var in self._params.sto_vars:
+            eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var))
+
         model = AtmoConvLSTM(self._params)
         model.compile(
             optimizer=self._params.optimizer,
             loss=keras.losses.MeanSquaredError(),
-            metrics=[
-                keras.metrics.MeanAbsoluteError(),
-                keras.metrics.RootMeanSquaredError(),
-                keras.metrics.MeanAbsolutePercentageError(),
-                metrics.NormalizedRootMeanSquaredError(),
-                metrics.SSIMMetric(),
-                metrics.PSNRMetric(),
-                metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.RH2),
-                metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.T2),
-                metrics.OutputVarMeanSquaredError(
-                    vars.SpatiotemporalOutput.WSPD_WDIR10
-                ),
-                metrics.OutputVarMeanSquaredError(
-                    vars.SpatiotemporalOutput.WSPD_WDIR10_COS
-                ),
-                metrics.OutputVarMeanSquaredError(
-                    vars.SpatiotemporalOutput.WSPD_WDIR10_SIN
-                ),
-            ],
+            metrics=eval_metrics,
         )
         model.build(self.get_input_shape_batched(self._params))
         return model
@@ -447,102 +440,138 @@ class AtmoConvLSTM(keras.Model):
         output_cnn_input_shape = (T, LSTM_H, LSTM_W, LSTM_FILTERS // 2)
 
         # Output: T2 (2m temperature)
-        self._t2_output_cnn = keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    keras.Sequential(
-                        [
-                            layers.Conv2DTranspose(
-                                64,
-                                OUTPUT_K_SIZE,
-                                strides=C1_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
-                            layers.Conv2DTranspose(
-                                16,
-                                OUTPUT_K_SIZE,
-                                strides=C2_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
-                            layers.Conv2DTranspose(
-                                1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
-                            ),
-                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
-                        ]
-                    )
-                ),
-            ],
-            name="t2_output_cnn",
+        self._t2_output_cnn = (
+            keras.Sequential(
+                [
+                    layers.InputLayer(output_cnn_input_shape),
+                    layers.TimeDistributed(
+                        keras.Sequential(
+                            [
+                                layers.Conv2DTranspose(
+                                    64,
+                                    OUTPUT_K_SIZE,
+                                    strides=C1_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                                layers.Conv2DTranspose(
+                                    16,
+                                    OUTPUT_K_SIZE,
+                                    strides=C2_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                                layers.Conv2DTranspose(
+                                    1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                            ]
+                        )
+                    ),
+                ],
+                name="t2_output_cnn",
+            )
+            if vars.SpatiotemporalOutput.T2 in self._params.sto_vars
+            else None
         )
 
         # Output: RH2 (2m relative humidity)
-        self._rh2_output_cnn = keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    keras.Sequential(
-                        [
-                            layers.Conv2DTranspose(
-                                64,
-                                OUTPUT_K_SIZE,
-                                strides=C1_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
-                            layers.Conv2DTranspose(
-                                16,
-                                OUTPUT_K_SIZE,
-                                strides=C2_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
-                            layers.Conv2DTranspose(
-                                1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
-                            ),
-                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
-                        ]
-                    )
-                ),
-            ],
-            name="rh2_output_cnn",
+        self._rh2_output_cnn = (
+            keras.Sequential(
+                [
+                    layers.InputLayer(output_cnn_input_shape),
+                    layers.TimeDistributed(
+                        keras.Sequential(
+                            [
+                                layers.Conv2DTranspose(
+                                    64,
+                                    OUTPUT_K_SIZE,
+                                    strides=C1_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                                layers.Conv2DTranspose(
+                                    16,
+                                    OUTPUT_K_SIZE,
+                                    strides=C2_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                                layers.Conv2DTranspose(
+                                    1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                            ]
+                        )
+                    ),
+                ],
+                name="rh2_output_cnn",
+            )
+            if vars.SpatiotemporalOutput.RH2 in self._params.sto_vars
+            else None
         )
 
         # Output: WSPD10 (10m wind speed)
-        self._wspd10_output_cnn = keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    keras.Sequential(
-                        [
-                            layers.Conv2DTranspose(
-                                64,
-                                OUTPUT_K_SIZE,
-                                strides=C1_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
-                            layers.Conv2DTranspose(
-                                16,
-                                OUTPUT_K_SIZE,
-                                strides=C2_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
-                            layers.Conv2DTranspose(
-                                1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
-                            ),
-                            layers.Cropping2D((OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)),
-                        ]
-                    )
-                ),
-            ],
-            name="wspd10_output_cnn",
+        self._wspd10_output_cnn = (
+            keras.Sequential(
+                [
+                    layers.InputLayer(output_cnn_input_shape),
+                    layers.TimeDistributed(
+                        keras.Sequential(
+                            [
+                                layers.Conv2DTranspose(
+                                    64,
+                                    OUTPUT_K_SIZE,
+                                    strides=C1_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                                layers.Conv2DTranspose(
+                                    16,
+                                    OUTPUT_K_SIZE,
+                                    strides=C2_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                                layers.Conv2DTranspose(
+                                    1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
+                                ),
+                                layers.Cropping2D(
+                                    (OUTPUT_K_SIZE // 2, OUTPUT_K_SIZE // 2)
+                                ),
+                            ]
+                        )
+                    ),
+                ],
+                name="wspd10_output_cnn",
+            )
+            if vars.SpatiotemporalOutput.WSPD_WDIR10 in self._params.sto_vars
+            else None
         )
 
         # Output: WDIR10 (10m wind direction sine and cosine functions)
+        has_windir10_cos = (
+            vars.SpatiotemporalOutput.WSPD_WDIR10_COS in self._params.sto_vars
+        )
+        has_windir10_sin = (
+            vars.SpatiotemporalOutput.WSPD_WDIR10_SIN in self._params.sto_vars
+        )
         self._wdir10_output_cnn = (
             keras.Sequential(
                 [
@@ -580,7 +609,7 @@ class AtmoConvLSTM(keras.Model):
                 ],
                 name="wdir10_output_cnn",
             )
-            if self._params.include_sin_cos_vars
+            if (has_windir10_cos and has_windir10_sin)
             else None
         )
 
