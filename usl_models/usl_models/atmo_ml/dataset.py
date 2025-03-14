@@ -174,6 +174,9 @@ def load_dataset_prediction_cached(
     config = config or Config()
 
     def generator() -> Iterable[model.AtmoModel.Input]:
+        if example_keys is None:
+            return
+
         for sim_name, day in example_keys:
             # Load cached data for the day (inputs only)
             load_result = load_day_cached(
