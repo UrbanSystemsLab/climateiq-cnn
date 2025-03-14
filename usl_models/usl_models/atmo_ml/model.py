@@ -438,108 +438,120 @@ class AtmoConvLSTM(keras.Model):
 
         # Output: T2 (2m temperature)
         OUTPUT_K_SIZE = self._params.output_cnn_kernel_size
-        self._t2_output_cnn = keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    keras.Sequential(
-                        [
-                            layers.Conv2D(
-                                LSTM_FILTERS // 2,
-                                OUTPUT_K_SIZE,
-                                strides=C1_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Conv2D(
-                                LSTM_FILTERS // 4,
-                                OUTPUT_K_SIZE,
-                                strides=C2_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Conv2D(
-                                LSTM_FILTERS // 8,
-                                OUTPUT_K_SIZE,
-                                strides=C2_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Conv2D(
-                                1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
-                            ),
-                        ]
-                    )
-                ),
-            ],
-            name="t2_output_cnn",
+        self._t2_output_cnn = (
+            keras.Sequential(
+                [
+                    layers.InputLayer(output_cnn_input_shape),
+                    layers.TimeDistributed(
+                        keras.Sequential(
+                            [
+                                layers.Conv2D(
+                                    LSTM_FILTERS // 2,
+                                    OUTPUT_K_SIZE,
+                                    strides=C1_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Conv2D(
+                                    LSTM_FILTERS // 4,
+                                    OUTPUT_K_SIZE,
+                                    strides=C2_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Conv2D(
+                                    LSTM_FILTERS // 8,
+                                    OUTPUT_K_SIZE,
+                                    strides=C2_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Conv2D(
+                                    1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
+                                ),
+                            ]
+                        )
+                    ),
+                ],
+                name="t2_output_cnn",
+            )
+            if vars.SpatiotemporalOutput.T2 in self._params.sto_vars
+            else None
         )
 
         # Output: RH2 (2m relative humidity)
-        self._rh2_output_cnn = keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    keras.Sequential(
-                        [
-                            layers.Conv2D(
-                                LSTM_FILTERS // 2,
-                                OUTPUT_K_SIZE,
-                                strides=C1_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Conv2D(
-                                LSTM_FILTERS // 4,
-                                OUTPUT_K_SIZE,
-                                strides=C2_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Conv2D(
-                                LSTM_FILTERS // 8,
-                                OUTPUT_K_SIZE,
-                                strides=C2_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Conv2D(
-                                1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
-                            ),
-                        ]
-                    )
-                ),
-            ],
-            name="rh2_output_cnn",
+        self._rh2_output_cnn = (
+            keras.Sequential(
+                [
+                    layers.InputLayer(output_cnn_input_shape),
+                    layers.TimeDistributed(
+                        keras.Sequential(
+                            [
+                                layers.Conv2D(
+                                    LSTM_FILTERS // 2,
+                                    OUTPUT_K_SIZE,
+                                    strides=C1_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Conv2D(
+                                    LSTM_FILTERS // 4,
+                                    OUTPUT_K_SIZE,
+                                    strides=C2_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Conv2D(
+                                    LSTM_FILTERS // 8,
+                                    OUTPUT_K_SIZE,
+                                    strides=C2_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Conv2D(
+                                    1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
+                                ),
+                            ]
+                        )
+                    ),
+                ],
+                name="rh2_output_cnn",
+            )
+            if vars.SpatiotemporalOutput.RH2 in self._params.sto_vars
+            else None
         )
 
         # Output: WSPD10 (10m wind speed)
-        self._wspd10_output_cnn = keras.Sequential(
-            [
-                layers.InputLayer(output_cnn_input_shape),
-                layers.TimeDistributed(
-                    keras.Sequential(
-                        [
-                            layers.Conv2D(
-                                LSTM_FILTERS // 2,
-                                OUTPUT_K_SIZE,
-                                strides=C1_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Conv2D(
-                                LSTM_FILTERS // 4,
-                                OUTPUT_K_SIZE,
-                                strides=C2_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Conv2D(
-                                LSTM_FILTERS // 8,
-                                OUTPUT_K_SIZE,
-                                strides=C2_STRIDE,
-                                **output_cnn_params,
-                            ),
-                            layers.Conv2D(
-                                1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
-                            ),
-                        ]
-                    )
-                ),
-            ],
-            name="wspd10_output_cnn",
+        self._wspd10_output_cnn = (
+            keras.Sequential(
+                [
+                    layers.InputLayer(output_cnn_input_shape),
+                    layers.TimeDistributed(
+                        keras.Sequential(
+                            [
+                                layers.Conv2D(
+                                    LSTM_FILTERS // 2,
+                                    OUTPUT_K_SIZE,
+                                    strides=C1_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Conv2D(
+                                    LSTM_FILTERS // 4,
+                                    OUTPUT_K_SIZE,
+                                    strides=C2_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Conv2D(
+                                    LSTM_FILTERS // 8,
+                                    OUTPUT_K_SIZE,
+                                    strides=C2_STRIDE,
+                                    **output_cnn_params,
+                                ),
+                                layers.Conv2D(
+                                    1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
+                                ),
+                            ]
+                        )
+                    ),
+                ],
+                name="wspd10_output_cnn",
+            )
+            if vars.SpatiotemporalOutput.WSPD_WDIR10 in self._params.sto_vars
+            else None
         )
 
         # Output: WDIR10 (10m wind direction sine and cosine functions)
