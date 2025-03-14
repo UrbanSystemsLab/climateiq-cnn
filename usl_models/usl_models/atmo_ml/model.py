@@ -2,7 +2,7 @@
 
 import logging
 import dataclasses
-from typing import TypedDict, List, Callable, Literal
+from typing import TypedDict, TypeAlias, List, Callable, Literal, Tuple
 
 import keras
 from keras import layers
@@ -15,13 +15,19 @@ from usl_models.atmo_ml import metrics
 from usl_models.atmo_ml import vars
 
 from usl_models.shared import keras_dataclasses
-from usl_models.shared import reflection_padding
+from usl_models.shared import pad_layers
+
+
+Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
+
+
+PadMode: TypeAlias = Literal["REFLECT", "CONSTANT"]
 
 
 class ConvParams(TypedDict):
     """Conv layer parameters."""
 
-    activation: Literal["relu", "sigmoid", "tanh", "softmax"]
+    activation: Activation
     padding: Literal["valid", "same"]
 
 
@@ -42,14 +48,20 @@ class AtmoModel:
         # Input CNN params
         input_cnn_kernel_size: int = 5
 
+        # Output CNN Params
+        output_cnn_kernel_size: int = 3
+
         # LSTM parameters.
         lstm_units: int = 64
         lstm_kernel_size: int = 5
         lstm_dropout: float = 0.2
         lstm_recurrent_dropout: float = 0.2
 
-        # Output CNN params
-        output_cnn_kernel_size: int = 1
+        # New activation parameters for each block.
+        spatial_activation: Activation = "relu"
+        st_activation: Activation = "relu"
+        lstm_activation: Activation = "tanh"
+        output_activation: Activation = "relu"
 
         # The optimizer configuration.
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
@@ -67,7 +79,13 @@ class AtmoModel:
         spatial_filters: int = 128
         spatiotemporal_filters: int = 64
 
-        include_sin_cos_vars: bool = True
+        sto_vars: Tuple[vars.SpatiotemporalOutput, ...] = (
+            vars.SpatiotemporalOutput.RH2,
+            vars.SpatiotemporalOutput.T2,
+            vars.SpatiotemporalOutput.WSPD_WDIR10,
+        )
+
+        pad_mode: PadMode = "REFLECT"
 
     class Input(TypedDict):
         """Input tensors."""
@@ -118,17 +136,9 @@ class AtmoModel:
     def get_output_spec(cls, params: Params) -> tf.TensorSpec:
         """Returns the output shape for the given params."""
         H, W = None, None
-        missing_vars = 0
-        if not params.include_sin_cos_vars:
-            missing_vars = 2
 
         return tf.TensorSpec(
-            shape=(
-                params.output_timesteps,
-                H,
-                W,
-                constants.OUTPUT_CHANNELS - missing_vars,
-            ),
+            shape=(params.output_timesteps, H, W, len(params.sto_vars)),
             dtype=tf.float32,
         )
 
@@ -187,19 +197,9 @@ class AtmoModel:
             metrics.NormalizedRootMeanSquaredError(),
             metrics.SSIMMetric(),
             metrics.PSNRMetric(),
-            metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.RH2),
-            metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.T2),
-            metrics.OutputVarMeanSquaredError(vars.SpatiotemporalOutput.WSPD_WDIR10),
         ]
-        if self._params.include_sin_cos_vars:
-            eval_metrics += [
-                metrics.OutputVarMeanSquaredError(
-                    vars.SpatiotemporalOutput.WSPD_WDIR10_COS
-                ),
-                metrics.OutputVarMeanSquaredError(
-                    vars.SpatiotemporalOutput.WSPD_WDIR10_SIN
-                ),
-            ]
+        for sto_var in self._params.sto_vars:
+            eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var))
 
         model = AtmoConvLSTM(self._params)
         model.compile(
@@ -337,6 +337,7 @@ class AtmoConvLSTM(keras.Model):
         LUI_DIM = self._params.lu_index_embedding_dim
         S_FILTERS = self._params.spatial_filters
         ST_FILTERS = self._params.spatiotemporal_filters
+        PAD_MODE = self._params.pad_mode
 
         # Define Embedding Layer for lu_index
         self.lu_index_embedding = keras.Sequential(
@@ -347,16 +348,18 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Spatial CNN
-        spatial_cnn_params = ConvParams(padding="valid", activation="relu")
+        spatial_cnn_params = ConvParams(
+            padding="valid", activation=self._params.spatial_activation
+        )
         self._spatial_cnn = keras.Sequential(
             [
                 layers.InputLayer((H, W, F_S + LUI_DIM)),
-                reflection_padding.ReflectionPadding2D((K_PAD, K_PAD)),
+                pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE),
                 layers.Conv2D(
                     S_FILTERS // 2, K_SIZE, strides=C1_STRIDE, **spatial_cnn_params
                 ),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
-                reflection_padding.ReflectionPadding2D((K_PAD, K_PAD)),
+                pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE),
                 layers.Conv2D(
                     S_FILTERS, K_SIZE, strides=C2_STRIDE, **spatial_cnn_params
                 ),
@@ -366,15 +369,15 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Spatiotemporal CNN
-        st_cnn_params = ConvParams(padding="valid", activation="relu")
+        st_cnn_params = ConvParams(
+            padding="valid", activation=self._params.st_activation
+        )
         self._st_cnn = keras.Sequential(
             [
                 layers.InputLayer((T, H, W, F_ST)),
                 # Remaining layers are TimeDistributed and are applied to each
                 # temporal slice
-                layers.TimeDistributed(
-                    reflection_padding.ReflectionPadding2D((K_PAD, K_PAD))
-                ),
+                layers.TimeDistributed(pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE)),
                 layers.TimeDistributed(
                     layers.Conv2D(
                         ST_FILTERS // 4, K_SIZE, strides=C1_STRIDE, **st_cnn_params
@@ -383,9 +386,7 @@ class AtmoConvLSTM(keras.Model):
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
-                layers.TimeDistributed(
-                    reflection_padding.ReflectionPadding2D((K_PAD, K_PAD))
-                ),
+                layers.TimeDistributed(pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE)),
                 layers.TimeDistributed(
                     layers.Conv2D(
                         ST_FILTERS, K_SIZE, strides=C2_STRIDE, **st_cnn_params
@@ -412,20 +413,23 @@ class AtmoConvLSTM(keras.Model):
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer((T, LSTM_H, LSTM_W, LSTM_C)),
                 layers.TimeDistributed(
-                    reflection_padding.ReflectionPadding2D((LSTM_K_PAD, LSTM_K_PAD))
+                    pad_layers.Pad2D((LSTM_K_PAD, LSTM_K_PAD), mode=PAD_MODE)
                 ),
                 layers.ConvLSTM2D(
                     LSTM_FILTERS,
                     LSTM_K_SIZE,
                     return_sequences=True,
                     strides=1,
-                    activation="tanh",
+                    padding="valid",
+                    activation=self._params.lstm_activation,
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
                 ),
             ],
             name="conv_lstm",
         )
+
+        OUTPUT_K_SIZE = self._params.output_cnn_kernel_size
 
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
@@ -539,6 +543,12 @@ class AtmoConvLSTM(keras.Model):
         )
 
         # Output: WDIR10 (10m wind direction sine and cosine functions)
+        has_windir10_cos = (
+            vars.SpatiotemporalOutput.WSPD_WDIR10_COS in self._params.sto_vars
+        )
+        has_windir10_sin = (
+            vars.SpatiotemporalOutput.WSPD_WDIR10_SIN in self._params.sto_vars
+        )
         self._wdir10_output_cnn = (
             keras.Sequential(
                 [
@@ -573,7 +583,7 @@ class AtmoConvLSTM(keras.Model):
                 ],
                 name="wdir10_output_cnn",
             )
-            if self._params.include_sin_cos_vars
+            if (has_windir10_cos and has_windir10_sin)
             else None
         )
 

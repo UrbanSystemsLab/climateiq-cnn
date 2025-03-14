@@ -6,7 +6,7 @@ import itertools
 import logging
 import pathlib
 import random
-from typing import Iterable
+from typing import Iterable, Tuple
 
 import tensorflow as tf
 import numpy as np
@@ -40,7 +40,11 @@ class Config:
     output_width: int = constants.MAP_WIDTH
     output_height: int = constants.MAP_HEIGHT
     output_timesteps: int = constants.OUTPUT_TIME_STEPS
-    include_sin_cos_vars: bool = True
+    sto_vars: Tuple[vars.SpatiotemporalOutput, ...] = (
+        vars.SpatiotemporalOutput.RH2,
+        vars.SpatiotemporalOutput.T2,
+        vars.SpatiotemporalOutput.WSPD_WDIR10,
+    )
 
 
 def get_date(filename: str) -> str:
@@ -111,7 +115,7 @@ def get_output_signature(
 ) -> tuple[model.AtmoModel.InputSpec, tf.TensorSpec]:
     params = model.AtmoModel.Params(
         output_timesteps=config.output_timesteps,
-        include_sin_cos_vars=config.include_sin_cos_vars,
+        sto_vars=config.sto_vars,
     )
     return (
         model.AtmoModel.get_input_spec(params),
@@ -455,13 +459,11 @@ def crop_2d(arr: np.ndarray, height: int, width: int) -> np.ndarray:
 
 def preprocess_label(label: np.ndarray, config: Config) -> np.ndarray:
     """Preprocess label tensor based on the dataset config."""
-    # Scale vars.
-    for sto_var in vars.SpatiotemporalOutput:
-        label[:, :, sto_var.value] = sto_var.scale(label[:, :, sto_var.value])
-
-    # Drop WIN_DIR SIN/COS.
-    if not config.include_sin_cos_vars:
-        label = label[:, :, :-2]
+    # Scale tensors and prune unused vars.
+    label_arrays = []
+    for sto_var in config.sto_vars:
+        label_arrays.append(sto_var.scale(label[:, :, sto_var.value]))
+    label = np.stack(label_arrays, axis=-1)
 
     # Apply cropping if required.
     H, W, _ = label.shape
