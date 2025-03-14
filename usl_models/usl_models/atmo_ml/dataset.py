@@ -459,10 +459,11 @@ def crop_2d(arr: np.ndarray, height: int, width: int) -> np.ndarray:
 
 def preprocess_label(label: np.ndarray, config: Config) -> np.ndarray:
     """Preprocess label tensor based on the dataset config."""
-    # Scale vars.
-    for i, sto_var in enumerate(config.sto_vars):
-        label[:, :, i] = sto_var.scale(label[:, :, sto_var.value])
-    label = label[:, :, : len(config.sto_vars)]
+    # Scale tensors and prune unused vars.
+    label_arrays = []
+    for sto_var in config.sto_vars:
+        label_arrays.append(sto_var.scale(label[:, :, sto_var.value]))
+    label = np.stack(label_arrays, axis=-1)
 
     # Apply cropping if required.
     H, W, _ = label.shape
