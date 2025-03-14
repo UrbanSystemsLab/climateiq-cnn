@@ -164,6 +164,38 @@ def load_dataset_cached(
     )
 
 
+def load_dataset_prediction_cached(
+    filecache_dir: pathlib.Path,
+    example_keys: list[ExampleKey] | None = None,
+    config: Config | None = None,
+):
+    """Loads a dataset from a filecache."""
+    example_keys = example_keys or get_cached_sim_dates(filecache_dir)
+    config = config or Config()
+
+    def generator() -> Iterable[model.AtmoModel.Input]:
+        for sim_name, day in example_keys:
+            # Load cached data for the day (inputs only)
+            load_result = load_day_cached(
+                filecache_dir,
+                sim_name,
+                datetime.strptime(day, DATE_FORMAT),
+                config=config,
+                for_prediction=True,  # Skip labels for prediction
+            )
+            if load_result is None:
+                logging.warning("Missing data for %s %s", sim_name, day)
+                continue
+            inputs, _ = load_result
+            yield inputs
+
+    # Return a dataset that yields only the inputs (input specification only)
+    input_spec = model.AtmoModel.get_input_spec(
+        model.AtmoModel.Params(output_timesteps=config.output_timesteps)
+    )
+    return tf.data.Dataset.from_generator(generator, output_signature=input_spec)
+
+
 def load_dataset(
     data_bucket_name: str,
     label_bucket_name: str,
@@ -349,7 +381,11 @@ def load_day_label(
 
 @functools.lru_cache(maxsize=128)
 def load_day_cached(
-    filecache_dir: pathlib.Path, sim_name: str, date: datetime, config: Config
+    filecache_dir: pathlib.Path,
+    sim_name: str,
+    date: datetime,
+    config: Config,
+    for_prediction: bool = False,
 ) -> tuple[model.AtmoModel.Input, tf.Tensor] | None:
     spatiotemporal = load_day_spatiotemporal_cached(
         filecache_dir / sim_name / "spatiotemporal", date, config
@@ -357,11 +393,15 @@ def load_day_cached(
     if spatiotemporal is None:
         return None
 
-    label = load_day_label_cached(
-        filecache_dir / sim_name / "labels", date, config=config
-    )
-    if label is None:
-        return None
+    if not for_prediction:
+        label = load_day_label_cached(
+            filecache_dir / sim_name / "labels", date, config=config
+        )
+        if label is None:
+            return None
+    else:
+        label = None
+
     static_data = np.load(filecache_dir / sim_name / STATIC_FILENAME_NPZ)
     if static_data is None:
         return None
