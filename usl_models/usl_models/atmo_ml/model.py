@@ -49,7 +49,7 @@ class AtmoModel:
         input_cnn_kernel_size: int = 5
 
         # Output CNN Params
-        output_cnn_kernel_size: int = 3
+        output_cnn_kernel_size: int = 1
 
         # LSTM parameters.
         lstm_units: int = 64
