@@ -140,18 +140,28 @@ def load_dataset_cached(
             if not (hash_range[0] <= hash_day(sim_name, day) < hash_range[1]):
                 continue
 
-            load_result = load_day_cached(
+            inputs = load_day_inputs_cached(
                 filecache_dir,
                 sim_name,
                 datetime.strptime(day, DATE_FORMAT),
                 config=config,
             )
-            if load_result is None:
+            if inputs is None:
+                missing_days += 1
+                continue
+
+            # Load labels using the existing load_day_label_cached function.
+            # Assume labels are stored under the "labels" folder in the filecache.
+            labels = load_day_label_cached(
+                filecache_dir / sim_name / "labels",
+                datetime.strptime(day, DATE_FORMAT),
+                config=config,
+            )
+            if labels is None:
                 missing_days += 1
                 continue
 
             generated_count += 1
-            inputs, labels = load_result
 
             yield inputs, labels
 
@@ -179,17 +189,17 @@ def load_dataset_prediction_cached(
 
         for sim_name, day in example_keys:
             # Load cached data for the day (inputs only)
-            load_result = load_day_cached(
+            inputs = load_day_inputs_cached(
                 filecache_dir,
                 sim_name,
                 datetime.strptime(day, DATE_FORMAT),
                 config=config,
-                for_prediction=True,  # Skip labels for prediction
+                # for_prediction=True,  # Skip labels for prediction
             )
-            if load_result is None:
+            if inputs is None:
                 logging.warning("Missing data for %s %s", sim_name, day)
                 continue
-            inputs, _ = load_result
+            # inputs, _ = load_result
             yield inputs
 
     # Return a dataset that yields only the inputs (input specification only)
@@ -383,12 +393,12 @@ def load_day_label(
 
 
 @functools.lru_cache(maxsize=128)
-def load_day_cached(
+def load_day_inputs_cached(
     filecache_dir: pathlib.Path,
     sim_name: str,
     date: datetime,
     config: Config,
-    for_prediction: bool = False,
+    # for_prediction: bool = False,
 ) -> tuple[model.AtmoModel.Input, tf.Tensor] | None:
     spatiotemporal = load_day_spatiotemporal_cached(
         filecache_dir / sim_name / "spatiotemporal", date, config
@@ -396,14 +406,14 @@ def load_day_cached(
     if spatiotemporal is None:
         return None
 
-    if not for_prediction:
-        label = load_day_label_cached(
-            filecache_dir / sim_name / "labels", date, config=config
-        )
-        if label is None:
-            return None
-    else:
-        label = None
+    # if not for_prediction:
+    #     label = load_day_label_cached(
+    #         filecache_dir / sim_name / "labels", date, config=config
+    #     )
+    #     if label is None:
+    #         return None
+    # else:
+    #     label = None
 
     static_data = np.load(filecache_dir / sim_name / STATIC_FILENAME_NPZ)
     if static_data is None:
@@ -424,7 +434,7 @@ def load_day_cached(
             sim_name=sim_name,
             date=date.strftime(DATE_FORMAT),
         ),
-        label,
+        # label,
     )
 
 

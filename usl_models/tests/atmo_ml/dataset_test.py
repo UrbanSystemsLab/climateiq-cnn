@@ -159,11 +159,11 @@ class TestAtmoMLDataset(usl_models.testing.TestCase):
             * num_batches,
         )
 
-    @mock.patch("usl_models.atmo_ml.dataset.load_day_cached")
-    def test_load_dataset_prediction_cached(self, mock_load_day_cached):
+    @mock.patch("usl_models.atmo_ml.dataset.load_day_inputs_cached")
+    def test_load_dataset_prediction_cached(self, mock_load_day_inputs_cached):
         """Test that load_dataset_prediction_cached returns only inputs."""
-        # Patch load_day_cached so that for prediction it returns (dummy_input, None)
-        mock_load_day_cached.return_value = (dummy_input, None)
+        # Patch load_day_inputs_cached so that for prediction it returns input.
+        mock_load_day_inputs_cached.return_value = dummy_input
 
         # Create example keys manually: list of tuples (sim_name, day)
         example_keys = [("test-sim", "2000-05-24"), ("test-sim", "2000-05-25")]
@@ -181,6 +181,7 @@ class TestAtmoMLDataset(usl_models.testing.TestCase):
 
         # Iterate over one batch and verify structure and shapes
         for inputs in pred_ds.take(1):
+            # Expected keys: 'spatiotemporal', 'spatial', 'lu_index', 'date', 'sim_name'
             self.assertIn("spatiotemporal", inputs)
             self.assertIn("spatial", inputs)
             self.assertIn("lu_index", inputs)
