@@ -460,12 +460,9 @@ class AtmoConvLSTM(keras.Model):
                                 layers.Conv2D(
                                     LSTM_FILTERS // 8,
                                     OUTPUT_K_SIZE,
-                                    strides=C2_STRIDE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(
-                                    1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
-                                ),
+                                layers.Conv2D(1, OUTPUT_K_SIZE, **output_cnn_params),
                             ]
                         )
                     ),
@@ -499,12 +496,9 @@ class AtmoConvLSTM(keras.Model):
                                 layers.Conv2D(
                                     LSTM_FILTERS // 8,
                                     OUTPUT_K_SIZE,
-                                    strides=C2_STRIDE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(
-                                    1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
-                                ),
+                                layers.Conv2D(1, OUTPUT_K_SIZE, **output_cnn_params),
                             ]
                         )
                     ),
@@ -538,12 +532,9 @@ class AtmoConvLSTM(keras.Model):
                                 layers.Conv2D(
                                     LSTM_FILTERS // 8,
                                     OUTPUT_K_SIZE,
-                                    strides=C2_STRIDE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(
-                                    1, OUTPUT_K_SIZE, strides=1, **output_cnn_params
-                                ),
+                                layers.Conv2D(1, OUTPUT_K_SIZE, **output_cnn_params),
                             ]
                         )
                     ),
@@ -583,12 +574,9 @@ class AtmoConvLSTM(keras.Model):
                                 layers.Conv2D(
                                     LSTM_FILTERS // 8,
                                     OUTPUT_K_SIZE,
-                                    strides=C2_STRIDE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(
-                                    2, OUTPUT_K_SIZE, strides=1, **output_cnn_params
-                                ),
+                                layers.Conv2D(2, OUTPUT_K_SIZE, **output_cnn_params),
                             ]
                         )
                     ),
