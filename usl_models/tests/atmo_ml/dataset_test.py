@@ -13,7 +13,7 @@ B = 2
 H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
 F_S = constants.NUM_SAPTIAL_FEATURES
 F_ST = constants.NUM_SPATIOTEMPORAL_FEATURES
-C = constants.OUTPUT_CHANNELS
+C = 3
 T_I, T_O = constants.INPUT_TIME_STEPS, 2
 
 
