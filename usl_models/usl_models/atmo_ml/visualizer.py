@@ -82,7 +82,11 @@ def _plot_2d(
     H, W, *_ = data.shape
     if dynamic_colorscale:
         vmin, vmax = get_min_max(data)
-        heatmap_kwargs = dict(vmin=None, vmax=None, robust=False)
+        heatmap_kwargs: dict[str, float | bool | None] = {
+            "vmin": None,
+            "vmax": None,
+            "robust": False,
+        }
     else:
         # When not normalizing, let seaborn use the raw data range.
         heatmap_kwargs = dict(vmin=vmin, vmax=vmax, robust=True)
