@@ -6,7 +6,7 @@ import itertools
 import logging
 import pathlib
 import random
-from typing import Iterable
+from typing import Iterable, Optional
 
 import tensorflow as tf
 import numpy as np
@@ -122,8 +122,11 @@ def load_dataset_cached(
     shuffle: bool = True,
     config: Config | None = None,
 ):
-    """Loads a dataset from a filecache."""
-    example_keys = example_keys or get_cached_sim_dates(filecache_dir)
+    """Loads a dataset from a filecache for training.
+
+    Uses separate functions to load inputs and labels.
+    """
+    example_keys = example_keys or (get_cached_sim_dates(filecache_dir) or [])
     config = config or Config()
 
     if shuffle:
@@ -139,23 +142,16 @@ def load_dataset_cached(
             # Skip days not in this dataset
             if not (hash_range[0] <= hash_day(sim_name, day) < hash_range[1]):
                 continue
-
-            inputs = load_day_inputs_cached(
-                filecache_dir,
-                sim_name,
-                datetime.strptime(day, DATE_FORMAT),
-                config=config,
-            )
-            if inputs is None:
+            date_obj = datetime.strptime(day, DATE_FORMAT)
+            result = load_day_inputs_cached(filecache_dir, sim_name, date_obj, config)
+            if result is None:
                 missing_days += 1
                 continue
+            # If the returned result is a tuple, extract only the first element (inputs)
+            inputs = result[0] if isinstance(result, tuple) else result
 
-            # Load labels using the existing load_day_label_cached function.
-            # Assume labels are stored under the "labels" folder in the filecache.
             labels = load_day_label_cached(
-                filecache_dir / sim_name / "labels",
-                datetime.strptime(day, DATE_FORMAT),
-                config=config,
+                filecache_dir / sim_name / "labels", date_obj, config
             )
             if labels is None:
                 missing_days += 1
@@ -178,9 +174,16 @@ def load_dataset_prediction_cached(
     filecache_dir: pathlib.Path,
     example_keys: list[ExampleKey] | None = None,
     config: Config | None = None,
-):
-    """Loads a dataset from a filecache."""
-    example_keys = example_keys or get_cached_sim_dates(filecache_dir)
+) -> tf.data.Dataset:
+    """Loads a prediction dataset from a filecache.
+
+    This function returns only inputs (without labels) for the inference phase.
+    """
+    example_keys = (
+        example_keys
+        if example_keys is not None
+        else (get_cached_sim_dates(filecache_dir) or [])
+    )
     config = config or Config()
 
     def generator() -> Iterable[model.AtmoModel.Input]:
@@ -188,18 +191,20 @@ def load_dataset_prediction_cached(
             return
 
         for sim_name, day in example_keys:
-            # Load cached data for the day (inputs only)
-            inputs = load_day_inputs_cached(
+            result = load_day_inputs_cached(
                 filecache_dir,
                 sim_name,
                 datetime.strptime(day, DATE_FORMAT),
                 config=config,
-                # for_prediction=True,  # Skip labels for prediction
             )
-            if inputs is None:
+            if result is None:
                 logging.warning("Missing data for %s %s", sim_name, day)
                 continue
-            # inputs, _ = load_result
+            # If result is a tuple, extract only the inputs
+            if isinstance(result, tuple):
+                inputs = result[0]
+            else:
+                inputs = result
             yield inputs
 
     # Return a dataset that yields only the inputs (input specification only)
@@ -434,7 +439,7 @@ def load_day_inputs_cached(
             sim_name=sim_name,
             date=date.strftime(DATE_FORMAT),
         ),
-        # label,
+        None,
     )
 
 
@@ -517,9 +522,12 @@ def preprocess_label(label: np.ndarray, config: Config) -> np.ndarray:
 
 
 def load_day_label_cached(
-    path: pathlib.Path, date: datetime, config: Config
-) -> tf.Tensor | None:
+    path: pathlib.Path, date: datetime, config: Optional[Config] = None
+) -> Optional[tf.Tensor]:
     """Load label tensor for a day."""
+    # Ensure we have a valid config
+    config = config or Config()
+
     timestep_interval = timedelta(hours=3)
     t_o = config.output_timesteps
     timestamps = [date + timestep_interval * i for i in range(8)][-t_o:]
