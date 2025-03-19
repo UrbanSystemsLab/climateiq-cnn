@@ -65,7 +65,9 @@ class AtmoModel:
 
         # The optimizer configuration.
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
-            default_factory=lambda: keras.optimizers.Adam(learning_rate=1e-3)
+            default_factory=lambda: keras.optimizers.Adam(
+                learning_rate=1e-3, beta_1=0.9, beta_2=0.999
+            )
         )
 
         output_timesteps: int = constants.OUTPUT_TIME_STEPS
@@ -364,6 +366,7 @@ class AtmoConvLSTM(keras.Model):
                     S_FILTERS, K_SIZE, strides=C2_STRIDE, **spatial_cnn_params
                 ),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
+                layers.BatchNormalization(),
             ],
             name="spatial_cnn",
         )
@@ -377,23 +380,28 @@ class AtmoConvLSTM(keras.Model):
                 layers.InputLayer((T, H, W, F_ST)),
                 # Remaining layers are TimeDistributed and are applied to each
                 # temporal slice
-                layers.TimeDistributed(pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE)),
                 layers.TimeDistributed(
-                    layers.Conv2D(
-                        ST_FILTERS // 4, K_SIZE, strides=C1_STRIDE, **st_cnn_params
+                    keras.Sequential(
+                        [
+                            pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE),
+                            layers.Conv2D(
+                                ST_FILTERS // 4,
+                                K_SIZE,
+                                strides=C1_STRIDE,
+                                **st_cnn_params,
+                            ),
+                            layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
+                            pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE),
+                            layers.Conv2D(
+                                ST_FILTERS,
+                                K_SIZE,
+                                strides=C2_STRIDE,
+                                **st_cnn_params,
+                            ),
+                            layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
+                            layers.BatchNormalization(),
+                        ]
                     )
-                ),
-                layers.TimeDistributed(
-                    layers.MaxPool2D(pool_size=2, strides=1, padding="same")
-                ),
-                layers.TimeDistributed(pad_layers.Pad2D((K_PAD, K_PAD), mode=PAD_MODE)),
-                layers.TimeDistributed(
-                    layers.Conv2D(
-                        ST_FILTERS, K_SIZE, strides=C2_STRIDE, **st_cnn_params
-                    )
-                ),
-                layers.TimeDistributed(
-                    layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
             ],
             name="spatiotemporal_cnn",
@@ -425,6 +433,7 @@ class AtmoConvLSTM(keras.Model):
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
                 ),
+                layers.TimeDistributed(layers.BatchNormalization()),
             ],
             name="conv_lstm",
         )
