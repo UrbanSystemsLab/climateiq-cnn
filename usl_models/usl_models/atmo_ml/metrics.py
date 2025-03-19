@@ -3,6 +3,8 @@
 Metrics used for AtmoML modeling.
 """
 
+from typing import Tuple
+
 import tensorflow as tf
 
 import keras
@@ -14,23 +16,35 @@ from usl_models.atmo_ml import vars
 class OutputVarMeanSquaredError(keras.metrics.MeanMetricWrapper):
     """Output variable mean squared error."""
 
-    def __init__(self, sto_var: vars.SpatiotemporalOutput, name=None, dtype=tf.float32):
+    def __init__(
+        self,
+        sto_var: vars.SpatiotemporalOutput,
+        sto_i: int,
+        name=None,
+        dtype=tf.float32,
+    ):
         """Create a mean squared error metric function for an sto_var."""
 
         def mse(y_true: tf.Tensor, y_pred: tf.Tensor):
             """Computes MSE on RH output tensor only."""
             return keras.metrics.mean_squared_error(
-                y_true[:, :, :, :, sto_var.value],
-                y_pred[:, :, :, :, sto_var.value],
+                y_true[:, :, :, :, sto_i],
+                y_pred[:, :, :, :, sto_i],
             )
 
         self.sto_var = sto_var
+        self.sto_i = sto_i
         name = name or "mse_" + sto_var.name
         keras.metrics.MeanMetricWrapper.__init__(self, fn=mse, name=name, dtype=dtype)
 
     def get_config(self):
         """Returns the serializable config of the metric."""
-        return {"name": self.name, "dtype": self.dtype, "sto_var": self.sto_var}
+        return {
+            "name": self.name,
+            "dtype": self.dtype,
+            "sto_var": self.sto_var,
+            "sto_i": self.sto_i,
+        }
 
 
 @keras.saving.register_keras_serializable(package="CustomMetrics")

@@ -82,9 +82,9 @@ class AtmoModel:
         spatiotemporal_filters: int = 64
 
         sto_vars: Tuple[vars.SpatiotemporalOutput, ...] = (
-            vars.SpatiotemporalOutput.RH2,
+            # vars.SpatiotemporalOutput.RH2,
             vars.SpatiotemporalOutput.T2,
-            vars.SpatiotemporalOutput.WSPD_WDIR10,
+            # vars.SpatiotemporalOutput.WSPD_WDIR10,
         )
 
         pad_mode: PadMode = "REFLECT"
@@ -200,8 +200,8 @@ class AtmoModel:
             metrics.SSIMMetric(),
             metrics.PSNRMetric(),
         ]
-        for sto_var in self._params.sto_vars:
-            eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var))
+        for i, sto_var in enumerate(self._params.sto_vars):
+            eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var, i))
 
         model = AtmoConvLSTM(self._params)
         model.compile(
@@ -650,7 +650,7 @@ class AtmoConvLSTM(keras.Model):
             outputs.append(self._wdir10_output_cnn(trconv_input))
 
         output = tf.concat(outputs, axis=-1)
-        tf.ensure_shape(output, (B, T_O, H, W, None))
+        tf.ensure_shape(output, (B, T_O, H, W, 1))
         return output
 
     def get_config(self) -> dict:

@@ -41,9 +41,9 @@ class Config:
     output_height: int = constants.MAP_HEIGHT
     output_timesteps: int = constants.OUTPUT_TIME_STEPS
     sto_vars: Tuple[vars.SpatiotemporalOutput, ...] = (
-        vars.SpatiotemporalOutput.RH2,
+        # vars.SpatiotemporalOutput.RH2,
         vars.SpatiotemporalOutput.T2,
-        vars.SpatiotemporalOutput.WSPD_WDIR10,
+        # vars.SpatiotemporalOutput.WSPD_WDIR10,
     )
 
 
