@@ -1,0 +1,31 @@
+# gcloud batch jobs submit atmo-ml-predict --location=us-central1 --config=usl_models/batch_predict/atmo_ml/predict.yaml
+
+taskGroups:
+  - taskSpec:
+      runnables:
+        - container:
+            imageUri: us-central1-docker.pkg.dev/climateiq/usl-models/atmo-ml-test:dev
+            options: --network host
+            volumes: /tmp:/tmp
+            commands:
+              - python3 /usl_models/batch_predict/atmo_ml/main.py
+        - barrier:
+            name: predict-complete
+      environment:
+        variables:
+          DATA_ROOT: /mnt/disks/tmp/data
+    taskCount: 2
+    taskCountPerNode: 1
+    requireHostsFile: true
+allocationPolicy:
+  instances:
+    - policy:
+        bootDisk:
+          sizeGb: 250
+        machineType: n1-standard-4
+        accelerators:
+          - type: nvidia-tesla-v100
+            count: 1
+      installGpuDrivers: true
+logsPolicy:
+  destination: CLOUD_LOGGING
