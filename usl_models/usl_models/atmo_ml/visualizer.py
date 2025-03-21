@@ -140,10 +140,6 @@ def plot(
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
     spatial_features: list[int] | None = None,
     spatial_ticks: int = 6,
-    gt_vmin: float | None = None,
-    gt_vmax: float | None = None,
-    pred_vmin: float | None = None,
-    pred_vmax: float | None = None,
     dynamic_colorscale: bool = False,
     unscale: bool = True,
 ) -> Iterator[matplotlib.figure.Figure]:
@@ -183,40 +179,29 @@ def plot(
     if label is not None:
         if dynamic_colorscale:
             gt_min, gt_max = get_min_max(label)
+            use_vmin, use_vmax = gt_min, gt_max
+        else:
+            use_vmin, use_vmax = sto_var_config.vmin, sto_var_config.vmax
         yield plot_2d_timeseries(
             label[:, :, :, sto_var.value],
             title=sto_var.name + f" [true] ({sim_name} {date})",
-            vmin=(
-                gt_vmin
-                if gt_vmin is not None
-                else (gt_min if dynamic_colorscale else sto_var_config.vmin)
-            ),
-            vmax=(
-                gt_vmax
-                if gt_vmax is not None
-                else (gt_max if dynamic_colorscale else sto_var_config.vmax)
-            ),
+            vmin=use_vmin,
+            vmax=use_vmax,
             t_start=0.0,
             t_interval=0.5,
             dynamic_colorscale=dynamic_colorscale,
         )
-
     if pred is not None:
         if dynamic_colorscale:
             pred_min, pred_max = get_min_max(pred)
+            use_vmin, use_vmax = pred_min, pred_max
+        else:
+            use_vmin, use_vmax = sto_var_config.vmin, sto_var_config.vmax
         yield plot_2d_timeseries(
             pred[:, :, :, sto_var.value],
             title=sto_var.name + f" [pred] ({sim_name} {date})",
-            vmin=(
-                pred_vmin
-                if pred_vmin is not None
-                else (pred_min if dynamic_colorscale else sto_var_config.vmin)
-            ),
-            vmax=(
-                pred_vmax
-                if pred_vmax is not None
-                else (pred_max if dynamic_colorscale else sto_var_config.vmax)
-            ),
+            vmin=use_vmin,
+            vmax=use_vmax,
             t_start=0.0,
             t_interval=0.5,
             dynamic_colorscale=dynamic_colorscale,
@@ -244,16 +229,13 @@ def plot_batch(
     st_var: vars.Spatiotemporal = vars.Spatiotemporal.RH,
     sto_var: vars.SpatiotemporalOutput = vars.SpatiotemporalOutput.RH2,
     max_examples: int | None = None,
-    gt_vmin: float | None = None,
-    gt_vmax: float | None = None,
-    pred_vmin: float | None = None,
-    pred_vmax: float | None = None,
     dynamic_colorscale: bool = False,
     unscale: bool = True,
 ) -> Iterator[matplotlib.figure.Figure]:
-    """Plot a batch of AtmoML Examples with separate vmin/vmax for GT and prediction.
+    """Plot a batch of AtmoML Examples.
 
     If dynamic_colorscale is True, the color limits are computed from the data.
+    Otherwise, a general range from the configuration is used for GT and prediction.
     """
     for b, _ in itertools.islice(enumerate(label_batch), max_examples):
         for fig in plot(
@@ -262,10 +244,6 @@ def plot_batch(
             pred=pred_batch[b],
             st_var=st_var,
             sto_var=sto_var,
-            gt_vmin=gt_vmin,
-            gt_vmax=gt_vmax,
-            pred_vmin=pred_vmin,
-            pred_vmax=pred_vmax,
             dynamic_colorscale=dynamic_colorscale,
             unscale=unscale,
         ):
