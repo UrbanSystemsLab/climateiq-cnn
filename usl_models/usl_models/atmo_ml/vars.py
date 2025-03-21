@@ -71,6 +71,11 @@ class SpatiotemporalOutput(Enum):
         """Get config for tensorflow serialization."""
         return {"value": self.value}
 
+    @classmethod
+    def from_config(cls, config: dict) -> "SpatiotemporalOutput":
+        """Get config for tensorflow serialization."""
+        return cls(config["value"])
+
     def scale(self, x: np.ndarray | tf.Tensor):
         """Apply min max scaling."""
         return STO_VAR_CONFIGS[self].scale(x)

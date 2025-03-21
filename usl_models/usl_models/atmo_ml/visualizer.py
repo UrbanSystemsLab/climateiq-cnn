@@ -9,6 +9,7 @@ import numpy as np
 import tensorflow as tf
 
 from usl_models.atmo_ml import vars
+from usl_models.atmo_ml import dataset
 
 
 def init_plt():
@@ -133,6 +134,7 @@ def plot_spatial(
 
 
 def plot(
+    config: dataset.Config,
     inputs: dict[str, tf.Tensor],
     label: tf.Tensor | None = None,
     pred: tf.Tensor | None = None,
@@ -176,6 +178,7 @@ def plot(
     if pred is not None and unscale:
         pred = sto_var_config.unscale(pred.numpy())
 
+    sto_i = config.sto_vars.index(sto_var)
     if label is not None:
         if dynamic_colorscale:
             gt_min, gt_max = get_min_max(label)
@@ -183,7 +186,7 @@ def plot(
         else:
             use_vmin, use_vmax = sto_var_config.vmin, sto_var_config.vmax
         yield plot_2d_timeseries(
-            label[:, :, :, sto_var.value],
+            label[:, :, :, sto_i],
             title=sto_var.name + f" [true] ({sim_name} {date})",
             vmin=use_vmin,
             vmax=use_vmax,
@@ -198,7 +201,7 @@ def plot(
         else:
             use_vmin, use_vmax = sto_var_config.vmin, sto_var_config.vmax
         yield plot_2d_timeseries(
-            pred[:, :, :, sto_var.value],
+            pred[:, :, :, sto_i],
             title=sto_var.name + f" [pred] ({sim_name} {date})",
             vmin=use_vmin,
             vmax=use_vmax,
@@ -209,7 +212,7 @@ def plot(
 
     # Plot the difference between prediction and ground truth
     if label is not None and pred is not None:
-        diff = pred[:, :, :, sto_var.value] - label[:, :, :, sto_var.value]
+        diff = pred[:, :, :, sto_i] - label[:, :, :, sto_i]
         diff_range = max(abs(sto_var_config.vmin), abs(sto_var_config.vmax))
         yield plot_2d_timeseries(
             diff,
@@ -223,6 +226,7 @@ def plot(
 
 
 def plot_batch(
+    config: dataset.Config,
     input_batch: tf.Tensor,
     label_batch: tf.Tensor,
     pred_batch: tf.Tensor,
@@ -239,6 +243,7 @@ def plot_batch(
     """
     for b, _ in itertools.islice(enumerate(label_batch), max_examples):
         for fig in plot(
+            config,
             inputs={k: v[b] for k, v in input_batch.items()},
             label=label_batch[b],
             pred=pred_batch[b],
