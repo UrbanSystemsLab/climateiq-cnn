@@ -14,13 +14,17 @@ class VarConfig:
     vmax: float = 1.0
 
     norm_vmin: float = 0.0
-    norm_vmax = 1.0
+    norm_vmax: float = 1.0
 
     def scale(self, x: np.ndarray | tf.Tensor) -> np.ndarray | tf.Tensor:
         """Apply min max scaling."""
         x[x > self.vmax] = self.vmax
         x[x < self.vmin] = self.vmin
         return (x - self.vmin) / (self.vmax - self.vmin)
+
+    def unscale(self, x: np.ndarray | tf.Tensor) -> np.ndarray | tf.Tensor:
+        """Reverse the scaling operation to recover true values."""
+        return x * (self.vmax - self.vmin) + self.vmin
 
 
 class Spatiotemporal(Enum):
