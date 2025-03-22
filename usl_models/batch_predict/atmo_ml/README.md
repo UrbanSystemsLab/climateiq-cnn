@@ -11,11 +11,13 @@ python usl_models/batch_predict/atmo_ml/main.py
 ## Build and push container
 
 ```sh
-gcloud builds submit --config=usl_models/batch_predict/atmo_ml/cloudbuild.yaml .
+gcloud builds submit --config="usl_models/batch_predict/atmo_ml/cloudbuild.yaml" "."
 ```
 
 ## Run batch inference job
 
-```sh
-gcloud batch jobs submit atmo-ml-predict --location=us-central1 --config=usl_models/batch_predict/atmo_ml/predict.yaml
+```bash
+gcloud batch jobs submit "atmo-ml-predict-$(date +%Y%m%d-%H%M%S)" \
+  --location="us-central1" \
+  --config="usl_models/batch_predict/atmo_ml/predict.yaml"
 ```

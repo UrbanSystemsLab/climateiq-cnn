@@ -5,10 +5,9 @@ taskGroups:
       runnables:
         - container:
             imageUri: us-central1-docker.pkg.dev/climateiq/usl-models/atmo-ml-test:dev
-            options: --network host
-            volumes: /tmp:/tmp
+            entrypoint: python3
             commands:
-              - python3 /usl_models/batch_predict/atmo_ml/main.py
+              - /usl_models/batch_predict/atmo_ml/main.py
         - barrier:
             name: predict-complete
       environment:

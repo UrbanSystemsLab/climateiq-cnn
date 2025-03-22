@@ -1,9 +1,11 @@
 # docker build -f usl_models/batch_predict/atmo_ml/Dockerfile .
-# gcloud builds submit --tag=us-central1-docker.pkg.dev/climateiq/usl-models/test-container:tag1 --region=us-central1 usl_models/batch_predict/atmo_ml/Dockerfile
-FROM python:3.11
+FROM python:3.11-slim
 
 # Copy python and shell scripts
 COPY usl_models /usl_models
+
+ENV PYTHONPATH="${PYTHONPATH}:/usl_models"
+ENV PIP_ROOT_USER_ACTION="ignore"
 
 # Install various dependencies
 RUN pip3 install --upgrade pip
