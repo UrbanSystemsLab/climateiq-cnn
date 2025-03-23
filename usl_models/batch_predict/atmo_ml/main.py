@@ -3,11 +3,11 @@
 import tensorflow as tf
 from usl_models.atmo_ml.model import AtmoModel
 from usl_models.atmo_ml import dataset
+from usl_models.shared import env
 
-import os
 
-BATCH_TASK_INDEX = os.getenv("BATCH_TASK_INDEX") or 0
-BATCH_TASK_COUNT = os.getenv("BATCH_TASK_COUNT") or 1
+BATCH_TASK_INDEX = env.getenv("BATCH_TASK_INDEX", int, default=0)
+BATCH_TASK_COUNT = env.getenv("BATCH_TASK_COUNT", int, default=1)
 SIMULATION_NAMES = [
     "NYC_Heat_Test/NYC_summer_2000_01p",
     "NYC_Heat_Test/NYC_summer_2010_99p",
