@@ -526,9 +526,6 @@ def load_day_label_cached(
     path: pathlib.Path, date: datetime, config: Config
 ) -> tf.Tensor | None:
     """Load label tensor for a day."""
-    # Ensure we have a valid config
-    config = config or Config()
-
     timestep_interval = timedelta(hours=3)
     t_o = config.output_timesteps
     timestamps = [date + timestep_interval * i for i in range(8)][-t_o:]
