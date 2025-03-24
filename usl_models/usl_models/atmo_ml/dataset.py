@@ -6,7 +6,7 @@ import itertools
 import logging
 import pathlib
 import random
-from typing import Iterable, Optional
+from typing import Iterable, Tuple
 
 import tensorflow as tf
 import numpy as np
@@ -40,6 +40,11 @@ class Config:
     output_width: int = constants.MAP_WIDTH
     output_height: int = constants.MAP_HEIGHT
     output_timesteps: int = constants.OUTPUT_TIME_STEPS
+    sto_vars: Tuple[vars.SpatiotemporalOutput, ...] = (
+        vars.SpatiotemporalOutput.RH2,
+        vars.SpatiotemporalOutput.T2,
+        vars.SpatiotemporalOutput.WSPD_WDIR10,
+    )
 
 
 def get_date(filename: str) -> str:
@@ -108,7 +113,10 @@ def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
 def get_output_signature(
     config: Config,
 ) -> tuple[model.AtmoModel.InputSpec, tf.TensorSpec]:
-    params = model.AtmoModel.Params(output_timesteps=config.output_timesteps)
+    params = model.AtmoModel.Params(
+        output_timesteps=config.output_timesteps,
+        sto_vars=config.sto_vars,
+    )
     return (
         model.AtmoModel.get_input_spec(params),
         model.AtmoModel.get_output_spec(params),
@@ -151,7 +159,7 @@ def load_dataset_cached(
             inputs = result[0] if isinstance(result, tuple) else result
 
             labels = load_day_label_cached(
-                filecache_dir / sim_name / "labels", date_obj, config
+                filecache_dir / sim_name / "labels", date_obj, config or Config()
             )
             if labels is None:
                 missing_days += 1
@@ -411,15 +419,6 @@ def load_day_inputs_cached(
     if spatiotemporal is None:
         return None
 
-    # if not for_prediction:
-    #     label = load_day_label_cached(
-    #         filecache_dir / sim_name / "labels", date, config=config
-    #     )
-    #     if label is None:
-    #         return None
-    # else:
-    #     label = None
-
     static_data = np.load(filecache_dir / sim_name / STATIC_FILENAME_NPZ)
     if static_data is None:
         return None
@@ -509,9 +508,11 @@ def crop_2d(arr: np.ndarray, height: int, width: int) -> np.ndarray:
 
 def preprocess_label(label: np.ndarray, config: Config) -> np.ndarray:
     """Preprocess label tensor based on the dataset config."""
-    # Scale vars.
-    for sto_var in vars.SpatiotemporalOutput:
-        label[:, :, sto_var.value] = sto_var.scale(label[:, :, sto_var.value])
+    # Scale tensors and prune unused vars.
+    label_arrays = []
+    for sto_var in config.sto_vars:
+        label_arrays.append(sto_var.scale(label[:, :, sto_var.value]))
+    label = np.stack(label_arrays, axis=-1)
 
     # Apply cropping if required.
     H, W, _ = label.shape
@@ -522,8 +523,8 @@ def preprocess_label(label: np.ndarray, config: Config) -> np.ndarray:
 
 
 def load_day_label_cached(
-    path: pathlib.Path, date: datetime, config: Optional[Config] = None
-) -> Optional[tf.Tensor]:
+    path: pathlib.Path, date: datetime, config: Config
+) -> tf.Tensor | None:
     """Load label tensor for a day."""
     # Ensure we have a valid config
     config = config or Config()
