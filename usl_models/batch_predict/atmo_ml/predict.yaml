@@ -5,9 +5,14 @@ taskGroups:
       runnables:
         - container:
             imageUri: us-central1-docker.pkg.dev/climateiq/usl-models/atmo-ml-test:dev
-            entrypoint: python3
+            entrypoint: python3.11
             commands:
               - /usl_models/batch_predict/atmo_ml/main.py
+              - --model_path="gs://climateiq-vertexai/atmoml-main-20250319-204950/model"
+              - --batch_size=2
+              - --max_batches=4
+              - --output_bucket=climateiq-predictions
+              - --output_path="atmoml-test/$(date +%Y%m%d-%H%M%S)"
         - barrier:
             name: predict-complete
       environment:
@@ -21,10 +26,11 @@ allocationPolicy:
     - policy:
         bootDisk:
           sizeGb: 250
-        machineType: n1-standard-4
+        machineType: g2-standard-24
         accelerators:
-          - type: nvidia-tesla-v100
-            count: 1
+          - type: nvidia-l4
+            count: 2
+            driverVersion: "550.90.07"
       installGpuDrivers: true
 logsPolicy:
   destination: CLOUD_LOGGING

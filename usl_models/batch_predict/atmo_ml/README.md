@@ -17,7 +17,7 @@ gcloud builds submit --config="usl_models/batch_predict/atmo_ml/cloudbuild.yaml"
 ## Run batch inference job
 
 ```bash
-gcloud batch jobs submit "atmo-ml-predict-$(date +%Y%m%d-%H%M%S)" \
+gcloud batch jobs submit "atmoml-predict-$(date +%Y%m%d-%H%M%S)" \
   --location="us-central1" \
   --config="usl_models/batch_predict/atmo_ml/predict.yaml"
 ```
