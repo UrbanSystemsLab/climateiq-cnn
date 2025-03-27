@@ -1,0 +1,12 @@
+# gcloud builds submit --config=usl_models/batch_predict/atmo_ml/cloudbuild.yaml .
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "build",
+        "--tag=us-central1-docker.pkg.dev/climateiq/usl-models/atmo-ml-test:dev",
+        "--file=./usl_models/batch_predict/atmo_ml/Dockerfile",
+        ".",
+      ]
+images:
+  - "us-central1-docker.pkg.dev/climateiq/usl-models/atmo-ml-test:dev"

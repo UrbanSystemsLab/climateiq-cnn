@@ -13,3 +13,6 @@ terraform/modules/data_pipeline/files/
 usl_models/logs/*
 usl_models/data/*
 .venv
+
+*.mypy_cache
+*.pytest_cache

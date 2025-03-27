@@ -1,0 +1,7 @@
+.git
+.gitignore
+#!include:.gitignore
+
+*.ipynb
+.vscode
+.github
