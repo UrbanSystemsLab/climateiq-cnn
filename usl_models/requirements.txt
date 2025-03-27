@@ -6,4 +6,5 @@ keras-tuner==1.4.7
 google-cloud-aiplatform==1.43.0
 google-cloud-storage==2.15.0
 google-cloud-firestore==2.15.0
+google-cloud-batch==0.17.35
 seaborn==0.13.2

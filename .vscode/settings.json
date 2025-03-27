@@ -1,5 +1,5 @@
 {
-    "jupyter.notebookFileRoot": "${fileDirname}/..",
+    "jupyter.notebookFileRoot": "${workspaceFolder}",
     "python.testing.pytestArgs": [
         "usl_models"
     ],

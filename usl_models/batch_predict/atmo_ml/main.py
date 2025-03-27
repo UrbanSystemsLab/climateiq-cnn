@@ -49,7 +49,7 @@ def main(
     assert len(gpu_devices) > 0, "Batch prediction requires a GPU."
 
     client = storage.Client()
-    output_bucket = client.bucket(output_bucket)
+    bucket = client.bucket(output_bucket)
 
     ds = dataset.load_dataset(
         data_bucket_name=dataset.FEATURE_BUCKET_NAME,
@@ -72,7 +72,7 @@ def main(
                 path = f"{output_path}/{sim_name}/{date}.npy"
                 uploader.upload_npy(
                     pred_npy,
-                    bucket=output_bucket,
+                    bucket=bucket,
                     path=path,
                 )
                 logging.info("Uploaded file: %s", f"{output_bucket}/{path}")
