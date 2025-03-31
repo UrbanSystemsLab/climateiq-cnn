@@ -19,7 +19,7 @@ class FloodModelParams(TypedDict):
 
     # The optimizer configuration.
     # We use the dictionary definition to ensure the model is serializable.
-    # This value is passed to tf.keras.optimizers.get to build the optimizer object.
+    # This value is passed to keras.optimizers.get to build the optimizer object.
     optimizer_config: Mapping[str, Any]
 
 
