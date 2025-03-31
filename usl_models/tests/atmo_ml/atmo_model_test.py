@@ -150,7 +150,7 @@ def test_train():
 
 def test_early_stopping():
     """Tests early stopping during model training."""
-    tf.keras.utils.set_random_seed(1)
+    keras.utils.set_random_seed(1)
 
     batch_size = 4
     params = pytest_model_params()

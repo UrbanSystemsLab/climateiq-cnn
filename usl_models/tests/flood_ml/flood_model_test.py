@@ -2,6 +2,7 @@
 
 import tempfile
 
+import keras
 import numpy as np
 import tensorflow as tf
 
@@ -151,7 +152,7 @@ def test_early_stopping():
     validaton loss goes up.
     """
     # To ensure determinism, we set a random seed so the model is reproducible.
-    tf.keras.utils.set_random_seed(1)
+    keras.utils.set_random_seed(1)
 
     batch_size = 4
     height, width = 100, 100
