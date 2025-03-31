@@ -130,11 +130,8 @@ def load_dataset_cached(
     shuffle: bool = True,
     config: Config | None = None,
 ):
-    """Loads a dataset from a filecache for training.
-
-    Uses separate functions to load inputs and labels.
-    """
-    example_keys = example_keys or (get_cached_sim_dates(filecache_dir) or [])
+    """Loads a dataset from a filecache."""
+    example_keys = example_keys or get_cached_sim_dates(filecache_dir)
     config = config or Config()
 
     if shuffle:
@@ -150,22 +147,19 @@ def load_dataset_cached(
             # Skip days not in this dataset
             if not (hash_range[0] <= hash_day(sim_name, day) < hash_range[1]):
                 continue
-            date_obj = datetime.strptime(day, DATE_FORMAT)
-            result = load_day_inputs_cached(filecache_dir, sim_name, date_obj, config)
-            if result is None:
-                missing_days += 1
-                continue
-            # If the returned result is a tuple, extract only the first element (inputs)
-            inputs = result[0] if isinstance(result, tuple) else result
 
-            labels = load_day_label_cached(
-                filecache_dir / sim_name / "labels", date_obj, config or Config()
+            load_result = load_day_cached(
+                filecache_dir,
+                sim_name,
+                datetime.strptime(day, DATE_FORMAT),
+                config=config,
             )
-            if labels is None:
+            if load_result is None:
                 missing_days += 1
                 continue
 
             generated_count += 1
+            inputs, labels = load_result
 
             yield inputs, labels
 
@@ -176,50 +170,6 @@ def load_dataset_cached(
     return tf.data.Dataset.from_generator(
         generator, output_signature=get_output_signature(config)
     )
-
-
-def load_dataset_prediction_cached(
-    filecache_dir: pathlib.Path,
-    example_keys: list[ExampleKey] | None = None,
-    config: Config | None = None,
-) -> tf.data.Dataset:
-    """Loads a prediction dataset from a filecache.
-
-    This function returns only inputs (without labels) for the inference phase.
-    """
-    example_keys = (
-        example_keys
-        if example_keys is not None
-        else (get_cached_sim_dates(filecache_dir) or [])
-    )
-    config = config or Config()
-
-    def generator() -> Iterable[model.AtmoModel.Input]:
-        if example_keys is None:
-            return
-
-        for sim_name, day in example_keys:
-            result = load_day_inputs_cached(
-                filecache_dir,
-                sim_name,
-                datetime.strptime(day, DATE_FORMAT),
-                config=config,
-            )
-            if result is None:
-                logging.warning("Missing data for %s %s", sim_name, day)
-                continue
-            # If result is a tuple, extract only the inputs
-            if isinstance(result, tuple):
-                inputs = result[0]
-            else:
-                inputs = result
-            yield inputs
-
-    # Return a dataset that yields only the inputs (input specification only)
-    input_spec = model.AtmoModel.get_input_spec(
-        model.AtmoModel.Params(output_timesteps=config.output_timesteps)
-    )
-    return tf.data.Dataset.from_generator(generator, output_signature=input_spec)
 
 
 def load_dataset(
@@ -406,12 +356,8 @@ def load_day_label(
 
 
 @functools.lru_cache(maxsize=128)
-def load_day_inputs_cached(
-    filecache_dir: pathlib.Path,
-    sim_name: str,
-    date: datetime,
-    config: Config,
-    # for_prediction: bool = False,
+def load_day_cached(
+    filecache_dir: pathlib.Path, sim_name: str, date: datetime, config: Config
 ) -> tuple[model.AtmoModel.Input, tf.Tensor] | None:
     spatiotemporal = load_day_spatiotemporal_cached(
         filecache_dir / sim_name / "spatiotemporal", date, config
@@ -419,6 +365,11 @@ def load_day_inputs_cached(
     if spatiotemporal is None:
         return None
 
+    label = load_day_label_cached(
+        filecache_dir / sim_name / "labels", date, config=config
+    )
+    if label is None:
+        return None
     static_data = np.load(filecache_dir / sim_name / STATIC_FILENAME_NPZ)
     if static_data is None:
         return None
@@ -438,7 +389,7 @@ def load_day_inputs_cached(
             sim_name=sim_name,
             date=date.strftime(DATE_FORMAT),
         ),
-        None,
+        label,
     )
 
 
