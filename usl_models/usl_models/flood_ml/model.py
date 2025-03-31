@@ -78,11 +78,11 @@ class FloodModel:
             spatial_dims=self._spatial_dims,
         )
         model.compile(
-            optimizer=tf.keras.optimizers.get(self._model_params["optimizer_config"]),
-            loss=tf.keras.losses.MeanSquaredError(),
+            optimizer=keras.optimizers.get(self._model_params["optimizer_config"]),
+            loss=keras.losses.MeanSquaredError(),
             metrics=[
-                tf.keras.metrics.MeanAbsoluteError(),
-                tf.keras.metrics.RootMeanSquaredError(),
+                keras.metrics.MeanAbsoluteError(),
+                keras.metrics.RootMeanSquaredError(),
             ],
         )
         return model
@@ -207,7 +207,7 @@ class FloodModel:
 ###############################################################################
 
 
-class FloodConvLSTM(tf.keras.Model):
+class FloodConvLSTM(keras.Model):
     """Flood ConvLSTM model.
 
     The architecture is an autoregressive ConvLSTM. Spatiotemporal and
@@ -244,7 +244,7 @@ class FloodConvLSTM(tf.keras.Model):
 
         # Spatiotemporal CNN
         st_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
-        self.st_cnn = tf.keras.Sequential(
+        self.st_cnn = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer((None, self._spatial_height, self._spatial_width, 1)),
@@ -264,7 +264,7 @@ class FloodConvLSTM(tf.keras.Model):
 
         # Geospatial CNN
         geo_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
-        self.geo_cnn = tf.keras.Sequential(
+        self.geo_cnn = keras.Sequential(
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
@@ -285,7 +285,7 @@ class FloodConvLSTM(tf.keras.Model):
         conv_lstm_height = self._spatial_height // 4
         conv_lstm_width = self._spatial_width // 4
         conv_lstm_channels = 16 + 64 + self._params["m_rainfall"]
-        self.conv_lstm = tf.keras.Sequential(
+        self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer(
@@ -306,7 +306,7 @@ class FloodConvLSTM(tf.keras.Model):
 
         # Output CNN (upsampling via TransposeConv)
         output_cnn_params = {"padding": "same", "activation": "relu"}
-        self.output_cnn = tf.keras.Sequential(
+        self.output_cnn = keras.Sequential(
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
