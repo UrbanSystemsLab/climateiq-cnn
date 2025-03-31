@@ -1,4 +1,5 @@
-r"""
+r"""Runs batch prediction on Google Cloud Batch for the Atmo Model.
+
 Local test:
 
 python usl_models/batch_predict/atmo_ml/main.py \
