@@ -31,13 +31,6 @@ class ConvParams(TypedDict):
     padding: Literal["valid", "same"]
 
 
-class ConvTransposeParams(TypedDict):
-    """Conv transponse layer parameters."""
-
-    activation: Literal["relu", "sigmoid", "tanh", "softmax"]
-    padding: Literal["valid", "same"]
-
-
 class AtmoModel:
     """Atmo model class."""
 
@@ -433,7 +426,7 @@ class AtmoConvLSTM(keras.Model):
 
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
-        output_cnn_params = ConvTransposeParams(activation="relu", padding="valid")
+        output_cnn_params = ConvParams(activation="relu", padding="valid")
         output_cnn_input_shape = (T, LSTM_H, LSTM_W, LSTM_FILTERS // 2)
 
         # Output: T2 (2m temperature)
