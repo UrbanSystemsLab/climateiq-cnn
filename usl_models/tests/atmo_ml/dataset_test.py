@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta
 
 import numpy as np
+import tensorflow as tf
+import pathlib
 
 import usl_models.testing
 from usl_models.testing import MockBlob, MockStorageClient, MockBucket
 from usl_models.atmo_ml import dataset
+from unittest import mock
 from usl_models.atmo_ml import constants
 
 
@@ -15,6 +18,15 @@ F_S = constants.NUM_SAPTIAL_FEATURES
 F_ST = constants.NUM_SPATIOTEMPORAL_FEATURES
 C = 3
 T_I, T_O = constants.INPUT_TIME_STEPS, 2
+
+# Create a dummy input that mimics the structure of model.AtmoModel.Input.
+dummy_input = {
+    "spatiotemporal": tf.random.uniform((T_I, H, W, F_ST), dtype=tf.float32),
+    "spatial": tf.random.uniform((H, W, F_S), dtype=tf.float32),
+    "lu_index": tf.random.uniform((H, W), maxval=10, dtype=tf.int32),
+    "date": "2000-05-24",
+    "sim_name": "test-sim",
+}
 
 
 class TestAtmoMLDataset(usl_models.testing.TestCase):
@@ -146,3 +158,42 @@ class TestAtmoMLDataset(usl_models.testing.TestCase):
             ]
             * num_batches,
         )
+
+    @mock.patch("usl_models.atmo_ml.dataset.load_day_inputs_cached")
+    def test_load_dataset_prediction_cached(self, mock_load_day_inputs_cached):
+        """Test that load_dataset_prediction_cached returns only inputs."""
+        # Patch load_day_inputs_cached so that for prediction it returns input.
+        mock_load_day_inputs_cached.return_value = dummy_input
+
+        # Create example keys manually: list of tuples (sim_name, day)
+        example_keys = [("test-sim", "2000-05-24"), ("test-sim", "2000-05-25")]
+
+        # Create a dummy filecache directory (can be a temporary directory path)
+        dummy_cache_dir = pathlib.Path("dummy_cache")
+        dummy_cache_dir.mkdir(exist_ok=True)
+
+        # Create the prediction dataset using the new function
+        pred_ds = dataset.load_dataset_prediction_cached(
+            filecache_dir=dummy_cache_dir,
+            example_keys=example_keys,
+            config=dataset.Config(),
+        ).batch(B)
+
+        # Iterate over one batch and verify structure and shapes
+        for inputs in pred_ds.take(1):
+            # Expected keys: 'spatiotemporal', 'spatial', 'lu_index', 'date', 'sim_name'
+            self.assertIn("spatiotemporal", inputs)
+            self.assertIn("spatial", inputs)
+            self.assertIn("lu_index", inputs)
+            self.assertIn("date", inputs)
+            self.assertIn("sim_name", inputs)
+
+            # Check the shapes of the tensors:
+            # 'spatiotemporal' should have shape (B, T_I, H, W, F_ST)
+            self.assertEqual(inputs["spatiotemporal"].shape, (B, T_I, H, W, F_ST))
+            # 'spatial' should have shape (B, H, W, F_S)
+            self.assertEqual(inputs["spatial"].shape, (B, H, W, F_S))
+            # 'lu_index' should have shape (B, H, W)
+            self.assertEqual(inputs["lu_index"].shape, (B, H, W))
+
+            break
