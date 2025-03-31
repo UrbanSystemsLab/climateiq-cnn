@@ -158,9 +158,6 @@ class FloodModelTest(unittest.TestCase):
         stopping with a patience of 1 epoch means that the model should stop training
         as soon as the validaton loss goes up.
         """
-        # To ensure determinism, we set a random seed so the model is reproducible.
-        keras.utils.set_random_seed(1)
-
         batch_size = 4
         height, width = 100, 100
         # Set a large number of epochs to increase the odds of triggering early
