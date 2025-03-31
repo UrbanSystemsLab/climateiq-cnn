@@ -5,7 +5,7 @@ from typing import Type, TypeVar
 T = TypeVar("T")
 
 
-def getenv(key: str, val_type: Type[T], default: T | None = None) -> T | None:
+def getenv(key: str, val_type: Type[T], default: T | None = None):
     """Gets a typed environment variable.
 
     Args:
@@ -15,4 +15,4 @@ def getenv(key: str, val_type: Type[T], default: T | None = None) -> T | None:
 
     Returns: The environment variable cast to `val_type`.
     """
-    return val_type(os.getenv(key, default=default))
+    return val_type(os.getenv(key, default=default))  # type: ignore
