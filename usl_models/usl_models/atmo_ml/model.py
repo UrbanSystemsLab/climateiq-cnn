@@ -2,12 +2,13 @@
 
 import logging
 import dataclasses
-from typing import TypedDict, TypeAlias, List, Callable, Literal, Tuple
+from typing import TypedDict, TypeAlias, List, Callable, Literal, Tuple, Iterable
 
 import keras
 from keras import layers
 import keras_tuner
 import tensorflow as tf
+import numpy as np
 
 from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import constants
@@ -210,6 +211,10 @@ class AtmoModel:
     def call(self, input: Input) -> tf.Tensor:
         """Forward pass for predictions. See `AtmoConvLSTM.call`."""
         return self._model.call(input)
+
+    def predict(self, inputs: Iterable[Input]) -> np.ndarray:
+        """Predict on input data."""
+        return self._model.predict(inputs)
 
     def fit(
         self,
