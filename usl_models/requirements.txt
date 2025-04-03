@@ -2,8 +2,9 @@ matplotlib==3.9.2
 numpy==1.26.4
 tensorflow[and-cuda]==2.15.1
 keras==2.15.0
-keras-tuner[baysian]==1.4.7
+keras-tuner==1.4.7
 google-cloud-aiplatform==1.43.0
 google-cloud-storage==2.15.0
 google-cloud-firestore==2.15.0
+google-cloud-batch==0.17.35
 seaborn==0.13.2

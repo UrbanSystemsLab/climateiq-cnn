@@ -277,6 +277,8 @@ def load_day(
         print("No lu index")
         return None
 
+    lu_index_data = tf.reshape(lu_index_data, (config.input_height, config.input_width))
+
     spatial_data = downloader.try_download_tensor(
         feature_bucket,
         f"{sim_name}/spatial/{start_filename}",
