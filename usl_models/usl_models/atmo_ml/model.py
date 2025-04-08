@@ -423,6 +423,36 @@ class AtmoConvLSTM(keras.Model):
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
                 ),
+                # Input shape: (time_steps, height, width, channels)
+                layers.InputLayer((T, LSTM_H, LSTM_W, LSTM_C)),
+                layers.TimeDistributed(
+                    pad_layers.Pad2D((LSTM_K_PAD, LSTM_K_PAD), mode=PAD_MODE)
+                ),
+                layers.ConvLSTM2D(
+                    LSTM_FILTERS,
+                    LSTM_K_SIZE,
+                    return_sequences=True,
+                    strides=1,
+                    padding="valid",
+                    activation=self._params.lstm_activation,
+                    dropout=self._params.lstm_dropout,
+                    recurrent_dropout=self._params.lstm_recurrent_dropout,
+                ),
+                # Input shape: (time_steps, height, width, channels)
+                layers.InputLayer((T, LSTM_H, LSTM_W, LSTM_C)),
+                layers.TimeDistributed(
+                    pad_layers.Pad2D((LSTM_K_PAD, LSTM_K_PAD), mode=PAD_MODE)
+                ),
+                layers.ConvLSTM2D(
+                    LSTM_FILTERS,
+                    LSTM_K_SIZE,
+                    return_sequences=True,
+                    strides=1,
+                    padding="valid",
+                    activation=self._params.lstm_activation,
+                    dropout=self._params.lstm_dropout,
+                    recurrent_dropout=self._params.lstm_recurrent_dropout,
+                ),
             ],
             name="conv_lstm",
         )
@@ -624,6 +654,15 @@ class AtmoConvLSTM(keras.Model):
 
         lstm_input = data_utils.boundary_pairs(concat_inputs)
         lstm_output = self.conv_lstm(lstm_input)
+
+        # lstm_output shape: (B, T, H, W, channels)
+        avg_spatial = tf.reduce_mean(
+            lstm_output, axis=[2, 3]
+        )  # shape: (B, T, channels)
+        attn_weights = tf.nn.softmax(
+            tf.reduce_mean(avg_spatial, axis=-1, keepdims=True), axis=1
+        )  # shape: (B, T, 1)
+        lstm_output = lstm_output * attn_weights[:, :, tf.newaxis, tf.newaxis, :]
 
         # Split up paired tensors into individual time steps.
         trconv_input = data_utils.split_time_step_pairs(lstm_output)[:, -T_O:]
