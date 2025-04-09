@@ -99,14 +99,24 @@ def get_all_simulation_days(
 
 
 def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
-    """Return all cached simulation dates."""
-    all_dates = set()
-    for file in path.glob("**/labels/wrfout_d03_????-??-??_??:??:??.npz"):
-        relative_path = file.relative_to(path)
-        sim_name = str(relative_path.parent.parent)
-        ts = datetime.strptime(relative_path.name, LABEL_FILENAME_FORMAT_NPZ)
-        all_dates.add((sim_name, ts.date().strftime(DATE_FORMAT)))
+    """Return all cached simulation dates.
 
+    If an error occurs (e.g., file missing or parsing error), returns an empty list.
+    """
+    all_dates = set()
+    try:
+        for file in path.glob("**/labels/wrfout_d03_????-??-??_??:??:??.npz"):
+            relative_path = file.relative_to(path)
+            sim_name = str(relative_path.parent.parent)
+            try:
+                ts = datetime.strptime(relative_path.name, LABEL_FILENAME_FORMAT_NPZ)
+            except Exception as e:
+                logging.warning("Error parsing date from file %s: %s", file, e)
+                continue
+            all_dates.add((sim_name, ts.date().strftime(DATE_FORMAT)))
+    except Exception as e:
+        logging.warning("Error loading cached simulation dates from %s: %s", path, e)
+        return []
     return sorted(all_dates)
 
 
@@ -134,7 +144,7 @@ def load_dataset_cached(
 
     Uses separate functions to load inputs and labels.
     """
-    example_keys = example_keys or (get_cached_sim_dates(filecache_dir) or [])
+    example_keys = example_keys or get_cached_sim_dates(filecache_dir)
     config = config or Config()
 
     if shuffle:
@@ -190,7 +200,7 @@ def load_dataset_prediction_cached(
     example_keys = (
         example_keys
         if example_keys is not None
-        else (get_cached_sim_dates(filecache_dir) or [])
+        else get_cached_sim_dates(filecache_dir)
     )
     config = config or Config()
 
