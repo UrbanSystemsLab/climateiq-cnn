@@ -165,8 +165,8 @@ def load_dataset_cached(
             if result is None:
                 missing_days += 1
                 continue
-            # If the returned result is a tuple, extract only the first element (inputs)
-            inputs = result[0] if isinstance(result, tuple) else result
+
+            inputs = result
 
             labels = load_day_label_cached(
                 filecache_dir / sim_name / "labels", date_obj, config or Config()
@@ -423,7 +423,12 @@ def load_day_inputs_cached(
     sim_name: str,
     date: datetime,
     config: Config,
-) -> tuple[model.AtmoModel.Input, tf.Tensor] | None:
+) -> model.AtmoModel.Input | None:
+    """Load cached inputs for a day.
+
+    Returns only the inputs (without labels) as defined by AtmoModel.Input,
+    or None if the data could not be loaded.
+    """
     spatiotemporal = load_day_spatiotemporal_cached(
         filecache_dir / sim_name / "spatiotemporal", date, config
     )
@@ -441,15 +446,12 @@ def load_day_inputs_cached(
         config.input_width,
     )
 
-    return (
-        model.AtmoModel.Input(
-            spatiotemporal=spatiotemporal,
-            spatial=tf.convert_to_tensor(spatial, dtype=tf.float32),
-            lu_index=tf.convert_to_tensor(lu_index, dtype=tf.int32),
-            sim_name=sim_name,
-            date=date.strftime(DATE_FORMAT),
-        ),
-        None,
+    return model.AtmoModel.Input(
+        spatiotemporal=spatiotemporal,
+        spatial=tf.convert_to_tensor(spatial, dtype=tf.float32),
+        lu_index=tf.convert_to_tensor(lu_index, dtype=tf.int32),
+        sim_name=sim_name,
+        date=date.strftime(DATE_FORMAT),
     )
 
 
