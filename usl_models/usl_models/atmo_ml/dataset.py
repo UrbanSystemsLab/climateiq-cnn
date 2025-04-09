@@ -423,7 +423,6 @@ def load_day_inputs_cached(
     sim_name: str,
     date: datetime,
     config: Config,
-    # for_prediction: bool = False,
 ) -> tuple[model.AtmoModel.Input, tf.Tensor] | None:
     spatiotemporal = load_day_spatiotemporal_cached(
         filecache_dir / sim_name / "spatiotemporal", date, config
