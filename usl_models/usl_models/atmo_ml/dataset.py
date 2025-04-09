@@ -99,14 +99,24 @@ def get_all_simulation_days(
 
 
 def get_cached_sim_dates(path: pathlib.Path) -> list[tuple[str, str]]:
-    """Return all cached simulation dates."""
-    all_dates = set()
-    for file in path.glob("**/labels/wrfout_d03_????-??-??_??:??:??.npz"):
-        relative_path = file.relative_to(path)
-        sim_name = str(relative_path.parent.parent)
-        ts = datetime.strptime(relative_path.name, LABEL_FILENAME_FORMAT_NPZ)
-        all_dates.add((sim_name, ts.date().strftime(DATE_FORMAT)))
+    """Return all cached simulation dates.
 
+    If an error occurs (e.g., file missing or parsing error), returns an empty list.
+    """
+    all_dates = set()
+    try:
+        for file in path.glob("**/labels/wrfout_d03_????-??-??_??:??:??.npz"):
+            relative_path = file.relative_to(path)
+            sim_name = str(relative_path.parent.parent)
+            try:
+                ts = datetime.strptime(relative_path.name, LABEL_FILENAME_FORMAT_NPZ)
+            except Exception as e:
+                logging.warning("Error parsing date from file %s: %s", file, e)
+                continue
+            all_dates.add((sim_name, ts.date().strftime(DATE_FORMAT)))
+    except Exception as e:
+        logging.warning("Error loading cached simulation dates from %s: %s", path, e)
+        return []
     return sorted(all_dates)
 
 
@@ -130,7 +140,10 @@ def load_dataset_cached(
     shuffle: bool = True,
     config: Config | None = None,
 ):
-    """Loads a dataset from a filecache."""
+    """Loads a dataset from a filecache for training.
+
+    Uses separate functions to load inputs and labels.
+    """
     example_keys = example_keys or get_cached_sim_dates(filecache_dir)
     config = config or Config()
 
@@ -147,19 +160,22 @@ def load_dataset_cached(
             # Skip days not in this dataset
             if not (hash_range[0] <= hash_day(sim_name, day) < hash_range[1]):
                 continue
+            date_obj = datetime.strptime(day, DATE_FORMAT)
+            result = load_day_inputs_cached(filecache_dir, sim_name, date_obj, config)
+            if result is None:
+                missing_days += 1
+                continue
 
-            load_result = load_day_cached(
-                filecache_dir,
-                sim_name,
-                datetime.strptime(day, DATE_FORMAT),
-                config=config,
+            inputs = result
+
+            labels = load_day_label_cached(
+                filecache_dir / sim_name / "labels", date_obj, config or Config()
             )
-            if load_result is None:
+            if labels is None:
                 missing_days += 1
                 continue
 
             generated_count += 1
-            inputs, labels = load_result
 
             yield inputs, labels
 
@@ -170,6 +186,50 @@ def load_dataset_cached(
     return tf.data.Dataset.from_generator(
         generator, output_signature=get_output_signature(config)
     )
+
+
+def load_dataset_prediction_cached(
+    filecache_dir: pathlib.Path,
+    example_keys: list[ExampleKey] | None = None,
+    config: Config | None = None,
+) -> tf.data.Dataset:
+    """Loads a prediction dataset from a filecache.
+
+    This function returns only inputs (without labels) for the inference phase.
+    """
+    example_keys = (
+        example_keys
+        if example_keys is not None
+        else get_cached_sim_dates(filecache_dir)
+    )
+    config = config or Config()
+
+    def generator() -> Iterable[model.AtmoModel.Input]:
+        if example_keys is None:
+            return
+
+        for sim_name, day in example_keys:
+            result = load_day_inputs_cached(
+                filecache_dir,
+                sim_name,
+                datetime.strptime(day, DATE_FORMAT),
+                config=config,
+            )
+            if result is None:
+                logging.warning("Missing data for %s %s", sim_name, day)
+                continue
+            # If result is a tuple, extract only the inputs
+            if isinstance(result, tuple):
+                inputs = result[0]
+            else:
+                inputs = result
+            yield inputs
+
+    # Return a dataset that yields only the inputs (input specification only)
+    input_spec = model.AtmoModel.get_input_spec(
+        model.AtmoModel.Params(output_timesteps=config.output_timesteps)
+    )
+    return tf.data.Dataset.from_generator(generator, output_signature=input_spec)
 
 
 def load_dataset(
@@ -358,20 +418,23 @@ def load_day_label(
 
 
 @functools.lru_cache(maxsize=128)
-def load_day_cached(
-    filecache_dir: pathlib.Path, sim_name: str, date: datetime, config: Config
-) -> tuple[model.AtmoModel.Input, tf.Tensor] | None:
+def load_day_inputs_cached(
+    filecache_dir: pathlib.Path,
+    sim_name: str,
+    date: datetime,
+    config: Config,
+) -> model.AtmoModel.Input | None:
+    """Load cached inputs for a day.
+
+    Returns only the inputs (without labels) as defined by AtmoModel.Input,
+    or None if the data could not be loaded.
+    """
     spatiotemporal = load_day_spatiotemporal_cached(
         filecache_dir / sim_name / "spatiotemporal", date, config
     )
     if spatiotemporal is None:
         return None
 
-    label = load_day_label_cached(
-        filecache_dir / sim_name / "labels", date, config=config
-    )
-    if label is None:
-        return None
     static_data = np.load(filecache_dir / sim_name / STATIC_FILENAME_NPZ)
     if static_data is None:
         return None
@@ -383,15 +446,12 @@ def load_day_cached(
         config.input_width,
     )
 
-    return (
-        model.AtmoModel.Input(
-            spatiotemporal=spatiotemporal,
-            spatial=tf.convert_to_tensor(spatial, dtype=tf.float32),
-            lu_index=tf.convert_to_tensor(lu_index, dtype=tf.int32),
-            sim_name=sim_name,
-            date=date.strftime(DATE_FORMAT),
-        ),
-        label,
+    return model.AtmoModel.Input(
+        spatiotemporal=spatiotemporal,
+        spatial=tf.convert_to_tensor(spatial, dtype=tf.float32),
+        lu_index=tf.convert_to_tensor(lu_index, dtype=tf.int32),
+        sim_name=sim_name,
+        date=date.strftime(DATE_FORMAT),
     )
 
 
