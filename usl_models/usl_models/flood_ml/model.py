@@ -47,14 +47,12 @@ class FloodModel:
         prediction: tf.Tensor
         chunk_id: str | tf.Tensor
 
-    def __init__(self, params: Params | None = None):
-        """Initialize the FloodModel instance.
-
-        Args:
-            params (Params | None): Model parameters. If None, defaults will be used.
-        """
+    def __init__(
+        self, params: Params | None = None, spatial_dims: tuple[int, int] | None = None
+    ):
+        """Initialize the FloodModel instance."""
         self._params = params or self.Params()
-        self._spatial_dims = (constants.MAP_HEIGHT, constants.MAP_WIDTH)
+        self._spatial_dims = spatial_dims or (constants.MAP_HEIGHT, constants.MAP_WIDTH)
         self._model = self._build_model()
 
     @classmethod
