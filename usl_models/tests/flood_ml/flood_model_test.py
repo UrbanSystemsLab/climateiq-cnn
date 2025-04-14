@@ -8,7 +8,6 @@ import numpy as np
 import tensorflow as tf
 
 from usl_models.flood_ml import model as flood_model
-from usl_models.flood_ml import model_params
 from tests.flood_ml.mock_dataset import mock_dataset, mock_prediction_dataset
 
 
@@ -18,15 +17,14 @@ class FloodModelTest(unittest.TestCase):
     def setUp(self):
         """Set up test fixture."""
         keras.utils.set_random_seed(1)
-        self._params = model_params.default_params()
-        self._params.update(
-            {
-                "batch_size": 4,
-                "m_rainfall": 3,
-                "n_flood_maps": 3,
-                "lstm_units": 32,
-                "lstm_kernel_size": 3,
-            }
+        self._params = flood_model.FloodModel.Params(
+            lstm_units=32,
+            lstm_kernel_size=3,
+            lstm_dropout=0.2,
+            lstm_recurrent_dropout=0.2,
+            m_rainfall=3,
+            n_flood_maps=3,
+            num_features=22,
         )
 
     def test_convlstm_call(self):
@@ -49,7 +47,7 @@ class FloodModelTest(unittest.TestCase):
                 )
             )
         )
-        model = flood_model.FloodConvLSTM(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodConvLSTM(self._params)
         prediction = model.call(input)
         assert prediction.shape == (batch_size, height, width, 1)
 
@@ -80,7 +78,7 @@ class FloodModelTest(unittest.TestCase):
                 )
             )
         )
-        model = flood_model.FloodConvLSTM(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodConvLSTM(self._params)
         prediction = model.call_n(input, n=storm_duration)
         assert prediction.shape == (batch_size, storm_duration, height, width)
 
@@ -107,7 +105,7 @@ class FloodModelTest(unittest.TestCase):
         )
         strategy = tf.distribute.MirroredStrategy()
         with strategy.scope():
-            model = flood_model.FloodModel(self._params, spatial_dims=(height, width))
+            model = flood_model.FloodModel(self._params)
             for results in model.batch_predict_n(dataset, n=storm_duration):
                 assert len(results) == batch_size
                 for result in results:
@@ -126,7 +124,7 @@ class FloodModelTest(unittest.TestCase):
         batch_size = 16
         height, width = 100, 100
 
-        model = flood_model.FloodModel(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodModel(self._params)
         epochs = 2
         train_dataset = mock_dataset(
             self._params,
@@ -163,7 +161,7 @@ class FloodModelTest(unittest.TestCase):
         # Set a large number of epochs to increase the odds of triggering early
         # stopping.
         epochs = 20
-        model = flood_model.FloodModel(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodModel(self._params)
 
         train_dataset = mock_dataset(
             self._params,
@@ -194,7 +192,7 @@ class FloodModelTest(unittest.TestCase):
         batch_size = 16
         height, width = 100, 100
 
-        model = flood_model.FloodModel(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodModel(self._params)
 
         train_dataset = mock_dataset(
             self._params,
@@ -214,9 +212,7 @@ class FloodModelTest(unittest.TestCase):
 
         with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
             model.save_model(tmp.name, overwrite=True)
-            new_model = flood_model.FloodModel(
-                self._params, spatial_dims=(height, width)
-            )
+            new_model = flood_model.FloodModel(self._params)
             new_model.load_weights(tmp.name)
 
         old_weights = model._model.get_weights()
