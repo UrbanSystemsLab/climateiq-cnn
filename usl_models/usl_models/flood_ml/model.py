@@ -34,7 +34,6 @@ class FloodModel:
             default_factory=lambda: keras.optimizers.Adam(learning_rate=1e-3)
         )
 
-        @classmethod
         def to_dict(self) -> dict[str, Any]:
             """Convert Params instance to dictionary."""
             return {
