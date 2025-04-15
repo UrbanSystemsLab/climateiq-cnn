@@ -7,7 +7,6 @@ import requests
 import dataclasses
 
 from usl_models.flood_ml import metastore
-from usl_models.flood_ml import model_params
 from usl_models.flood_ml.model import FloodModel
 
 FloodModelParams = FloodModel.Params
@@ -329,9 +328,9 @@ def test_get_label_chunk_metadata_missing_features(firestore_db) -> None:
 
 
 def test_write_model_metadata(firestore_db) -> None:
-    params = model_params.default_params()
-    params_dc = model_params.FloodModelParams.from_dict(  # type: ignore[attr-defined]
-        params
+    params = FloodModel.Params()
+    params_dc = FloodModel.Params.from_dict(  # type: ignore[attr-defined]
+        params.to_dict()
     )
     id_ = metastore.write_model_metadata(
         firestore_db,
