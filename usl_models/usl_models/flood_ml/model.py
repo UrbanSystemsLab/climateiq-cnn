@@ -35,23 +35,34 @@ class FloodModel:
         )
 
         @classmethod
+        def to_dict(self) -> dict[str, Any]:
+            """Convert Params instance to dictionary."""
+            return {
+                "lstm_units": self.lstm_units,
+                "lstm_kernel_size": self.lstm_kernel_size,
+                "lstm_dropout": self.lstm_dropout,
+                "lstm_recurrent_dropout": self.lstm_recurrent_dropout,
+                "m_rainfall": self.m_rainfall,
+                "n_flood_maps": self.n_flood_maps,
+                "num_features": self.num_features,
+                "optimizer": {
+                    "class_name": type(self.optimizer).__name__,
+                    "config": self.optimizer.get_config(),
+                },
+            }
+
+        @classmethod
         def from_dict(cls, d: dict[str, Any]) -> "FloodModel.Params":
             """Create Params instance from dictionary."""
             d = d.copy()
-            optimizer_config = d.pop("optimizer")
-            class_name = optimizer_config.pop("class_name")
+            optimizer_info = d.pop("optimizer")
             optimizer = keras.optimizers.get(
-                {"class_name": class_name, "config": optimizer_config}
+                {
+                    "class_name": optimizer_info["class_name"],
+                    "config": optimizer_info["config"],
+                }
             )
             return cls(optimizer=optimizer, **d)
-
-        @classmethod
-        def to_dict(self) -> dict[str, Any]:
-            """Convert Params instance to dictionary."""
-            d = dataclasses.asdict(self())
-            d["optimizer"] = self.optimizer.get_config()
-            d["optimizer"]["class_name"] = type(self.optimizer).__name__
-            return d
 
     class Input(TypedDict):
         """Input tensors dictionary."""
