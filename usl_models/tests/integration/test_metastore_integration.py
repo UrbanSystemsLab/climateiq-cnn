@@ -330,7 +330,7 @@ def test_get_label_chunk_metadata_missing_features(firestore_db) -> None:
 
 def test_write_model_metadata(firestore_db) -> None:
     params = model_params.default_params()
-    params_dc = model_params.FloodModelParams.from_config(  # type: ignore[attr-defined]
+    params_dc = model_params.FloodModelParams.from_dict(  # type: ignore[attr-defined]
         params
     )
     id_ = metastore.write_model_metadata(
