@@ -3,12 +3,11 @@
 import tensorflow as tf
 
 from usl_models.flood_ml import model as flood_model
-from usl_models.flood_ml import model_params
 from usl_models.flood_ml import constants
 
 
 def input_signature(
-    params: model_params.FloodModelParams,
+    params: flood_model.FloodModel.Params,
     height: int = 100,
     width: int = 100,
     n: int | None = None,
@@ -48,7 +47,7 @@ def metadata_signature() -> tf.TensorSpec:
 
 
 def mock_dataset(
-    params: model_params.FloodModelParams,
+    params: flood_model.FloodModel.Params,
     height: int = 100,
     width: int = 100,
     batch_count: int = 1,
@@ -93,7 +92,7 @@ def mock_dataset(
 
 
 def mock_prediction_dataset(
-    params: model_params.FloodModelParams,
+    params: flood_model.FloodModel.Params,
     height: int = 100,
     width: int = 100,
     batch_count: int = 1,

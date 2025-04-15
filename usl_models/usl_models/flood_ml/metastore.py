@@ -4,14 +4,12 @@ import urllib.parse
 
 from google.cloud import firestore  # type:ignore[attr-defined]
 
-import usl_models.flood_ml.model_params
-
 
 def write_model_metadata(
     db: firestore.Client,
     gcs_model_dir: str,
     sim_names: Sequence[str],
-    model_params: usl_models.flood_ml.model_params.FloodModelParams,
+    model_params: dict[str, Any],
     epochs: int,
     model_name: str,
 ) -> str:

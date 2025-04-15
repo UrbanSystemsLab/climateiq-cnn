@@ -1,7 +1,7 @@
 """Flood model definition."""
 
 import logging
-from typing import Iterator, TypedDict, List, Callable, Literal, TypeAlias
+from typing import Iterator, TypedDict, List, Callable, Literal, TypeAlias, Any
 import dataclasses
 
 import keras
@@ -33,6 +33,15 @@ class FloodModel:
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
             default_factory=lambda: keras.optimizers.Adam(learning_rate=1e-3)
         )
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "FloodModel.Params":
+        """Create Params instance from dictionary."""
+        return cls(**d)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert Params instance to dictionary."""
+        return dataclasses.asdict(self)
 
     class Input(TypedDict):
         """Input tensors dictionary."""

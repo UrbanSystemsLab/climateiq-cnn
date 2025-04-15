@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import dataclasses
 
 from google.cloud import firestore  # type:ignore[attr-defined]
 from google.cloud import storage  # type:ignore[attr-defined]
@@ -10,8 +11,7 @@ from tensorflow.python.client import device_lib
 import usl_models.flood_ml.dataset
 import usl_models.flood_ml.model
 from usl_models.flood_ml import metastore
-import usl_models.flood_ml.model_params
-
+from usl_models.flood_ml.model import FloodModel
 
 logging.basicConfig(level=logging.INFO)
 
@@ -44,33 +44,31 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-logging.info("DEVICES" + str(device_lib.list_local_devices()))
+logging.info("DEVICES: %s", device_lib.list_local_devices())
 
-# Single Machine, single compute device
+# Distributed strategy setup
 if args.distribute == "single":
     if tf.test.is_gpu_available():
         strategy = tf.distribute.OneDeviceStrategy(device="/gpu:0")
     else:
         strategy = tf.distribute.OneDeviceStrategy(device="/cpu:0")
-    logging.info("Single device training")
-# Single Machine, multiple compute device
+    logging.info("Using Single device strategy.")
 elif args.distribute == "mirrored":
     strategy = tf.distribute.MirroredStrategy()
-    logging.info("Mirrored Strategy distributed training")
-# Multi Machine, multiple compute device
+    logging.info("Using Mirrored Strategy.")
 elif args.distribute == "multiworker":
     strategy = tf.distribute.MultiWorkerMirroredStrategy()
-    logging.info("Multi-worker Strategy distributed training")
-    logging.info("TF_CONFIG = {}".format(os.environ.get("TF_CONFIG", "Not found")))
-    # Single Machine, multiple TPU devices
+    logging.info("Using Multi-worker Strategy.")
+    logging.info("TF_CONFIG: %s", os.environ.get("TF_CONFIG", "Not found"))
 elif args.distribute == "tpu":
     cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(tpu="local")
     tf.config.experimental_connect_to_cluster(cluster_resolver)
     tf.tpu.experimental.initialize_tpu_system(cluster_resolver)
     strategy = tf.distribute.TPUStrategy(cluster_resolver)
-    print("All devices: ", tf.config.list_logical_devices("TPU"))
+    logging.info("Using TPU Strategy.")
+    logging.info("All devices: %s", tf.config.list_logical_devices("TPU"))
 
-logging.info("num_replicas_in_sync = {}".format(strategy.num_replicas_in_sync))
+logging.info("num_replicas_in_sync = %d", strategy.num_replicas_in_sync)
 
 
 def _is_chief(task_type, task_id):
@@ -83,7 +81,7 @@ def _is_chief(task_type, task_id):
 
 
 def train(
-    model: usl_models.flood_ml.model.FloodModel,
+    model: FloodModel,
     train_dataset: tf.data.Dataset,
     val_dataset: tf.data.Dataset,
     firestore_client: firestore.Client,
@@ -103,66 +101,65 @@ def train(
     else:
         task_type, task_id = None, None
 
+    # Determine model saving path
     if args.distribute == "tpu":
-        save_locally = tf.saved_model.SaveOptions(
+        save_options = tf.saved_model.SaveOptions(
             experimental_io_device="/job:localhost"
         )
-        logging.info("Saving model to %s", args.model_dir)
         model_dir = args.model_dir
-        model.save_model(model_dir, options=save_locally)
-    # single, mirrored or primary for multiworker
+        logging.info("Saving model to %s", model_dir)
+        model.save_model(model_dir, options=save_options)
     elif _is_chief(task_type, task_id):
-        logging.info("Saving model to %s", args.model_dir)
         model_dir = args.model_dir
+        logging.info("Saving model to %s", model_dir)
         model.save_model(model_dir)
-    # non-primary workers for multi-workers
     else:
-        # each worker saves their model instance to a unique temp location
-        model_dir = args.model_dir + "/workertemp_" + str(task_id)
+        model_dir = f"{args.model_dir}/workertemp_{task_id}"
         logging.info("Saving model to %s", model_dir)
         tf.io.gfile.makedirs(model_dir)
         model.save_model(model_dir)
 
+    # ✅ Pass dict for FloodModelParams
     metastore.write_model_metadata(
         firestore_client,
         gcs_model_dir=model_dir,
         sim_names=args.sim_names,
-        model_params=model._model_params,
+        model_params=dataclasses.asdict(model._params),
         epochs=args.epochs,
         model_name=args.model_name,
     )
 
 
 with strategy.scope():
-    # Creation of dataset, and model building/compiling need to be within
-    # `strategy.scope()`.
     firestore_client = firestore.Client(project="climateiq")
 
-    model_params = usl_models.flood_ml.model_params.default_params()
-    if args.batch_size is not None:
-        model_params["batch_size"] = args.batch_size
-    model = usl_models.flood_ml.model.FloodModel(params=model_params)
+    model_params = FloodModel.Params()
+
+    model = FloodModel(params=model_params)
+
     logging.info(
-        "Training model for %s epochs with params %s", args.epochs, model_params
+        "Training model for %s epochs with params %s",
+        args.epochs,
+        dataclasses.asdict(model_params),
     )
 
-    kwargs = {}
+    dataset_kwargs = {}
     if args.batch_size is not None:
-        kwargs["batch_size"] = args.batch_size
+        dataset_kwargs["batch_size"] = args.batch_size
+
     train_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
         sim_names=args.sim_names,
         dataset_split="train",
         firestore_client=firestore_client,
         storage_client=storage.Client(project="climateiq"),
-        **kwargs,
+        **dataset_kwargs,
     )
     val_dataset = usl_models.flood_ml.dataset.load_dataset_windowed(
         sim_names=args.sim_names,
         dataset_split="val",
         firestore_client=firestore_client,
         storage_client=storage.Client(project="climateiq"),
-        **kwargs,
+        **dataset_kwargs,
     )
-
 
 train(model, train_dataset, val_dataset, firestore_client)
