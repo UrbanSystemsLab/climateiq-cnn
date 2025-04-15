@@ -37,11 +37,24 @@ class FloodModel:
         @classmethod
         def from_dict(cls, d: dict[str, Any]) -> "FloodModel.Params":
             """Create Params instance from dictionary."""
+            d = d.copy()
+            optimizer_name = d.pop("optimizer", "Adam")
+            d["optimizer"] = getattr(keras.optimizers, optimizer_name)()
             return cls(**d)
 
+        @classmethod
         def to_dict(self) -> dict[str, Any]:
             """Convert Params instance to dictionary."""
-            return dataclasses.asdict(self)
+            return {
+                "lstm_units": self.lstm_units,
+                "lstm_kernel_size": self.lstm_kernel_size,
+                "lstm_dropout": self.lstm_dropout,
+                "lstm_recurrent_dropout": self.lstm_recurrent_dropout,
+                "m_rainfall": self.m_rainfall,
+                "n_flood_maps": self.n_flood_maps,
+                "num_features": self.num_features,
+                "optimizer": type(self.optimizer).__name__,  # or str(self.optimizer)
+            }
 
     class Input(TypedDict):
         """Input tensors dictionary."""
