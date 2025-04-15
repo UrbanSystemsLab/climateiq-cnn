@@ -3,6 +3,7 @@
 import logging
 from typing import Iterator, TypedDict, List, Callable, Literal, TypeAlias, Any
 import dataclasses
+import numpy as np
 
 import keras
 from keras import layers
@@ -46,7 +47,10 @@ class FloodModel:
                 "num_features": self.num_features,
                 "optimizer": {
                     "class_name": type(self.optimizer).__name__,
-                    "config": self.optimizer.get_config(),
+                    "config": {
+                        k: (float(v) if isinstance(v, (float, np.floating)) else v)
+                        for k, v in self.optimizer.get_config().items()
+                    },
                 },
             }
 
