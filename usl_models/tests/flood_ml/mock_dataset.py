@@ -3,12 +3,11 @@
 import tensorflow as tf
 
 from usl_models.flood_ml import model as flood_model
-from usl_models.flood_ml import model_params
 from usl_models.flood_ml import constants
 
 
 def input_signature(
-    params: model_params.FloodModelParams,
+    params: flood_model.FloodModel.Params,
     height: int = 100,
     width: int = 100,
     n: int | None = None,
@@ -16,17 +15,17 @@ def input_signature(
     """Returns the input signature for a dataset with n timesteps."""
     # If the datset specifies a number of timesteps, temporal tensor is of max size.
     temporal_duration = (
-        constants.MAX_RAINFALL_DURATION if n is not None else params["n_flood_maps"]
+        constants.MAX_RAINFALL_DURATION if n is not None else params.n_flood_maps
     )
     return dict(
         geospatial=tf.TensorSpec(
             shape=(height, width, constants.GEO_FEATURES), dtype=tf.float32
         ),
         temporal=tf.TensorSpec(
-            shape=(temporal_duration, params["m_rainfall"]), dtype=tf.float32
+            shape=(temporal_duration, params.m_rainfall), dtype=tf.float32
         ),
         spatiotemporal=tf.TensorSpec(
-            shape=(params["n_flood_maps"], height, width, 1), dtype=tf.float32
+            shape=(params.n_flood_maps, height, width, 1), dtype=tf.float32
         ),
     )
 
@@ -48,7 +47,7 @@ def metadata_signature() -> tf.TensorSpec:
 
 
 def mock_dataset(
-    params: model_params.FloodModelParams,
+    params: flood_model.FloodModel.Params,
     height: int = 100,
     width: int = 100,
     batch_count: int = 1,
@@ -93,7 +92,7 @@ def mock_dataset(
 
 
 def mock_prediction_dataset(
-    params: model_params.FloodModelParams,
+    params: flood_model.FloodModel.Params,
     height: int = 100,
     width: int = 100,
     batch_count: int = 1,

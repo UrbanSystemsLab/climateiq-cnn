@@ -8,7 +8,6 @@ import numpy as np
 import tensorflow as tf
 
 from usl_models.flood_ml import model as flood_model
-from usl_models.flood_ml import model_params
 from tests.flood_ml.mock_dataset import mock_dataset, mock_prediction_dataset
 
 
@@ -18,15 +17,14 @@ class FloodModelTest(unittest.TestCase):
     def setUp(self):
         """Set up test fixture."""
         keras.utils.set_random_seed(1)
-        self._params = model_params.default_params()
-        self._params.update(
-            {
-                "batch_size": 4,
-                "m_rainfall": 3,
-                "n_flood_maps": 3,
-                "lstm_units": 32,
-                "lstm_kernel_size": 3,
-            }
+        self._params = flood_model.FloodModel.Params(
+            lstm_units=32,
+            lstm_kernel_size=3,
+            lstm_dropout=0.2,
+            lstm_recurrent_dropout=0.2,
+            m_rainfall=3,
+            n_flood_maps=3,
+            num_features=22,
         )
 
     def test_convlstm_call(self):

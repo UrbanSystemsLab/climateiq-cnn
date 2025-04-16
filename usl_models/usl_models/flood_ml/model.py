@@ -1,20 +1,71 @@
 """Flood model definition."""
 
 import logging
-from typing import Iterator, TypeAlias, TypedDict, List, Callable
+from typing import Iterator, TypedDict, List, Callable, Literal, TypeAlias, Any
+import dataclasses
+import numpy as np
 
 import keras
 from keras import layers
+import keras_tuner
 import tensorflow as tf
 
 from usl_models.flood_ml import constants
-from usl_models.flood_ml import model_params
+from usl_models.shared import keras_dataclasses
 
-FloodModelParams: TypeAlias = model_params.FloodModelParams
+
+Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
 
 
 class FloodModel:
     """Flood model class."""
+
+    @keras_dataclasses.dataclass(kw_only=True)
+    class Params(keras_dataclasses.Base):
+        """Flood model hyperparameters."""
+
+        lstm_units: int = 64
+        lstm_kernel_size: int = 3
+        lstm_dropout: float = 0.2
+        lstm_recurrent_dropout: float = 0.2
+        m_rainfall: int = 3
+        n_flood_maps: int = 6
+        num_features: int = 22
+        optimizer: keras.optimizers.Optimizer = dataclasses.field(
+            default_factory=lambda: keras.optimizers.Adam(learning_rate=1e-3)
+        )
+
+        def to_dict(self) -> dict[str, Any]:
+            """Convert Params instance to dictionary."""
+            return {
+                "lstm_units": self.lstm_units,
+                "lstm_kernel_size": self.lstm_kernel_size,
+                "lstm_dropout": self.lstm_dropout,
+                "lstm_recurrent_dropout": self.lstm_recurrent_dropout,
+                "m_rainfall": self.m_rainfall,
+                "n_flood_maps": self.n_flood_maps,
+                "num_features": self.num_features,
+                "optimizer": {
+                    "class_name": type(self.optimizer).__name__,
+                    "config": {
+                        k: (float(v) if isinstance(v, (float, np.floating)) else v)
+                        for k, v in self.optimizer.get_config().items()
+                    },
+                },
+            }
+
+        @classmethod
+        def from_dict(cls, d: dict[str, Any]) -> "FloodModel.Params":
+            """Create Params instance from dictionary."""
+            d = d.copy()
+            optimizer_info = d.pop("optimizer")
+            optimizer = keras.optimizers.get(
+                {
+                    "class_name": optimizer_info["class_name"],
+                    "config": optimizer_info["config"],
+                }
+            )
+            return cls(optimizer=optimizer, **d)
 
     class Input(TypedDict):
         """Input tensors dictionary."""
@@ -30,21 +81,11 @@ class FloodModel:
         chunk_id: str | tf.Tensor
 
     def __init__(
-        self,
-        params: FloodModelParams | None = None,
-        spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
+        self, params: Params | None = None, spatial_dims: tuple[int, int] | None = None
     ):
-        """Creates the flood model.
-
-        Args:
-            params: A dictionary of configurable model parameters.
-            spatial_dims: Tuple of spatial height and width input dimensions.
-                Needed for defining input shapes. This is an optional arg that
-                can be changed (primarily for testing/debugging).
-            artifact_uri: Optional artifact URI to load model weights from.
-        """
-        self._model_params = params or model_params.default_params()
-        self._spatial_dims = spatial_dims
+        """Initialize the FloodModel instance."""
+        self._params = params or self.Params()
+        self._spatial_dims = spatial_dims or (constants.MAP_HEIGHT, constants.MAP_WIDTH)
         self._model = self._build_model()
 
     @classmethod
@@ -65,24 +106,36 @@ class FloodModel:
         Returns:
             The loaded FloodModel.
         """
-        model = cls(**kwargs)
         loaded_model = keras.models.load_model(artifact_uri)
-        assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
+        params = FloodModel.Params.from_config(loaded_model.get_config())
+        model = cls(params=params, **kwargs)
         model._model.set_weights(loaded_model.get_weights())
         return model
 
+    @classmethod
+    def get_hypermodel(cls, **kwargs) -> keras_tuner.HyperModel:
+        """Returns a hypermodel function for use with Keras Tuner.
+
+        The kwargs (hp_options) should be a dict where keys are parameter names
+        and values are lists of possible choices.
+        """
+
+        def hypermodel(hp: keras_tuner.HyperParameters):
+            hp_kwargs = {k: hp.Choice(k, v) for k, v in kwargs.items()}
+            params = cls.Params(**hp_kwargs)
+            return cls(params=params)._model
+
+        return hypermodel
+
     def _build_model(self) -> keras.Model:
-        """Creates the correct internal (Keras) model architecture."""
-        model = FloodConvLSTM(
-            self._model_params,
-            spatial_dims=self._spatial_dims,
-        )
+        model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
         model.compile(
-            optimizer=keras.optimizers.get(self._model_params["optimizer_config"]),
+            optimizer=self._params.optimizer,
             loss=keras.losses.MeanSquaredError(),
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),
+                # Optional: add your custom metrics here
             ],
         )
         return model
@@ -226,7 +279,7 @@ class FloodConvLSTM(keras.Model):
 
     def __init__(
         self,
-        params: FloodModelParams,
+        params: FloodModel.Params,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
     ):
         """Creates the ConvLSTM model.
@@ -284,7 +337,7 @@ class FloodConvLSTM(keras.Model):
         # and the rainfall window size.
         conv_lstm_height = self._spatial_height // 4
         conv_lstm_width = self._spatial_width // 4
-        conv_lstm_channels = 16 + 64 + self._params["m_rainfall"]
+        conv_lstm_channels = 16 + 64 + self._params.m_rainfall
         self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
@@ -292,13 +345,13 @@ class FloodConvLSTM(keras.Model):
                     (None, conv_lstm_height, conv_lstm_width, conv_lstm_channels)
                 ),
                 layers.ConvLSTM2D(
-                    self._params["lstm_units"],
-                    self._params["lstm_kernel_size"],
+                    self._params.lstm_units,
+                    self._params.lstm_kernel_size,
                     strides=1,
                     padding="same",
                     activation="tanh",
-                    dropout=self._params["lstm_dropout"],
-                    recurrent_dropout=self._params["lstm_recurrent_dropout"],
+                    dropout=self._params.lstm_dropout,
+                    recurrent_dropout=self._params.lstm_recurrent_dropout,
                 ),
             ],
             name="conv_lstm",
@@ -310,7 +363,7 @@ class FloodConvLSTM(keras.Model):
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
-                    (conv_lstm_height, conv_lstm_width, self._params["lstm_units"])
+                    (conv_lstm_height, conv_lstm_width, self._params.lstm_units)
                 ),
                 layers.Conv2DTranspose(8, 4, strides=4, **output_cnn_params),
                 layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params),
@@ -334,20 +387,11 @@ class FloodConvLSTM(keras.Model):
         Returns:
             The flood map prediction. A tensor of shape [B, H, W, 1].
         """
-        spatiotemporal: tf.Tensor = input["spatiotemporal"]
-        geospatial: tf.Tensor = input["geospatial"]
-        temporal: tf.Tensor = input["temporal"]
+        spatiotemporal = input["spatiotemporal"]
+        geospatial = input["geospatial"]
+        temporal = input["temporal"]
 
-        B = spatiotemporal.shape[0]
-        C = 1  # Channel dimension for spatiotemporal tensor
-        F = constants.GEO_FEATURES
-        N = self._params["n_flood_maps"]
-        M = self._params["m_rainfall"]
-        H, W = self._spatial_height, self._spatial_width
-
-        tf.ensure_shape(spatiotemporal, (B, N, H, W, C))
-        tf.ensure_shape(geospatial, (B, H, W, F))
-        tf.ensure_shape(temporal, (B, N, M))
+        B, N, H, W, _ = spatiotemporal.shape
 
         # Spatiotemporal CNN
         # [B, n, H, W, 1] -> [B, n, H', W', k1]
@@ -358,8 +402,7 @@ class FloodConvLSTM(keras.Model):
         # Add a new time axis and repeat n times -> [B, n, H', W', k2].
         geo_cnn_output = self.geo_cnn(geospatial)
         geo_cnn_output = geo_cnn_output[:, tf.newaxis, :, :, :]
-        n = spatiotemporal.shape[1]
-        geo_cnn_output = tf.repeat(geo_cnn_output, [n], axis=1)
+        geo_cnn_output = tf.repeat(geo_cnn_output, [N], axis=1)
 
         # Expand temporal inputs into maps
         # [B, n, m] -> [B, n, H', W', m]
@@ -395,7 +438,7 @@ class FloodConvLSTM(keras.Model):
         B = spatiotemporal.shape[0]
         C = 1  # Channel dimension for spatiotemporal tensor
         F = constants.GEO_FEATURES
-        N, M = self._params["n_flood_maps"], self._params["m_rainfall"]
+        N, M = self._params.n_flood_maps, self._params.m_rainfall
         T_MAX = constants.MAX_RAINFALL_DURATION
         H, W = self._spatial_height, self._spatial_width
 
