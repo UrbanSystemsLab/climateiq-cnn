@@ -625,6 +625,15 @@ class AtmoConvLSTM(keras.Model):
         lstm_input = data_utils.boundary_pairs(concat_inputs)
         lstm_output = self.conv_lstm(lstm_input)
 
+        # lstm_output shape: (B, T, H, W, channels)
+        avg_spatial = tf.reduce_mean(
+            lstm_output, axis=[2, 3]
+        )  # shape: (B, T, channels)
+        attn_weights = tf.nn.softmax(
+            tf.reduce_mean(avg_spatial, axis=-1, keepdims=True), axis=1
+        )  # shape: (B, T, 1)
+        lstm_output = lstm_output * attn_weights[:, :, tf.newaxis, tf.newaxis, :]
+
         # Split up paired tensors into individual time steps.
         trconv_input = data_utils.split_time_step_pairs(lstm_output)[:, -T_O:]
 
