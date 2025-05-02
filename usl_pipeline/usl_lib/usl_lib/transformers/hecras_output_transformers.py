@@ -54,8 +54,7 @@ def get_cell_centers(hdf_file, domain):
 
 
 def create_rsl_files(hdf_file, output_dir, domain):
-    """Creates and saves multiple RSL files,
-    one for each combination of time series columns."""
+    """Creates and saves multiple RSL files"""
     os.makedirs(output_dir, exist_ok=True)
     cell_centers = get_cell_centers(hdf_file, domain)
     if cell_centers is None:
