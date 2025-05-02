@@ -28,7 +28,7 @@ def test_load_prediction_dataset(mock_metastore):
 
     # Set up some fake data to retrieve from our mock GCS.
     mock_rainfall = numpy.pad(numpy.array([1, 2, 3, 4]), (0, 860))
-    mock_spatial_features = numpy.random.rand(1000, 1000, 8)
+    mock_spatial_features = numpy.random.rand(1000, 1000, 9)
     mock_labels = numpy.random.rand(1000, 1000, 19)
 
     # Set the storage client to return the right mock data for each GCS path.
