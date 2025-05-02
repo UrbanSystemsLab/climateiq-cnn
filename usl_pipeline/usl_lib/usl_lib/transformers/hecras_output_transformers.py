@@ -5,7 +5,8 @@ import os
 
 # Constants
 GEOMETRY_GROUP = "/Geometry/2D Flow Areas"
-TSERIES_GROUP = "/Results/Unsteady/Output/Output Blocks/Base Output/Unsteady Time Series/2D Flow Areas"
+RESULTS_GROUP = "/Results/Unsteady/Output/Output Blocks/Base Output"
+TSERIES_GROUP = f"""{RESULTS_GROUP}/Unsteady Time Series/2D Flow Areas"""
 TABLE_WATER_SURFACE = "Water Surface"
 DOMAIN_AREA = "2D Interior Area"
 CELL_CENTERS_TABLE = "Cells Center Coordinate"
@@ -53,7 +54,8 @@ def get_cell_centers(hdf_file, domain):
 
 
 def create_rsl_files(hdf_file, output_dir, domain):
-    """Creates and saves multiple RSL files, one for each combination of time series columns."""
+    """Creates and saves multiple RSL files,
+    one for each combination of time series columns."""
     os.makedirs(output_dir, exist_ok=True)
     cell_centers = get_cell_centers(hdf_file, domain)
     if cell_centers is None:
@@ -67,7 +69,8 @@ def create_rsl_files(hdf_file, output_dir, domain):
     cell_centers_df = pd.DataFrame(cell_centers, columns=[XCEN_COLUMN, YCEN_COLUMN])
     if len(cell_centers_df) != len(depth_df):
         print(
-            f"Length of cell centers ({len(cell_centers_df)}) does not match the length of depth dataframe ({len(depth_df)})."
+            f"""Length of cell centers ({len(cell_centers_df)})
+            does not match the length of depth dataframe ({len(depth_df)})."""
         )
         return
 

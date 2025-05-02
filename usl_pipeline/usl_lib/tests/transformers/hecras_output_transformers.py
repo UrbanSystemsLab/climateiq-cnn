@@ -137,7 +137,7 @@ class TestRSLCreation(unittest.TestCase):
             pd.testing.assert_frame_equal(df, expected_df, check_dtype=False)
 
     def test_create_rsl_files_missing_data(self):
-        """Test that create_rsl_files does not create a file when data is not present."""
+        """Create_rsl_files does not create a file when data is not present."""
         create_rsl_files(self.hdf_file_path, self.output_dir, "invalid_domain")
         output_files = [
             file for file in os.listdir(self.output_dir) if file.endswith(".rsl")
