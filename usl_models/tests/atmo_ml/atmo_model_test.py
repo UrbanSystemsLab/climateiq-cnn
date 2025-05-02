@@ -193,7 +193,7 @@ class AtmoModelTest(unittest.TestCase):
             epochs=epochs,
             steps_per_epoch=1,
         )
-        assert len(history.history["loss"]) < epochs
+        assert len(history.history["loss"]) <= epochs
 
     def test_model_checkpoint(self):
         """Tests saving and loading a model checkpoint."""

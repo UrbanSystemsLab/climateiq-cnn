@@ -4,7 +4,7 @@ import logging
 from typing import Iterator, TypedDict, List, Callable, Literal, TypeAlias, Any
 import dataclasses
 import numpy as np
-
+from usl_models.shared import pad_layers
 import keras
 from keras import layers
 import keras_tuner
@@ -15,6 +15,7 @@ from usl_models.shared import keras_dataclasses
 
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
+PadMode: TypeAlias = Literal["REFLECT", "CONSTANT"]
 
 
 class FloodModel:
@@ -31,6 +32,7 @@ class FloodModel:
         m_rainfall: int = 3
         n_flood_maps: int = 6
         num_features: int = 22
+        pad_mode: PadMode = "REFLECT"
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
             default_factory=lambda: keras.optimizers.Adam(learning_rate=1e-3)
         )
@@ -291,23 +293,34 @@ class FloodConvLSTM(keras.Model):
                 can be changed (primarily for testing/debugging).
         """
         super().__init__()
-
         self._params = params
         self._spatial_height, self._spatial_width = spatial_dims
 
-        # Spatiotemporal CNN
-        st_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
+        # CNN padding config
+        K_PAD = 2  # 5x5 kernel means 2-pixel padding
+        cnn_pad = (K_PAD, K_PAD)
+        activation = "relu"
+
+        # === Spatiotemporal CNN ===
         self.st_cnn = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer((None, self._spatial_height, self._spatial_width, 1)),
-                # Remaining layers are TimeDistributed and are applied to each
-                # temporal slice
-                layers.TimeDistributed(layers.Conv2D(8, 5, **st_cnn_params)),
+                layers.TimeDistributed(pad_layers.Pad2D(cnn_pad, mode="REFLECT")),
+                layers.TimeDistributed(
+                    layers.Conv2D(
+                        8, 5, strides=2, padding="valid", activation=activation
+                    )
+                ),
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
-                layers.TimeDistributed(layers.Conv2D(16, 5, **st_cnn_params)),
+                layers.TimeDistributed(pad_layers.Pad2D(cnn_pad, mode="REFLECT")),
+                layers.TimeDistributed(
+                    layers.Conv2D(
+                        16, 5, strides=2, padding="valid", activation=activation
+                    )
+                ),
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
@@ -315,17 +328,18 @@ class FloodConvLSTM(keras.Model):
             name="spatiotemporal_cnn",
         )
 
-        # Geospatial CNN
-        geo_cnn_params = {"strides": 2, "padding": "same", "activation": "relu"}
+        # === Geospatial CNN ===
         self.geo_cnn = keras.Sequential(
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
                     (self._spatial_height, self._spatial_width, constants.GEO_FEATURES)
                 ),
-                layers.Conv2D(16, 5, **geo_cnn_params),
+                pad_layers.Pad2D(cnn_pad, mode="REFLECT"),
+                layers.Conv2D(16, 5, strides=2, padding="valid", activation=activation),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
-                layers.Conv2D(64, 5, **geo_cnn_params),
+                pad_layers.Pad2D(cnn_pad, mode="REFLECT"),
+                layers.Conv2D(64, 5, strides=2, padding="valid", activation=activation),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
             ],
             name="geospatial_cnn",
