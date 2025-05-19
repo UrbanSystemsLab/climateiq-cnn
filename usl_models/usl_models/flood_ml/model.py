@@ -18,6 +18,23 @@ Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
 PadMode: TypeAlias = Literal["REFLECT", "CONSTANT"]
 
 
+class SpatialAttention(layers.Layer):
+    def __init__(self, **kwargs):
+        """Initialize the spatial attention instance."""
+        super().__init__(**kwargs)
+        self.conv = layers.Conv2D(
+            1, kernel_size=7, padding="same", activation="sigmoid"
+        )
+
+    def call(self, inputs):
+        """Compute the attention weights."""
+        avg_pool = tf.reduce_mean(inputs, axis=-1, keepdims=True)
+        max_pool = tf.reduce_max(inputs, axis=-1, keepdims=True)
+        concat = tf.concat([avg_pool, max_pool], axis=-1)
+        attention = self.conv(concat)
+        return inputs * attention
+
+
 class FloodModel:
     """Flood model class."""
 
@@ -137,7 +154,6 @@ class FloodModel:
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),
-                # Optional: add your custom metrics here
             ],
         )
         return model
@@ -328,10 +344,8 @@ class FloodConvLSTM(keras.Model):
             name="spatiotemporal_cnn",
         )
 
-        # === Geospatial CNN ===
         self.geo_cnn = keras.Sequential(
             [
-                # Input shape: (height, width, channels)
                 layers.InputLayer(
                     (self._spatial_height, self._spatial_width, constants.GEO_FEATURES)
                 ),
@@ -341,8 +355,7 @@ class FloodConvLSTM(keras.Model):
                 pad_layers.Pad2D(cnn_pad, mode="REFLECT"),
                 layers.Conv2D(64, 5, strides=2, padding="valid", activation=activation),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
-            ],
-            name="geospatial_cnn",
+            ]
         )
 
         # ConvLSTM
@@ -370,6 +383,8 @@ class FloodConvLSTM(keras.Model):
             ],
             name="conv_lstm",
         )
+
+        self.attention = SpatialAttention()
 
         # Output CNN (upsampling via TransposeConv)
         output_cnn_params = {"padding": "same", "activation": "relu"}
@@ -418,10 +433,7 @@ class FloodConvLSTM(keras.Model):
         geo_cnn_output = geo_cnn_output[:, tf.newaxis, :, :, :]
         geo_cnn_output = tf.repeat(geo_cnn_output, [N], axis=1)
 
-        # Expand temporal inputs into maps
-        # [B, n, m] -> [B, n, H', W', m]
-        H_out = st_cnn_output.shape[2]
-        W_out = st_cnn_output.shape[3]
+        H_out, W_out = st_cnn_output.shape[2], st_cnn_output.shape[3]
         temp_input = temporal[:, :, tf.newaxis, tf.newaxis, :]
         temp_input = tf.tile(temp_input, [1, 1, H_out, W_out, 1])
 
@@ -429,6 +441,7 @@ class FloodConvLSTM(keras.Model):
         # [B, n, H', W', k'] -> [B, H, W, 1]
         lstm_input = tf.concat([st_cnn_output, geo_cnn_output, temp_input], axis=-1)
         lstm_output = self.conv_lstm(lstm_input)
+        lstm_output = self.attention(lstm_output)
         output = self.output_cnn(lstm_output)
 
         return output
@@ -450,7 +463,7 @@ class FloodConvLSTM(keras.Model):
         temporal = full_input["temporal"]
 
         B = spatiotemporal.shape[0]
-        C = 1  # Channel dimension for spatiotemporal tensor
+        C = 1
         F = constants.GEO_FEATURES
         N, M = self._params.n_flood_maps, self._params.m_rainfall
         T_MAX = constants.MAX_RAINFALL_DURATION
