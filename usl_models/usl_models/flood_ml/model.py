@@ -1,5 +1,3 @@
-"""Flood model definition."""
-
 import logging
 from typing import Iterator, TypedDict, List, Callable, Literal, TypeAlias, Any
 import dataclasses
@@ -12,6 +10,30 @@ import tensorflow as tf
 
 from usl_models.flood_ml import constants
 from usl_models.shared import keras_dataclasses
+
+
+def weighted_mse_small_targets(y_true, y_pred):
+    """Custom MSE loss that gives higher importance to smaller target values."""
+    # Ignore NaNs (if any) in labels
+    mask = tf.math.logical_not(tf.math.is_nan(y_true))
+    y_true = tf.where(mask, y_true, tf.zeros_like(y_true))
+    y_pred = tf.where(mask, y_pred, tf.zeros_like(y_pred))
+
+    # Define inverse-weighting: smaller values get higher weight
+    weights = 1.0 / (1.0 + 100.0 * y_true)  # e.g., 0.001 -> ~1, 0.1 -> ~0.09
+    squared_error = tf.square(y_true - y_pred)
+    weighted_squared_error = weights * squared_error
+
+    # Normalize by number of valid entries
+    return tf.reduce_sum(weighted_squared_error) / tf.reduce_sum(
+        tf.cast(mask, tf.float32)
+    )
+
+
+def hybrid_loss(y_true, y_pred):
+    mse = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
+    small_weighted = weighted_mse_small_targets(y_true, y_pred)
+    return 0.5 * mse + 0.5 * small_weighted
 
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
@@ -150,7 +172,8 @@ class FloodModel:
         model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
         model.compile(
             optimizer=self._params.optimizer,
-            loss=keras.losses.MeanSquaredError(),
+            # loss=keras.losses.MeanSquaredError(),
+            loss=hybrid_loss,
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),
@@ -312,15 +335,12 @@ class FloodConvLSTM(keras.Model):
         self._params = params
         self._spatial_height, self._spatial_width = spatial_dims
 
-        # CNN padding config
-        K_PAD = 2  # 5x5 kernel means 2-pixel padding
+        K_PAD = 2
         cnn_pad = (K_PAD, K_PAD)
         activation = "relu"
 
-        # === Spatiotemporal CNN ===
         self.st_cnn = keras.Sequential(
             [
-                # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer((None, self._spatial_height, self._spatial_width, 1)),
                 layers.TimeDistributed(pad_layers.Pad2D(cnn_pad, mode="REFLECT")),
                 layers.TimeDistributed(
@@ -340,8 +360,7 @@ class FloodConvLSTM(keras.Model):
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
-            ],
-            name="spatiotemporal_cnn",
+            ]
         )
 
         self.geo_cnn = keras.Sequential(
@@ -358,16 +377,14 @@ class FloodConvLSTM(keras.Model):
             ]
         )
 
-        # ConvLSTM
-        # The spatial dimensions have been reduced 4x by the CNNs.
-        # The "channel" dimension is the sum of the channels from the CNNs
-        # and the rainfall window size.
         conv_lstm_height = self._spatial_height // 4
         conv_lstm_width = self._spatial_width // 4
         conv_lstm_channels = 16 + 64 + self._params.m_rainfall
+
+        self.pre_attention = SpatialAttention()  # attention before ConvLSTM
+
         self.conv_lstm = keras.Sequential(
             [
-                # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer(
                     (None, conv_lstm_height, conv_lstm_width, conv_lstm_channels)
                 ),
@@ -380,24 +397,23 @@ class FloodConvLSTM(keras.Model):
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
                 ),
-            ],
-            name="conv_lstm",
+            ]
         )
 
-        self.attention = SpatialAttention()
+        self.attention = SpatialAttention()  # attention after ConvLSTM
 
-        # Output CNN (upsampling via TransposeConv)
-        output_cnn_params = {"padding": "same", "activation": "relu"}
         self.output_cnn = keras.Sequential(
             [
-                # Input shape: (height, width, channels)
                 layers.InputLayer(
                     (conv_lstm_height, conv_lstm_width, self._params.lstm_units)
                 ),
-                layers.Conv2DTranspose(8, 4, strides=4, **output_cnn_params),
-                layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params),
-            ],
-            name="output_cnn",
+                layers.Conv2DTranspose(
+                    8, 4, strides=4, padding="same", activation="relu"
+                ),
+                layers.Conv2DTranspose(
+                    1, 1, strides=1, padding="same", activation="relu"
+                ),
+            ]
         )
 
     def call(self, input: FloodModel.Input) -> tf.Tensor:
@@ -422,13 +438,7 @@ class FloodConvLSTM(keras.Model):
 
         B, N, H, W, _ = spatiotemporal.shape
 
-        # Spatiotemporal CNN
-        # [B, n, H, W, 1] -> [B, n, H', W', k1]
         st_cnn_output = self.st_cnn(spatiotemporal)
-
-        # Geospatial CNN
-        # [B, H, W, f ]-> [B, H', W', k2]
-        # Add a new time axis and repeat n times -> [B, n, H', W', k2].
         geo_cnn_output = self.geo_cnn(geospatial)
         geo_cnn_output = geo_cnn_output[:, tf.newaxis, :, :, :]
         geo_cnn_output = tf.repeat(geo_cnn_output, [N], axis=1)
@@ -437,13 +447,11 @@ class FloodConvLSTM(keras.Model):
         temp_input = temporal[:, :, tf.newaxis, tf.newaxis, :]
         temp_input = tf.tile(temp_input, [1, 1, H_out, W_out, 1])
 
-        # Concatenate and feed into remaining ConvLSTM and TransposeConv layers
-        # [B, n, H', W', k'] -> [B, H, W, 1]
         lstm_input = tf.concat([st_cnn_output, geo_cnn_output, temp_input], axis=-1)
+        lstm_input = self.pre_attention(lstm_input)
         lstm_output = self.conv_lstm(lstm_input)
         lstm_output = self.attention(lstm_output)
         output = self.output_cnn(lstm_output)
-
         return output
 
     def call_n(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
@@ -473,12 +481,7 @@ class FloodConvLSTM(keras.Model):
         tf.ensure_shape(geospatial, (B, H, W, F))
         tf.ensure_shape(temporal, (B, T_MAX, M))
 
-        # This array stores the n predictions.
         predictions = tf.TensorArray(tf.float32, size=n)
-
-        # We use 1-indexing for simplicity. Time step t represents the t-th flood
-        # prediction.
-        # TODO: consider using tf.while_loop to support serializing this function.
         for t in range(1, n + 1):
             input = FloodModel.Input(
                 geospatial=geospatial,
@@ -487,29 +490,15 @@ class FloodConvLSTM(keras.Model):
             )
             prediction = self.call(input)
             predictions = predictions.write(t - 1, prediction)
-
-            # Append new predictions along time axis, drop the first.
             spatiotemporal = tf.concat(
                 [spatiotemporal, tf.expand_dims(prediction, axis=1)], axis=1
             )[:, 1:]
 
-        # Gather dense tensor out of TensorArray along the time axis.
         predictions = tf.stack(tf.unstack(predictions.stack()), axis=1)
-        # Drop channels dimension.
         return tf.squeeze(predictions, axis=-1)
 
     @staticmethod
     def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
-        """Returns a zero-padded n-sized window at timestep t.
-
-        Args:
-            temporal: Temporal tensor of shape (B, T_MAX, M)
-            t: timestep to fetch the windows for. At time t, we use at temporal[t-n:t].
-            n: window size
-
-        Returns:
-            Returns a zero-padded n-sized window at timestep t of shape (B, n, M)
-        """
         B, _, M = temporal.shape
         return tf.concat(
             [
