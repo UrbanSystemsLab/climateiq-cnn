@@ -12,6 +12,7 @@ import tensorflow as tf
 
 from usl_models.flood_ml import constants
 from usl_models.shared import keras_dataclasses
+from usl_models.flood_ml import customloss
 
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
@@ -133,7 +134,8 @@ class FloodModel:
         model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
         model.compile(
             optimizer=self._params.optimizer,
-            loss=keras.losses.MeanSquaredError(),
+            # loss=keras.losses.MeanSquaredError(),
+            loss=customloss.hybrid_loss,
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),
