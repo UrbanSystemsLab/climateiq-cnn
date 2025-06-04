@@ -74,9 +74,9 @@ class AtmoModel:
         spatiotemporal_filters: int = 64
 
         sto_vars: Tuple[vars.SpatiotemporalOutput, ...] = (
-            vars.SpatiotemporalOutput.RH2,
+            # vars.SpatiotemporalOutput.RH2,
             vars.SpatiotemporalOutput.T2,
-            vars.SpatiotemporalOutput.WSPD_WDIR10,
+            # vars.SpatiotemporalOutput.WSPD_WDIR10,
         )
 
         pad_mode: PadMode = "REFLECT"
@@ -132,7 +132,7 @@ class AtmoModel:
         H, W = None, None
 
         return tf.TensorSpec(
-            shape=(params.output_timesteps, H, W, len(params.sto_vars)),
+            shape=(params.output_timesteps, H, W, 1),
             dtype=tf.float32,
         )
 
@@ -192,8 +192,9 @@ class AtmoModel:
             metrics.SSIMMetric(),
             metrics.PSNRMetric(),
         ]
-        for sto_var in self._params.sto_vars:
-            eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var))
+        for var_index, sto_var in enumerate(self._params.sto_vars):
+            eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var, var_index=var_index))
+
 
         model = AtmoConvLSTM(self._params)
         model.compile(
