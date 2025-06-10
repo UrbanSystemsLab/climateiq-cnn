@@ -12,6 +12,7 @@ import tensorflow as tf
 
 from usl_models.flood_ml import constants
 from usl_models.shared import keras_dataclasses
+from usl_models.flood_ml import customloss
 
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
@@ -83,11 +84,15 @@ class FloodModel:
         chunk_id: str | tf.Tensor
 
     def __init__(
-        self, params: Params | None = None, spatial_dims: tuple[int, int] | None = None
+        self,
+        params: Params | None = None,
+        spatial_dims: tuple[int, int] | None = None,
+        loss_scale: float = 100.0,
     ):
         """Initialize the FloodModel instance."""
         self._params = params or self.Params()
         self._spatial_dims = spatial_dims or (constants.MAP_HEIGHT, constants.MAP_WIDTH)
+        self._loss_scale = loss_scale
         self._model = self._build_model()
 
     @classmethod
@@ -116,16 +121,25 @@ class FloodModel:
 
     @classmethod
     def get_hypermodel(cls, **kwargs) -> keras_tuner.HyperModel:
-        """Returns a hypermodel function for use with Keras Tuner.
-
-        The kwargs (hp_options) should be a dict where keys are parameter names
-        and values are lists of possible choices.
-        """
+        """Return a hypermodel function for use with Keras Tuner."""
 
         def hypermodel(hp: keras_tuner.HyperParameters):
-            hp_kwargs = {k: hp.Choice(k, v) for k, v in kwargs.items()}
+            # Separate loss_scale from the rest
+            hp_kwargs = {}
+            loss_scale = 100.0  # default fallback
+            for k, v in kwargs.items():
+                if k == "loss_scale":
+                    loss_scale = hp.Choice("loss_scale", v)
+                else:
+                    hp_kwargs[k] = hp.Choice(k, v)
+
             params = cls.Params(**hp_kwargs)
-            return cls(params=params)._model
+            model = cls(params=params)._model
+
+            # Attach the loss_scale to model for later access
+            model.loss_scale = loss_scale
+
+            return model
 
         return hypermodel
 
@@ -133,7 +147,8 @@ class FloodModel:
         model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
         model.compile(
             optimizer=self._params.optimizer,
-            loss=keras.losses.MeanSquaredError(),
+            # loss=keras.losses.MeanSquaredError(),
+            loss=customloss.make_hybrid_loss(scale=self._loss_scale),
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),
