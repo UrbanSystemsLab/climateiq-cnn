@@ -25,10 +25,17 @@ def weighted_mse_small_targets(y_true, y_pred, scale=100.0):
     )
 
 
+def log_cosh_loss(y_true, y_pred):
+    diff = y_pred - y_true
+    return tf.reduce_mean(tf.math.log(tf.cosh(diff + 1e-12)))
+
+
 def make_hybrid_loss(scale=100.0):
     def loss_fn(y_true, y_pred):
-        mse = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
-        small_weighted = weighted_mse_small_targets(y_true, y_pred, scale=scale)
-        return 0.5 * mse + 0.5 * small_weighted
+        # mse = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
+        logcosh = log_cosh_loss(y_true, y_pred)
+        # small_weighted = weighted_mse_small_targets(y_true, y_pred, scale=scale)
+        # return 0.3 * mse + 0.4 * small_weighted + 0.3 * logcosh
+        return logcosh
 
     return loss_fn
