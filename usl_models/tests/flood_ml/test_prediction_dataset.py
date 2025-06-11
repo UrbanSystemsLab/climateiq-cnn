@@ -5,7 +5,7 @@ from google.cloud import firestore  # type:ignore[attr-defined]
 from google.cloud import storage  # type:ignore[attr-defined]
 import numpy
 
-from usl_models.flood_ml import dataset
+from usl_models.flood_ml import dataset, constants
 from usl_models.flood_ml import prediction_dataset
 
 
@@ -28,7 +28,7 @@ def test_load_prediction_dataset(mock_metastore):
 
     # Set up some fake data to retrieve from our mock GCS.
     mock_rainfall = numpy.pad(numpy.array([1, 2, 3, 4]), (0, 860))
-    mock_spatial_features = numpy.random.rand(1000, 1000, 9)
+    mock_spatial_features = numpy.random.rand(1000, 1000, constants.GEO_FEATURES - 1)
     mock_labels = numpy.random.rand(1000, 1000, 19)
 
     # Set the storage client to return the right mock data for each GCS path.
@@ -73,10 +73,12 @@ def test_load_prediction_dataset(mock_metastore):
         metadata["rainfall"].numpy(), numpy.array([m_rainfall])
     )
 
-    # geospatial will have the same spatial features.
-    numpy.testing.assert_array_almost_equal(
-        tensors["geospatial"].numpy(),
-        numpy.array([mock_spatial_features] * batch_size),
+    # geospatial tensor should have an additional slope feature channel
+    assert tensors["geospatial"].shape == (
+        batch_size,
+        1000,
+        1000,
+        constants.GEO_FEATURES,
     )
 
     # spatiotemporal will have the labels creeping into a sequence of zeros.

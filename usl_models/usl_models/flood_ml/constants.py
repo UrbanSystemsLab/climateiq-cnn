@@ -1,7 +1,7 @@
 """Constant definitions for Flood CNN."""
 
 # Geospatial constants
-GEO_FEATURES = 9
+GEO_FEATURES = 10
 MAP_HEIGHT = 1000
 MAP_WIDTH = 1000
 

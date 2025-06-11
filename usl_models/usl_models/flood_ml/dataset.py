@@ -14,6 +14,20 @@ from usl_models.flood_ml import model
 from usl_models.shared import downloader
 
 
+def _append_slope_feature(features: tf.Tensor) -> tf.Tensor:
+    """Appends a slope channel derived from the elevation layer."""
+    # Elevation is expected to be the first channel
+    elevation = features[:, :, 0:1]
+    # tf.image.sobel_edges expects a 4D tensor [B, H, W, C]
+    elevation_bhwc = elevation[tf.newaxis, ...]
+    sobel = tf.image.sobel_edges(elevation_bhwc)
+    dy = sobel[0, :, :, 0, 0]
+    dx = sobel[0, :, :, 0, 1]
+    slope = tf.sqrt(tf.square(dx) + tf.square(dy))
+    slope = slope[:, :, tf.newaxis]
+    return tf.concat([features, slope], axis=-1)
+
+
 def load_dataset(
     sim_names: list[str],
     dataset_split: str,
@@ -353,6 +367,7 @@ def _iter_geo_feature_label_tensors(
             "Retrieving features from %s and labels from %s", feature_url, label_url
         )
         feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
+        feature_tensor = _append_slope_feature(feature_tensor)
         label_tensor = downloader.download_as_tensor(storage_client, label_url)
 
         reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
@@ -385,7 +400,7 @@ def _iter_model_inputs_for_prediction(
 
         model_input = model.FloodModel.Input(
             temporal=temporal,
-            geospatial=feature_tensor,
+            geospatial=_append_slope_feature(feature_tensor),
             spatiotemporal=tf.zeros(
                 shape=(
                     n_flood_maps,
@@ -416,7 +431,7 @@ def _iter_study_area_tensors(
 
         logging.info("Retrieving features from %s ", feature_url)
         feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
-        yield feature_tensor, chunk_name
+        yield _append_slope_feature(feature_tensor), chunk_name
 
 
 def _geospatial_dataset_signature() -> tf.TensorSpec:
