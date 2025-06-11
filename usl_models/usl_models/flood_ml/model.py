@@ -443,7 +443,35 @@ class FloodConvLSTM(keras.Model):
         # Concatenate and feed into remaining ConvLSTM and TransposeConv layers
         # [B, n, H', W', k'] -> [B, H, W, 1]
         lstm_input = tf.concat([st_cnn_output, geo_cnn_output, temp_input], axis=-1)
+        lstm_input_shape = tf.shape(lstm_input)
+        batch_size = lstm_input_shape[0]
+        time_steps = lstm_input_shape[1]
+        height = lstm_input_shape[2]
+        width = lstm_input_shape[3]
+        channels = lstm_input_shape[4]
+        lstm_input_flat = tf.reshape(
+            lstm_input, [batch_size, time_steps, height * width, channels]
+        )
+        attn_output = layers.MultiHeadAttention(num_heads=4, key_dim=channels // 4)(
+            lstm_input_flat, lstm_input_flat
+        )
+        attn_output_reshaped = tf.reshape(attn_output, tf.shape(lstm_input))
+        lstm_input = lstm_input + attn_output_reshaped
         lstm_output = self.conv_lstm(lstm_input)
+        lstm_output_shape = tf.shape(lstm_output)
+        batch_size = lstm_output_shape[0]
+        time_steps = lstm_output_shape[1]
+        height = lstm_output_shape[2]
+        width = lstm_output_shape[3]
+        channels = lstm_output_shape[4]
+        lstm_output_flat = tf.reshape(
+            lstm_output, [batch_size, time_steps, height * width, channels]
+        )
+        attn_output2 = layers.MultiHeadAttention(num_heads=4, key_dim=channels // 4)(
+            lstm_output_flat, lstm_output_flat
+        )
+        attn_output2_reshaped = tf.reshape(attn_output2, tf.shape(lstm_output))
+        lstm_output = lstm_output + attn_output2_reshaped
         output = self.output_cnn(lstm_output)
 
         return output
