@@ -551,3 +551,12 @@ class FloodConvLSTM(keras.Model):
             ],
             axis=1,
         )
+
+    def get_config(self) -> dict:
+        """Keras serialization."""
+        return self._params.get_config()
+
+    @classmethod
+    def from_config(cls, config: dict) -> "FloodConvLSTM":
+        """Keras deserialization."""
+        return cls(params=FloodModel.Params.from_config(config))
