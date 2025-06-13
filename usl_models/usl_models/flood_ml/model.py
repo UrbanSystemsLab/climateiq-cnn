@@ -33,6 +33,16 @@ class SpatialAttention(layers.Layer):
         attention = self.conv(concat)
         return inputs * attention
 
+    def get_config(self):
+        """Getcongif."""
+        base_config = super().get_config()
+        return base_config
+
+    @classmethod
+    def from_config(cls, config):
+        """fromcongif."""
+        return cls(**config)
+
 
 class FloodModel:
     """Flood model class."""
