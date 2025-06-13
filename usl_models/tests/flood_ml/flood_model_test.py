@@ -212,13 +212,16 @@ class FloodModelTest(unittest.TestCase):
 
         with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
             model.save_model(tmp.name, overwrite=True)
-            new_model = flood_model.FloodModel(
-                self._params, spatial_dims=(height, width)
-            )
-            new_model.load_weights(tmp.name)
 
-        old_weights = model._model.get_weights()
-        new_weights = new_model._model.get_weights()
+            # Load the entire model, not just weights
+            loaded_model = keras.models.load_model(
+                tmp.name,
+                custom_objects={"SpatialAttention": flood_model.SpatialAttention},
+            )
+
+            # Check weights equality
+            old_weights = model._model.get_weights()
+            new_weights = loaded_model.get_weights()
         for old, new in zip(old_weights, new_weights):
             np.testing.assert_array_equal(old, new)
 
