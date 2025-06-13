@@ -1,6 +1,7 @@
 """loss used for FloodML modeling."""
 
 import tensorflow as tf
+from keras.saving import register_keras_serializable
 
 
 def weighted_mse_small_targets(y_true, y_pred, scale=100.0):
@@ -30,6 +31,7 @@ def log_cosh_loss(y_true, y_pred):
     return tf.reduce_mean(tf.math.log(tf.cosh(diff + 1e-12)))
 
 
+@register_keras_serializable(package="Custom", name="loss_fn")
 def make_hybrid_loss(scale=100.0):
     def loss_fn(y_true, y_pred):
         # mse = tf.keras.losses.MeanSquaredError()(y_true, y_pred)

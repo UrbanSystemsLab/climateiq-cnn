@@ -552,11 +552,16 @@ class FloodConvLSTM(keras.Model):
             axis=1,
         )
 
-    def get_config(self) -> dict:
-        """Keras serialization."""
-        return self._params.get_config()
+    def get_config(self):
+        return {
+            "params": self._params.to_dict(),
+            "spatial_dims": (self._spatial_height, self._spatial_width),
+        }
 
     @classmethod
-    def from_config(cls, config: dict) -> "FloodConvLSTM":
-        """Keras deserialization."""
-        return cls(params=FloodModel.Params.from_config(config))
+    def from_config(cls, config):
+        return cls(
+            params=FloodModel.Params.from_dict(config["params"]),
+            spatial_dims=tuple(config["spatial_dims"]),
+        )
+
