@@ -9,6 +9,7 @@ import tensorflow as tf
 
 from usl_models.flood_ml import model as flood_model
 from tests.flood_ml.mock_dataset import mock_dataset, mock_prediction_dataset
+from usl_models.flood_ml.model import SpatialAttention, FloodConvLSTM
 
 
 class FloodModelTest(unittest.TestCase):
@@ -216,7 +217,10 @@ class FloodModelTest(unittest.TestCase):
             # Load the entire model, not just weights
             loaded_model = keras.models.load_model(
                 tmp.name,
-                custom_objects={"SpatialAttention": flood_model.SpatialAttention},
+                custom_objects={
+                    "SpatialAttention": SpatialAttention,
+                    "FloodConvLSTM": FloodConvLSTM,
+                },
             )
 
             # Check weights equality
