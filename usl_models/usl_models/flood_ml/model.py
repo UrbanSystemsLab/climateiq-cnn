@@ -553,6 +553,7 @@ class FloodConvLSTM(keras.Model):
         )
 
     def get_config(self):
+        """Get_config."""
         return {
             "params": self._params.to_dict(),
             "spatial_dims": (self._spatial_height, self._spatial_width),
@@ -560,8 +561,8 @@ class FloodConvLSTM(keras.Model):
 
     @classmethod
     def from_config(cls, config):
+        """From_config."""
         return cls(
             params=FloodModel.Params.from_dict(config["params"]),
             spatial_dims=tuple(config["spatial_dims"]),
         )
-
