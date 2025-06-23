@@ -109,11 +109,9 @@ class FloodModel:
         spatiotemporal: tf.TensorSpec
 
     @classmethod
-    def get_input_spec(
-        cls, params: Params, spatial_dims: tuple[int | None, int | None] | None = None
-    ) -> InputSpec:
+    def get_input_spec(cls, params: Params) -> InputSpec:
         """Return the input spec for the given params."""
-        H, W = spatial_dims or (None, None)
+        H, W = None, None
         return cls.InputSpec(
             geospatial=tf.TensorSpec(
                 shape=(H, W, constants.GEO_FEATURES), dtype=tf.float32
@@ -129,16 +127,13 @@ class FloodModel:
 
     @classmethod
     def get_input_shape_batched(
-        cls, params: Params, spatial_dims: tuple[int | None, int | None] | None = None
-    ) -> dict[str, tf.TypeSpec]:
-        spec = cls.get_input_spec(params, spatial_dims)
+        cls, params: Params) -> dict[str, tf.TypeSpec]:
+        spec = cls.get_input_spec(params)
         return {k: (None, *v.shape) for k, v in spec.items()}  # type: ignore
 
     @classmethod
-    def get_output_spec(
-        cls, params: Params, spatial_dims: tuple[int | None, int | None] | None = None
-    ) -> tf.TensorSpec:
-        H, W = spatial_dims or (None, None)
+    def get_output_spec(cls, params: Params) -> tf.TensorSpec:
+        H, W = None, None
         return tf.TensorSpec(shape=(H, W), dtype=tf.float32)
 
     class Result(TypedDict):
@@ -147,17 +142,20 @@ class FloodModel:
         prediction: tf.Tensor
         chunk_id: str | tf.Tensor
 
-    def __init__(
-        self,
-        params: Params | None = None,
-        spatial_dims: tuple[int, int] | None = None,
-        loss_scale: float = 100.0,
-    ):
-        """Initialize the FloodModel instance."""
-        self._params = params or self.Params()
-        self._spatial_dims = spatial_dims or (constants.MAP_HEIGHT, constants.MAP_WIDTH)
+    def __init__(self, params: Params | None = None, loss_scale: float =100.0,  model: keras.Model | None = None):
+        """Creates the Atmo model.
+
+        Args:
+            params: Model parameters.
+            model: If you already have a keras.Model constructed, pass it here.
+        """
         self._loss_scale = loss_scale
-        self._model = self._build_model()
+        if model is not None:
+            self._params = model._params  # type: ignore
+            self._model = model
+        else:
+            self._params = params or self.Params()
+            self._model = self._build_model()
 
     @classmethod
     def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "FloodModel":
@@ -180,11 +178,12 @@ class FloodModel:
         loaded_model = keras.models.load_model(artifact_uri)
         params = FloodModel.Params.from_config(loaded_model.get_config())
         model = cls(params=params, **kwargs)
+        assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
         model._model.set_weights(loaded_model.get_weights())
         return model
 
     @classmethod
-    def get_hypermodel(cls, *, spatial_dims=(constants.MAP_HEIGHT, constants.MAP_WIDTH), **kwargs) -> keras_tuner.HyperModel:
+    def get_hypermodel(cls, **kwargs) -> keras_tuner.HyperModel:
         """Return a hypermodel function for use with Keras Tuner."""
 
         def hypermodel(hp: keras_tuner.HyperParameters):
@@ -198,7 +197,7 @@ class FloodModel:
                     hp_kwargs[k] = hp.Choice(k, v)
 
             params = cls.Params(**hp_kwargs)
-            model = cls(params=params, spatial_dims=spatial_dims)._model
+            model = cls(params=params)._model
 
             # Attach the loss_scale to model for later access
             model.loss_scale = loss_scale
@@ -212,14 +211,9 @@ class FloodModel:
     def get_input_shape_batched(
         cls,
         params: Params,
-        spatial_dims: tuple[int | None, int | None]
-        | None = None,
     ) -> dict[str, tuple[int | None, ...]]:
         """Returns the batched input shape for the given params."""
-        if spatial_dims is None:
-            H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
-        else:
-            H, W = spatial_dims
+        H, W = None, None
 
         return {
             "geospatial": (None, H, W, constants.GEO_FEATURES),
@@ -238,7 +232,7 @@ class FloodModel:
         }
 
     def _build_model(self) -> keras.Model:
-        model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
+        model = FloodConvLSTM(self._params)
         model.compile(
             optimizer=self._params.optimizer,
             # loss=keras.losses.MeanSquaredError(),
@@ -388,12 +382,7 @@ class FloodConvLSTM(keras.Model):
     Architecture diagram: https://miro.com/app/board/uXjVKd7C19U=/.
     """
 
-    def __init__(
-        self,
-        params: FloodModel.Params,
-        spatial_dims: tuple[int, int] | None = None,
-        **kwargs,
-    ):
+    def __init__(self, params: FloodModel.Params):
         """Creates the ConvLSTM model.
 
         Args:
@@ -402,9 +391,8 @@ class FloodConvLSTM(keras.Model):
                 Needed for defining input shapes. This is an optional arg that
                 can be changed (primarily for testing/debugging).
         """
-        super().__init__(**kwargs)
+        super().__init__()
         self._params = params
-        self._spatial_dims = spatial_dims or (constants.MAP_HEIGHT, constants.MAP_WIDTH)
         # CNN padding config
         K_PAD = 2  # 5x5 kernel means 2-pixel padding
         cnn_pad = (K_PAD, K_PAD)
