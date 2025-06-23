@@ -151,7 +151,6 @@ class FloodModel:
         """
         self._loss_scale = loss_scale
         if model is not None:
-            self._params = model._params  # type: ignore
             self._model = model
         else:
             self._params = params or self.Params()
@@ -175,12 +174,17 @@ class FloodModel:
         Returns:
             The loaded FloodModel.
         """
-        loaded_model = keras.models.load_model(artifact_uri)
-        params = FloodModel.Params.from_config(loaded_model.get_config())
-        model = cls(params=params, **kwargs)
-        assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
-        model._model.set_weights(loaded_model.get_weights())
-        return model
+
+        loss_fn = customloss.make_hybrid_loss(scale=kwargs.get("loss_scale", 100.0))
+
+        loaded_model = keras.models.load_model(
+            artifact_uri,
+            custom_objects={"loss_fn": loss_fn},
+        )
+
+        # Wrap in FloodModel directly
+        return cls(model=loaded_model, loss_scale=kwargs.get("loss_scale", 100.0))
+
 
     @classmethod
     def get_hypermodel(cls, **kwargs) -> keras_tuner.HyperModel:
