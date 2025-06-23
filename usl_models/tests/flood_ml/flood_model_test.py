@@ -83,6 +83,24 @@ class FloodModelTest(unittest.TestCase):
         prediction = model.call_n(input, n=storm_duration)
         assert prediction.shape == (batch_size, storm_duration, height, width)
 
+    def test_convlstm_variable_resolution(self):
+        """Model works for different spatial resolutions."""
+        for h in [200, 1000]:
+            input, _ = next(
+                iter(
+                    mock_dataset(
+                        self._params,
+                        height=h,
+                        width=h,
+                        batch_size=1,
+                        n=2,
+                    )
+                )
+            )
+            model = flood_model.FloodConvLSTM(self._params, spatial_dims=(h, h))
+            prediction = model.call_n(input, n=2)
+            assert prediction.shape == (1, 2, h, h)
+
     def test_batch_predict_n(self):
         """Tests the FloodConvLSTM model batch predict.
 

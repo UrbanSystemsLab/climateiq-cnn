@@ -65,6 +65,7 @@ def test_load_dataset_full(mock_metastore) -> None:
         m_rainfall=m_rainfall,
         firestore_client=mock_firestore_client,
         storage_client=mock_storage_client,
+        ds_config=dataset.Config(),
     )
     batch = ds.take(1)
     element = batch.get_single_element()[0]
@@ -181,6 +182,7 @@ def test_load_dataset_windowed(mock_metastore) -> None:
         m_rainfall=m_rainfall,
         firestore_client=mock_firestore_client,
         storage_client=mock_storage_client,
+        ds_config=dataset.Config(),
     )
     batch = ds.take(1)
     element = batch.get_single_element()[0]
@@ -291,3 +293,57 @@ def test_load_dataset_windowed(mock_metastore) -> None:
             ]
         ),
     )
+
+
+@mock.patch.object(dataset, "metastore")
+def test_dataset_with_config(mock_metastore) -> None:
+    """Dataset works with alternative spatial dimensions."""
+    mock_firestore_client = mock.MagicMock(spec=firestore.Client)
+    mock_storage_client = mock.MagicMock(spec=storage.Client)
+
+    mock_metastore.get_temporal_feature_metadata.return_value = {
+        "as_vector_gcs_uri": "gs://temporal-features/temporal-feature.npy",
+        "rainfall_duration": 5,
+    }
+    mock_metastore.get_spatial_feature_and_label_chunk_metadata.return_value = [
+        (
+            {"feature_matrix_path": "gs://spatial-features/spatial-feature.npy"},
+            {"gcs_uri": "gs://labels/labels.npy"},
+        )
+    ]
+
+    mock_rainfall = numpy.pad(numpy.array([1, 2, 3, 4]), (0, 860))
+    mock_spatial_features = numpy.random.rand(1000, 1000, 9)
+    mock_labels = numpy.random.rand(1000, 1000, 19)
+
+    def mock_blob_func(blob_name):
+        if blob_name == "temporal-feature.npy":
+            data = mock_rainfall
+        elif blob_name == "spatial-feature.npy":
+            data = mock_spatial_features
+        elif blob_name == "labels.npy":
+            data = mock_labels
+        else:
+            raise ValueError()
+        buf = io.BytesIO()
+        numpy.save(buf, data)
+        buf.seek(0)
+        mock_blob = mock.MagicMock(spec=storage.Blob)
+        mock_blob.open.return_value = buf
+        return mock_blob
+
+    mock_storage_client.bucket().blob.side_effect = mock_blob_func
+
+    config = dataset.Config(input_height=200, input_width=200, output_height=200, output_width=200)
+    ds = dataset.load_dataset_windowed(
+        sim_names=["sim_name"],
+        dataset_split="train",
+        batch_size=1,
+        n_flood_maps=5,
+        m_rainfall=6,
+        firestore_client=mock_firestore_client,
+        storage_client=mock_storage_client,
+        ds_config=config,
+    )
+    element = ds.take(1).get_single_element()[0]
+    assert element["geospatial"].shape == (1, 200, 200, 9)

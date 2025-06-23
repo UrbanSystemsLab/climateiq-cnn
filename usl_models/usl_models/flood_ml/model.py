@@ -101,6 +101,45 @@ class FloodModel:
         geospatial: tf.Tensor
         temporal: tf.Tensor
         spatiotemporal: tf.Tensor
+    class InputSpec(TypedDict):
+        """TensorSpec for model inputs."""
+
+        geospatial: tf.TensorSpec
+        temporal: tf.TensorSpec
+        spatiotemporal: tf.TensorSpec
+
+    @classmethod
+    def get_input_spec(
+        cls, params: Params, spatial_dims: tuple[int | None, int | None] | None = None
+    ) -> InputSpec:
+        """Return the input spec for the given params."""
+        H, W = spatial_dims or (None, None)
+        return cls.InputSpec(
+            geospatial=tf.TensorSpec(
+                shape=(H, W, constants.GEO_FEATURES), dtype=tf.float32
+            ),
+            temporal=tf.TensorSpec(
+                shape=(constants.MAX_RAINFALL_DURATION, params.m_rainfall),
+                dtype=tf.float32,
+            ),
+            spatiotemporal=tf.TensorSpec(
+                shape=(params.n_flood_maps, H, W, 1), dtype=tf.float32
+            ),
+        )
+
+    @classmethod
+    def get_input_shape_batched(
+        cls, params: Params, spatial_dims: tuple[int | None, int | None] | None = None
+    ) -> dict[str, tf.TypeSpec]:
+        spec = cls.get_input_spec(params, spatial_dims)
+        return {k: (None, *v.shape) for k, v in spec.items()}  # type: ignore
+
+    @classmethod
+    def get_output_spec(
+        cls, params: Params, spatial_dims: tuple[int | None, int | None] | None = None
+    ) -> tf.TensorSpec:
+        H, W = spatial_dims or (None, None)
+        return tf.TensorSpec(shape=(H, W), dtype=tf.float32)
 
     class Result(TypedDict):
         """Prediction result dictionary."""
@@ -145,7 +184,7 @@ class FloodModel:
         return model
 
     @classmethod
-    def get_hypermodel(cls, **kwargs) -> keras_tuner.HyperModel:
+    def get_hypermodel(cls, *, spatial_dims=(constants.MAP_HEIGHT, constants.MAP_WIDTH), **kwargs) -> keras_tuner.HyperModel:
         """Return a hypermodel function for use with Keras Tuner."""
 
         def hypermodel(hp: keras_tuner.HyperParameters):
@@ -159,7 +198,7 @@ class FloodModel:
                     hp_kwargs[k] = hp.Choice(k, v)
 
             params = cls.Params(**hp_kwargs)
-            model = cls(params=params)._model
+            model = cls(params=params, spatial_dims=spatial_dims)._model
 
             # Attach the loss_scale to model for later access
             model.loss_scale = loss_scale
@@ -167,6 +206,36 @@ class FloodModel:
             return model
 
         return hypermodel
+
+
+    @classmethod
+    def get_input_shape_batched(
+        cls,
+        params: Params,
+        spatial_dims: tuple[int | None, int | None]
+        | None = None,
+    ) -> dict[str, tuple[int | None, ...]]:
+        """Returns the batched input shape for the given params."""
+        if spatial_dims is None:
+            H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
+        else:
+            H, W = spatial_dims
+
+        return {
+            "geospatial": (None, H, W, constants.GEO_FEATURES),
+            "temporal": (
+                None,
+                constants.MAX_RAINFALL_DURATION,
+                params.m_rainfall,
+            ),
+            "spatiotemporal": (
+                None,
+                params.n_flood_maps,
+                H,
+                W,
+                1,
+            ),
+        }
 
     def _build_model(self) -> keras.Model:
         model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
@@ -322,7 +391,8 @@ class FloodConvLSTM(keras.Model):
     def __init__(
         self,
         params: FloodModel.Params,
-        spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
+        spatial_dims: tuple[int, int] | None = None,
+        **kwargs,
     ):
         """Creates the ConvLSTM model.
 
@@ -332,10 +402,9 @@ class FloodConvLSTM(keras.Model):
                 Needed for defining input shapes. This is an optional arg that
                 can be changed (primarily for testing/debugging).
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._params = params
-        self._spatial_height, self._spatial_width = spatial_dims
-
+        self._spatial_dims = spatial_dims or (constants.MAP_HEIGHT, constants.MAP_WIDTH)
         # CNN padding config
         K_PAD = 2  # 5x5 kernel means 2-pixel padding
         cnn_pad = (K_PAD, K_PAD)
@@ -344,21 +413,18 @@ class FloodConvLSTM(keras.Model):
         # === Spatiotemporal CNN ===
         self.st_cnn = keras.Sequential(
             [
-                # Input shape: (time_steps, height, width, channels)
-                layers.InputLayer((None, self._spatial_height, self._spatial_width, 1)),
-                layers.TimeDistributed(pad_layers.Pad2D(cnn_pad, mode="REFLECT")),
+                layers.InputLayer((None, None, None, 1)),
                 layers.TimeDistributed(
                     layers.Conv2D(
-                        8, 5, strides=2, padding="valid", activation=activation
+                        8, 5, strides=1, padding="same", activation=activation
                     )
                 ),
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
-                layers.TimeDistributed(pad_layers.Pad2D(cnn_pad, mode="REFLECT")),
                 layers.TimeDistributed(
                     layers.Conv2D(
-                        16, 5, strides=2, padding="valid", activation=activation
+                        16, 5, strides=1, padding="same", activation=activation
                     )
                 ),
                 layers.TimeDistributed(
@@ -368,29 +434,26 @@ class FloodConvLSTM(keras.Model):
             name="spatiotemporal_cnn",
         )
 
+
         # === Geospatial CNN ===
         self.geo_cnn = keras.Sequential(
             [
-                # Input shape: (height, width, channels)
-                layers.InputLayer(
-                    (self._spatial_height, self._spatial_width, constants.GEO_FEATURES)
-                ),
-                pad_layers.Pad2D(cnn_pad, mode="REFLECT"),
-                layers.Conv2D(16, 5, strides=2, padding="valid", activation=activation),
+                layers.InputLayer((None, None, constants.GEO_FEATURES)),
+                layers.Conv2D(16, 5, strides=1, padding="same", activation=activation),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
-                pad_layers.Pad2D(cnn_pad, mode="REFLECT"),
-                layers.Conv2D(64, 5, strides=2, padding="valid", activation=activation),
+                layers.Conv2D(64, 5, strides=1, padding="same", activation=activation),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
             ],
             name="geospatial_cnn",
         )
 
+
         # ConvLSTM
         # The spatial dimensions have been reduced 4x by the CNNs.
         # The "channel" dimension is the sum of the channels from the CNNs
         # and the rainfall window size.
-        conv_lstm_height = self._spatial_height // 4
-        conv_lstm_width = self._spatial_width // 4
+        conv_lstm_height = None
+        conv_lstm_width = None
         conv_lstm_channels = 16 + 64 + self._params.m_rainfall
 
         self.pre_attention = SpatialAttention()  # attention before ConvLSTM
@@ -418,18 +481,19 @@ class FloodConvLSTM(keras.Model):
 
         self.output_cnn = keras.Sequential(
             [
-                # Input shape: (height, width, channels)
                 layers.InputLayer(
-                    (conv_lstm_height, conv_lstm_width, self._params.lstm_units)
+                    (None, None, self._params.lstm_units)
                 ),
-                layers.Conv2DTranspose(
-                    8, 4, strides=4, padding="same", activation="relu"
+                layers.Conv2D(
+                    16, 3, padding="same", activation="relu"
                 ),
-                layers.Conv2DTranspose(
-                    1, 1, strides=1, padding="same", activation="relu"
+                layers.Conv2D(
+                    1, 1, padding="same", activation="relu"
                 ),
-            ]
+            ],
+            name="output_cnn"
         )
+
 
     def call(self, input: FloodModel.Input) -> tf.Tensor:
         """Makes a single forward pass on a batch of data.
@@ -498,13 +562,15 @@ class FloodConvLSTM(keras.Model):
         B = spatiotemporal.shape[0]
         C = 1  # Channel dimension for spatiotemporal tensor
         F = constants.GEO_FEATURES
+        # B = tf.shape(spatiotemporal)[0]
+        # H = tf.shape(spatiotemporal)[2]
+        # W = tf.shape(spatiotemporal)[3]
         N, M = self._params.n_flood_maps, self._params.m_rainfall
         T_MAX = constants.MAX_RAINFALL_DURATION
-        H, W = self._spatial_height, self._spatial_width
 
-        tf.ensure_shape(spatiotemporal, (B, N, H, W, C))
-        tf.ensure_shape(geospatial, (B, H, W, F))
-        tf.ensure_shape(temporal, (B, T_MAX, M))
+        assert spatiotemporal.shape[-1] == 1, "Expected single channel"
+        # tf.ensure_shape(geospatial, (B, H, W, F))
+        # tf.ensure_shape(temporal, (B, T_MAX, M))
 
         # This array stores the n predictions.
         predictions = tf.TensorArray(tf.float32, size=n)
@@ -556,7 +622,6 @@ class FloodConvLSTM(keras.Model):
         """Get_config."""
         return {
             "params": self._params.to_dict(),
-            "spatial_dims": (self._spatial_height, self._spatial_width),
         }
 
     @classmethod
@@ -564,5 +629,4 @@ class FloodConvLSTM(keras.Model):
         """From_config."""
         return cls(
             params=FloodModel.Params.from_dict(config["params"]),
-            spatial_dims=tuple(config["spatial_dims"]),
         )
