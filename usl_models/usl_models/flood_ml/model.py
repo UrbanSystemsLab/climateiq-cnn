@@ -33,15 +33,15 @@ class SpatialAttention(layers.Layer):
         attention = self.conv(concat)
         return inputs * attention
 
-    def get_config(self):
-        """Getcongif."""
-        base_config = super().get_config()
-        return base_config
+    # def get_config(self):
+    #     """Getcongif."""
+    #     base_config = super().get_config()
+    #     return base_config
 
-    @classmethod
-    def from_config(cls, config):
-        """fromcongif."""
-        return cls(**config)
+    # @classmethod
+    # def from_config(cls, config):
+    #     """fromcongif."""
+    #     return cls(**config)
 
 
 class FloodModel:
@@ -55,7 +55,7 @@ class FloodModel:
         lstm_kernel_size: int = 3
         lstm_dropout: float = 0.2
         lstm_recurrent_dropout: float = 0.2
-        m_rainfall: int = 3
+        m_rainfall: int = 6
         n_flood_maps: int = 6
         num_features: int = 22
         pad_mode: PadMode = "REFLECT"
@@ -156,34 +156,28 @@ class FloodModel:
             self._params = params or self.Params()
             self._model = self._build_model()
 
+
+
     @classmethod
     def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "FloodModel":
-        """Loads the model from a checkpoint URI.
+        """Loads the FloodModel from a checkpoint, allowing new spatial shapes."""
 
-        We load weights only to keep custom methods (e.g. `call_n`) intact.
-        This only works if the model architecture is identical to the architecure
-        used during export.
-        Ideally, we would load the entire Keras model and use that directly to allow
-        loading different architectures within the same wrapper class.
-        Unfortunately, `call_n` is not trivially serializeable in its current state.
+        # Load the model to get weights only
+        loaded_model = keras.models.load_model(artifact_uri)
 
-        Args:
-            artifact_uri: The path to the SavedModel directory.
-                This should end in `/model` if using a GCloud artifact.
+        # Rebuild model architecture dynamically
+        params = FloodModel.Params.from_config(loaded_model.get_config())
+        print(f"Loaded model params: {params}")
+        model = cls(params=params, **kwargs)
 
-        Returns:
-            The loaded FloodModel.
-        """
+        # Now set weights
+        model._model.set_weights(loaded_model.get_weights())
 
-        loss_fn = customloss.make_hybrid_loss(scale=kwargs.get("loss_scale", 100.0))
+        return model
 
-        loaded_model = keras.models.load_model(
-            artifact_uri,
-            custom_objects={"loss_fn": loss_fn},
-        )
 
-        # Wrap in FloodModel directly
-        return cls(model=loaded_model, loss_scale=kwargs.get("loss_scale", 100.0))
+
+
 
 
     @classmethod
@@ -354,7 +348,7 @@ class FloodModel:
             filepath: Path to which to save the model. Must end in ".keras".
             kwargs: Additional arguments to pass to keras' model.save method.
         """
-        self._model.save(filepath, **kwargs)
+        self._model.save(filepath, include_optimizer=False, **kwargs)
         logging.info("Saved model to %s", filepath)
 
 
@@ -522,10 +516,14 @@ class FloodConvLSTM(keras.Model):
 
         # Expand temporal inputs into maps
         # [B, n, m] -> [B, n, H', W', m]
-        H_out = st_cnn_output.shape[2]
-        W_out = st_cnn_output.shape[3]
-        temp_input = temporal[:, :, tf.newaxis, tf.newaxis, :]
-        temp_input = tf.tile(temp_input, [1, 1, H_out, W_out, 1])
+        H_out = tf.shape(st_cnn_output)[2]
+        W_out = tf.shape(st_cnn_output)[3]
+# Ensure consistent temporal length: take last N = self._params.n_flood_maps
+        N = self._params.n_flood_maps
+        temporal = temporal[:, -N:, :]  # shape: [B, N, M]
+        temp_input = temporal[:, :, tf.newaxis, tf.newaxis, :]  # [B, N, 1, 1, M]
+        temp_input = tf.tile(temp_input, [1, 1, H_out, W_out, 1])  # [B, N, H, W, M]
+
 
         lstm_input = tf.concat([st_cnn_output, geo_cnn_output, temp_input], axis=-1)
         lstm_input = self.pre_attention(lstm_input)
@@ -612,13 +610,9 @@ class FloodConvLSTM(keras.Model):
 
     def get_config(self):
         """Get_config."""
-        return {
-            "params": self._params.to_dict(),
-        }
+        return self._params.get_config()
 
     @classmethod
     def from_config(cls, config):
         """From_config."""
-        return cls(
-            params=FloodModel.Params.from_dict(config["params"]),
-        )
+        return cls(params=FloodModel.Params.from_config(config))
