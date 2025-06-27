@@ -160,24 +160,27 @@ class FloodModel:
 
     @classmethod
     def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "FloodModel":
-        """Loads the FloodModel from a checkpoint, allowing new spatial shapes."""
+        """Loads the model from a checkpoint URI.
 
-        # Load the model to get weights only
+        We load weights only to keep custom methods (e.g. `call_n`) intact.
+        This only works if the model architecture is identical to the architecure
+        used during export.
+        Ideally, we would load the entire Keras model and use that directly to allow
+        loading different architectures within the same wrapper class.
+        Unfortunately, `call_n` is not trivially serializeable in its current state.
+
+        Args:
+            artifact_uri: The path to the SavedModel directory.
+                This should end in `/model` if using a GCloud artifact.
+
+        Returns:
+            The loaded FloodModel.
+        """
         loaded_model = keras.models.load_model(artifact_uri)
-
-        # Rebuild model architecture dynamically
         params = FloodModel.Params.from_config(loaded_model.get_config())
-        print(f"Loaded model params: {params}")
         model = cls(params=params, **kwargs)
-
-        # Now set weights
         model._model.set_weights(loaded_model.get_weights())
-
         return model
-
-
-
-
 
 
     @classmethod
@@ -348,7 +351,7 @@ class FloodModel:
             filepath: Path to which to save the model. Must end in ".keras".
             kwargs: Additional arguments to pass to keras' model.save method.
         """
-        self._model.save(filepath, include_optimizer=False, **kwargs)
+        self._model.save(filepath, **kwargs)
         logging.info("Saved model to %s", filepath)
 
 

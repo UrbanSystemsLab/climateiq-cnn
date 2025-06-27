@@ -100,7 +100,7 @@ def load_dataset(
                 ),
             ),
             tf.TensorSpec(
-                shape=(None, ds_config.output_height, ds_config.output_width),
+                shape=(None, None, None),
                 dtype=tf.float32,
             ),
         ),
@@ -177,12 +177,12 @@ def load_dataset_windowed(
                     dtype=tf.float32,
                 ),
                 spatiotemporal=tf.TensorSpec(
-                    shape=(n_flood_maps, ds_config.input_height, ds_config.input_width, 1),
+                    shape=(n_flood_maps, None,None, 1),
                     dtype=tf.float32,
                 ),
             ),
             tf.TensorSpec(
-                shape=(ds_config.output_height, ds_config.output_width), dtype=tf.float32
+                shape=(None, None), dtype=tf.float32
             ),
         ),
     )
@@ -392,7 +392,7 @@ def _iter_geo_feature_label_tensors(
 
         reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
         reshaped_label_tensor = tf.map_fn(
-            lambda x: crop_or_pad_2d(x, config.output_height, config.output_width),
+            lambda x: crop_or_pad_2d(x, None, None),
             reshaped_label_tensor,
         )
         yield feature_tensor, reshaped_label_tensor
@@ -466,8 +466,8 @@ def _iter_study_area_tensors(
 def _geospatial_dataset_signature(config: Config) -> tf.TensorSpec:
     return tf.TensorSpec(
         shape=(
-            config.input_height,
-            config.input_width,
+            None,
+            None,
             constants.GEO_FEATURES,
         ),
         dtype=tf.float32,
@@ -485,8 +485,8 @@ def _spatiotemporal_dataset_signature(n_flood_maps: int, config: Config) -> tf.T
     return tf.TensorSpec(
         shape=(
             n_flood_maps,
-            config.input_height,
-            config.input_width,
+            None,
+            None,
             1,
         ),
         dtype=tf.float32,

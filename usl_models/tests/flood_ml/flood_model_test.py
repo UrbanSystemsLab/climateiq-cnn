@@ -10,6 +10,7 @@ import tensorflow as tf
 from usl_models.flood_ml import model as flood_model
 from tests.flood_ml.mock_dataset import mock_dataset, mock_prediction_dataset
 from usl_models.flood_ml.model import SpatialAttention, FloodConvLSTM
+from usl_models.flood_ml.model import FloodModel
 
 
 class FloodModelTest(unittest.TestCase):
@@ -209,9 +210,10 @@ class FloodModelTest(unittest.TestCase):
     def test_model_checkpoint(self):
         """Tests saving and loading a model checkpoint."""
         batch_size = 16
-        height, width = 100, 100
+        height, width = 10, 10
+        infer_height, infer_width = 20, 20
 
-        model = flood_model.FloodModel(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodModel(self._params)
 
         train_dataset = mock_dataset(
             self._params,
@@ -222,8 +224,8 @@ class FloodModelTest(unittest.TestCase):
         )
         val_dataset = mock_dataset(
             self._params,
-            height=height,
-            width=width,
+            height=infer_height,
+            width=infer_width,
             batch_size=batch_size,
             batch_count=1,
         )
@@ -233,17 +235,15 @@ class FloodModelTest(unittest.TestCase):
             model.save_model(tmp.name, overwrite=True)
 
             # Load the entire model, not just weights
-            loaded_model = keras.models.load_model(
+            loaded_model = FloodModel.from_checkpoint(
                 tmp.name,
-                custom_objects={
-                    "SpatialAttention": SpatialAttention,
-                    "FloodConvLSTM": FloodConvLSTM,
-                },
             )
-
-            # Check weights equality
+            # Try running on first sample of val_dataset
+            inputs, labels = next(iter(val_dataset))
+            prediction = loaded_model.call(inputs)
+            assert prediction.shape == (batch_size, infer_height, infer_width, 1)
             old_weights = model._model.get_weights()
-            new_weights = loaded_model.get_weights()
+            new_weights = loaded_model._model.get_weights()
         for old, new in zip(old_weights, new_weights):
             np.testing.assert_array_equal(old, new)
 
