@@ -25,8 +25,19 @@ class Config:
     output_width: int = constants.MAP_WIDTH
 
 
-def crop_or_pad_2d(tensor: tf.Tensor, height: int, width: int) -> tf.Tensor:
-    """Crop or pad a 2D or 3D tensor to the given shape."""
+def crop_or_pad_2d(tensor: tf.Tensor, ds_config: Config) -> tf.Tensor:
+    """Crop or pad a 2D or 3D tensor to the shape specified in ds_config."""
+    if ds_config is None:
+        raise ValueError("`ds_config` must be provided with output dimensions.")
+
+    height = ds_config.output_height
+    width = ds_config.output_width
+
+    if height is None or width is None:
+        raise ValueError(
+            "`output_height` and `output_width` in ds_config must not be None."
+        )
+
     rank = tensor.shape.rank
     if rank == 2:
         t = tensor[tf.newaxis, ..., tf.newaxis]
@@ -35,7 +46,7 @@ def crop_or_pad_2d(tensor: tf.Tensor, height: int, width: int) -> tf.Tensor:
     elif rank == 3:
         return tf.image.resize_with_crop_or_pad(tensor, height, width)
     else:
-        raise ValueError("tensor must be 2D or 3D")
+        raise ValueError("Input tensor must be 2D or 3D, got rank = {}".format(rank))
 
 
 def load_dataset(
@@ -68,6 +79,7 @@ def load_dataset(
                   If `None` (default) yields all examples from the simulations.
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
+      ds_config: The dataset configuration for spatial resolutions.
     """
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
@@ -144,6 +156,7 @@ def load_dataset_windowed(
                   If `None` (default) yields all examples from the simulations.
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
+      ds_config: The dataset configuration for spatial dimension.
     """
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
@@ -177,13 +190,11 @@ def load_dataset_windowed(
                     dtype=tf.float32,
                 ),
                 spatiotemporal=tf.TensorSpec(
-                    shape=(n_flood_maps, None,None, 1),
+                    shape=(n_flood_maps, None, None, 1),
                     dtype=tf.float32,
                 ),
             ),
-            tf.TensorSpec(
-                shape=(None, None), dtype=tf.float32
-            ),
+            tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         ),
     )
     # If no batch specified, do not batch the dataset, which is required
@@ -223,6 +234,7 @@ def load_prediction_dataset(
                   If `None` (default) yields all examples from the simulations.
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
+      ds_config: The dataset configuration for spatial resolutions.
     """
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
@@ -385,14 +397,12 @@ def _iter_geo_feature_label_tensors(
             "Retrieving features from %s and labels from %s", feature_url, label_url
         )
         feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
-        feature_tensor = crop_or_pad_2d(
-            feature_tensor, config.input_height, config.input_width
-        )
+        feature_tensor = crop_or_pad_2d(feature_tensor, ds_config=config)
         label_tensor = downloader.download_as_tensor(storage_client, label_url)
 
         reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
         reshaped_label_tensor = tf.map_fn(
-            lambda x: crop_or_pad_2d(x, None, None),
+            lambda x: crop_or_pad_2d(x, ds_config=config),
             reshaped_label_tensor,
         )
         yield feature_tensor, reshaped_label_tensor
@@ -457,9 +467,7 @@ def _iter_study_area_tensors(
 
         logging.info("Retrieving features from %s ", feature_url)
         feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
-        feature_tensor = crop_or_pad_2d(
-            feature_tensor, config.input_height, config.input_width
-        )
+        feature_tensor = crop_or_pad_2d(feature_tensor, ds_config=config)
         yield feature_tensor, chunk_name
 
 
@@ -481,7 +489,9 @@ def _temporal_dataset_signature(m_rainfall: int) -> tf.TensorSpec:
     )
 
 
-def _spatiotemporal_dataset_signature(n_flood_maps: int, config: Config) -> tf.TensorSpec:
+def _spatiotemporal_dataset_signature(
+    n_flood_maps: int, config: Config
+) -> tf.TensorSpec:
     return tf.TensorSpec(
         shape=(
             n_flood_maps,
