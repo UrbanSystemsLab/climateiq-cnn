@@ -334,7 +334,9 @@ def test_dataset_with_config(mock_metastore) -> None:
 
     mock_storage_client.bucket().blob.side_effect = mock_blob_func
 
-    config = dataset.Config(input_height=200, input_width=200, output_height=200, output_width=200)
+    config = dataset.Config(
+        input_height=200, input_width=200, output_height=200, output_width=200
+    )
     ds = dataset.load_dataset_windowed(
         sim_names=["sim_name"],
         dataset_split="train",
