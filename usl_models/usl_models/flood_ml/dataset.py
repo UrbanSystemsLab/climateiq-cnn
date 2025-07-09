@@ -2,6 +2,7 @@
 
 import logging
 import random
+import dataclasses
 from typing import Any, Iterator, Tuple
 
 from google.cloud import firestore  # type:ignore[attr-defined]
@@ -14,6 +15,40 @@ from usl_models.flood_ml import model
 from usl_models.shared import downloader
 
 
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class Config:
+    """Dataset configuration for spatial resolutions."""
+
+    input_height: int = constants.MAP_HEIGHT
+    input_width: int = constants.MAP_WIDTH
+    output_height: int = constants.MAP_HEIGHT
+    output_width: int = constants.MAP_WIDTH
+
+
+def crop_or_pad_2d(tensor: tf.Tensor, ds_config: Config) -> tf.Tensor:
+    """Crop or pad a 2D or 3D tensor to the shape specified in ds_config."""
+    if ds_config is None:
+        raise ValueError("`ds_config` must be provided with output dimensions.")
+
+    height = ds_config.output_height
+    width = ds_config.output_width
+
+    if height is None or width is None:
+        raise ValueError(
+            "`output_height` and `output_width` in ds_config must not be None."
+        )
+
+    rank = tensor.shape.rank
+    if rank == 2:
+        t = tensor[tf.newaxis, ..., tf.newaxis]
+        resized = tf.image.resize_with_crop_or_pad(t, height, width)
+        return tf.squeeze(resized, axis=[0, -1])
+    elif rank == 3:
+        return tf.image.resize_with_crop_or_pad(tensor, height, width)
+    else:
+        raise ValueError("Input tensor must be 2D or 3D, got rank = {}".format(rank))
+
+
 def load_dataset(
     sim_names: list[str],
     dataset_split: str,
@@ -23,6 +58,7 @@ def load_dataset(
     max_chunks: int | None = None,
     firestore_client: firestore.Client = None,
     storage_client: storage.Client | None = None,
+    ds_config: Config | None = None,
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for the flood model.
 
@@ -43,9 +79,11 @@ def load_dataset(
                   If `None` (default) yields all examples from the simulations.
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
+      ds_config: The dataset configuration for spatial resolutions.
     """
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
+    ds_config = ds_config or Config()
 
     def generator():
         """Generator for producing full inputs and labels."""
@@ -58,6 +96,7 @@ def load_dataset(
                 m_rainfall,
                 max_chunks,
                 dataset_split,
+                ds_config,
             ):
                 yield model_input, labels
 
@@ -66,12 +105,14 @@ def load_dataset(
         generator=generator,
         output_signature=(
             dict(
-                geospatial=_geospatial_dataset_signature(),
+                geospatial=_geospatial_dataset_signature(ds_config),
                 temporal=_temporal_dataset_signature(m_rainfall),
-                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
+                spatiotemporal=_spatiotemporal_dataset_signature(
+                    n_flood_maps, ds_config
+                ),
             ),
             tf.TensorSpec(
-                shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                shape=(None, None, None),
                 dtype=tf.float32,
             ),
         ),
@@ -92,6 +133,7 @@ def load_dataset_windowed(
     max_chunks: int | None = None,
     firestore_client: firestore.Client | None = None,
     storage_client: storage.Client | None = None,
+    ds_config: Config | None = None,
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for flood model training.
 
@@ -114,9 +156,11 @@ def load_dataset_windowed(
                   If `None` (default) yields all examples from the simulations.
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
+      ds_config: The dataset configuration for spatial dimension.
     """
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
+    ds_config = ds_config or Config()
 
     def generator():
         """Windowed generator for teacher-forcing training."""
@@ -129,6 +173,7 @@ def load_dataset_windowed(
                 m_rainfall,
                 max_chunks,
                 dataset_split,
+                ds_config,
             ):
                 for window_input, window_label in _generate_windows(
                     model_input, labels, n_flood_maps
@@ -139,26 +184,17 @@ def load_dataset_windowed(
         generator=generator,
         output_signature=(
             dict(
-                geospatial=tf.TensorSpec(
-                    shape=(
-                        constants.MAP_HEIGHT,
-                        constants.MAP_WIDTH,
-                        constants.GEO_FEATURES,
-                    ),
-                    dtype=tf.float32,
-                ),
+                geospatial=_geospatial_dataset_signature(ds_config),
                 temporal=tf.TensorSpec(
                     shape=(n_flood_maps, m_rainfall),
                     dtype=tf.float32,
                 ),
                 spatiotemporal=tf.TensorSpec(
-                    shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
+                    shape=(n_flood_maps, None, None, 1),
                     dtype=tf.float32,
                 ),
             ),
-            tf.TensorSpec(
-                shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
-            ),
+            tf.TensorSpec(shape=(None, None), dtype=tf.float32),
         ),
     )
     # If no batch specified, do not batch the dataset, which is required
@@ -177,6 +213,7 @@ def load_prediction_dataset(
     max_chunks: int | None = None,
     firestore_client: firestore.Client | None = None,
     storage_client: storage.Client | None = None,
+    ds_config: Config | None = None,
 ) -> tf.data.Dataset:
     """Creates a prediction dataset which generates chunks for flood model prediction.
 
@@ -197,9 +234,11 @@ def load_prediction_dataset(
                   If `None` (default) yields all examples from the simulations.
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
+      ds_config: The dataset configuration for spatial resolutions.
     """
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
+    ds_config = ds_config or Config()
 
     def generator():
         """Generator for producing full inputs from study area."""
@@ -211,6 +250,7 @@ def load_prediction_dataset(
             n_flood_maps,
             m_rainfall,
             max_chunks,
+            ds_config,
         ):
             yield model_input, metadata
 
@@ -219,9 +259,11 @@ def load_prediction_dataset(
         generator=generator,
         output_signature=(
             dict(
-                geospatial=_geospatial_dataset_signature(),
+                geospatial=_geospatial_dataset_signature(ds_config),
                 temporal=_temporal_dataset_signature(m_rainfall),
-                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
+                spatiotemporal=_spatiotemporal_dataset_signature(
+                    n_flood_maps, ds_config
+                ),
             ),
             dict(
                 feature_chunk=tf.TensorSpec(shape=(), dtype=tf.string),
@@ -284,6 +326,7 @@ def _iter_model_inputs(
     m_rainfall: int,
     max_chunks: int | None,
     dataset_split: str,
+    config: Config,
 ) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor]]:
     """Yields model inputs for each spatial chunk in the simulation."""
     temporal, _ = _generate_temporal_tensor(
@@ -293,7 +336,7 @@ def _iter_model_inputs(
         m_rainfall,
     )
     feature_label_gen = _iter_geo_feature_label_tensors(
-        firestore_client, storage_client, sim_name, dataset_split
+        firestore_client, storage_client, sim_name, dataset_split, config
     )
 
     for i, (geospatial, labels) in enumerate(feature_label_gen):
@@ -306,8 +349,8 @@ def _iter_model_inputs(
             spatiotemporal=tf.zeros(
                 shape=(
                     n_flood_maps,
-                    constants.MAP_HEIGHT,
-                    constants.MAP_WIDTH,
+                    config.input_height,
+                    config.input_width,
                     1,
                 )
             ),
@@ -337,6 +380,7 @@ def _iter_geo_feature_label_tensors(
     storage_client: storage.Client,
     sim_name: str,
     dataset_split: str,
+    config: Config,
 ) -> Iterator[tuple[tf.Tensor, tf.Tensor]]:
     """Yields feature and label tensors from chunks stored in GCS."""
     feature_label_metadata = metastore.get_spatial_feature_and_label_chunk_metadata(
@@ -353,9 +397,14 @@ def _iter_geo_feature_label_tensors(
             "Retrieving features from %s and labels from %s", feature_url, label_url
         )
         feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
+        feature_tensor = crop_or_pad_2d(feature_tensor, ds_config=config)
         label_tensor = downloader.download_as_tensor(storage_client, label_url)
 
         reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
+        reshaped_label_tensor = tf.map_fn(
+            lambda x: crop_or_pad_2d(x, ds_config=config),
+            reshaped_label_tensor,
+        )
         yield feature_tensor, reshaped_label_tensor
 
 
@@ -367,6 +416,7 @@ def _iter_model_inputs_for_prediction(
     n_flood_maps: int,
     m_rainfall: int,
     max_chunks: int | None,
+    config: Config,
 ) -> Iterator[Tuple[model.FloodModel.Input, dict]]:
     """Yields model inputs for each spatial chunk in the simulation."""
     temporal, rainfall = _generate_temporal_tensor(
@@ -379,7 +429,7 @@ def _iter_model_inputs_for_prediction(
     )
 
     for feature_tensor, chunk_name in _iter_study_area_tensors(
-        firestore_client, storage_client, study_area_name
+        firestore_client, storage_client, study_area_name, config
     ):
         metadata = {"feature_chunk": chunk_name, "rainfall": rainfall}
 
@@ -389,8 +439,8 @@ def _iter_model_inputs_for_prediction(
             spatiotemporal=tf.zeros(
                 shape=(
                     n_flood_maps,
-                    constants.MAP_HEIGHT,
-                    constants.MAP_WIDTH,
+                    config.input_height,
+                    config.input_width,
                     1,
                 )
             ),
@@ -402,6 +452,7 @@ def _iter_study_area_tensors(
     firestore_client: firestore.Client,
     storage_client: storage.Client,
     study_area_name: str,
+    config: Config,
 ) -> Iterator[Tuple[tf.Tensor, str]]:
     """Yields feature tensors from chunks stored in GCS."""
     all_feature_metadata = metastore.get_spatial_feature_chunk_metadata_for_prediction(
@@ -416,14 +467,15 @@ def _iter_study_area_tensors(
 
         logging.info("Retrieving features from %s ", feature_url)
         feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
+        feature_tensor = crop_or_pad_2d(feature_tensor, ds_config=config)
         yield feature_tensor, chunk_name
 
 
-def _geospatial_dataset_signature() -> tf.TensorSpec:
+def _geospatial_dataset_signature(config: Config) -> tf.TensorSpec:
     return tf.TensorSpec(
         shape=(
-            constants.MAP_HEIGHT,
-            constants.MAP_WIDTH,
+            None,
+            None,
             constants.GEO_FEATURES,
         ),
         dtype=tf.float32,
@@ -437,12 +489,14 @@ def _temporal_dataset_signature(m_rainfall: int) -> tf.TensorSpec:
     )
 
 
-def _spatiotemporal_dataset_signature(n_flood_maps: int) -> tf.TensorSpec:
+def _spatiotemporal_dataset_signature(
+    n_flood_maps: int, config: Config
+) -> tf.TensorSpec:
     return tf.TensorSpec(
         shape=(
             n_flood_maps,
-            constants.MAP_HEIGHT,
-            constants.MAP_WIDTH,
+            None,
+            None,
             1,
         ),
         dtype=tf.float32,

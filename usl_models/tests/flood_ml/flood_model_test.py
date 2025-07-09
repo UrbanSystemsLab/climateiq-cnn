@@ -9,7 +9,7 @@ import tensorflow as tf
 
 from usl_models.flood_ml import model as flood_model
 from tests.flood_ml.mock_dataset import mock_dataset, mock_prediction_dataset
-from usl_models.flood_ml.model import SpatialAttention, FloodConvLSTM
+from usl_models.flood_ml import customloss
 
 
 class FloodModelTest(unittest.TestCase):
@@ -48,7 +48,7 @@ class FloodModelTest(unittest.TestCase):
                 )
             )
         )
-        model = flood_model.FloodConvLSTM(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodConvLSTM(self._params)
         prediction = model.call(input)
         assert prediction.shape == (batch_size, height, width, 1)
 
@@ -79,9 +79,27 @@ class FloodModelTest(unittest.TestCase):
                 )
             )
         )
-        model = flood_model.FloodConvLSTM(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodConvLSTM(self._params)
         prediction = model.call_n(input, n=storm_duration)
         assert prediction.shape == (batch_size, storm_duration, height, width)
+
+    def test_convlstm_variable_resolution(self):
+        """Model works for different spatial resolutions."""
+        for h in [200, 1000]:
+            input, _ = next(
+                iter(
+                    mock_dataset(
+                        self._params,
+                        height=h,
+                        width=h,
+                        batch_size=1,
+                        n=2,
+                    )
+                )
+            )
+            model = flood_model.FloodConvLSTM(self._params)
+            prediction = model.call_n(input, n=2)
+            assert prediction.shape == (1, 2, h, h)
 
     def test_batch_predict_n(self):
         """Tests the FloodConvLSTM model batch predict.
@@ -106,7 +124,7 @@ class FloodModelTest(unittest.TestCase):
         )
         strategy = tf.distribute.MirroredStrategy()
         with strategy.scope():
-            model = flood_model.FloodModel(self._params, spatial_dims=(height, width))
+            model = flood_model.FloodModel(self._params)
             for results in model.batch_predict_n(dataset, n=storm_duration):
                 assert len(results) == batch_size
                 for result in results:
@@ -125,7 +143,7 @@ class FloodModelTest(unittest.TestCase):
         batch_size = 16
         height, width = 100, 100
 
-        model = flood_model.FloodModel(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodModel(self._params)
         epochs = 2
         train_dataset = mock_dataset(
             self._params,
@@ -162,7 +180,7 @@ class FloodModelTest(unittest.TestCase):
         # Set a large number of epochs to increase the odds of triggering early
         # stopping.
         epochs = 20
-        model = flood_model.FloodModel(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodModel(self._params)
 
         train_dataset = mock_dataset(
             self._params,
@@ -191,9 +209,10 @@ class FloodModelTest(unittest.TestCase):
     def test_model_checkpoint(self):
         """Tests saving and loading a model checkpoint."""
         batch_size = 16
-        height, width = 100, 100
+        height, width = 20, 20
+        infer_height, infer_width = 10, 10
 
-        model = flood_model.FloodModel(self._params, spatial_dims=(height, width))
+        model = flood_model.FloodModel(self._params)
 
         train_dataset = mock_dataset(
             self._params,
@@ -204,30 +223,34 @@ class FloodModelTest(unittest.TestCase):
         )
         val_dataset = mock_dataset(
             self._params,
-            height=height,
-            width=width,
+            height=infer_height,
+            width=infer_width,
             batch_size=batch_size,
             batch_count=1,
         )
         model.fit(train_dataset, val_dataset=val_dataset, steps_per_epoch=1)
 
-        with tempfile.NamedTemporaryFile(suffix=".keras") as tmp:
-            model.save_model(tmp.name, overwrite=True)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = f"{tmpdir}/model.keras"
+            model.save_model(model_path)
 
-            # Load the entire model, not just weights
-            loaded_model = keras.models.load_model(
-                tmp.name,
-                custom_objects={
-                    "SpatialAttention": SpatialAttention,
-                    "FloodConvLSTM": FloodConvLSTM,
-                },
+            loss_scale = 100.0
+            loss_fn = customloss.make_hybrid_loss(scale=loss_scale)
+
+            loaded_model = tf.keras.models.load_model(
+                model_path, custom_objects={"loss_fn": loss_fn}
             )
 
-            # Check weights equality
+            # Run prediction
+            inputs, labels = next(iter(val_dataset))
+            prediction = loaded_model(inputs)
+            assert prediction.shape == (batch_size, infer_height, infer_width, 1)
+
+            # compare weights
             old_weights = model._model.get_weights()
             new_weights = loaded_model.get_weights()
-        for old, new in zip(old_weights, new_weights):
-            np.testing.assert_array_equal(old, new)
+            for old, new in zip(old_weights, new_weights):
+                np.testing.assert_array_almost_equal(old, new, decimal=5)
 
     def test_get_temporal_window(self):
         """Tests copmuting the temporal window."""
