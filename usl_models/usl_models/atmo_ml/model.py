@@ -33,7 +33,7 @@ class ConvParams(TypedDict):
 
 
 class AtmoModel:
-    """Atmo model class."""
+    """Atmospheric model class."""
 
     @keras_dataclasses.dataclass(kw_only=True)
     class Params(keras_dataclasses.Base):
