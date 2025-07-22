@@ -24,14 +24,29 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: "3.11"
-    - name: Start FireStore Emulator
+    - name: Start Firestore Emulator and Wait for Readiness
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
         curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
         echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
         sudo apt-get update && sudo apt-get install -y google-cloud-cli google-cloud-cli-firestore-emulator
-        gcloud emulators firestore start --host-port=localhost:8085 &
+
+        # Start the emulator in the background
+        gcloud emulators firestore start --host-port=localhost:8085 > firestore.log 2>&1 &
+        
+        # Wait until the emulator is ready
+        echo "Waiting for Firestore emulator to start..."
+        for i in {1..30}; do
+          if nc -z localhost 8085; then
+            echo "Firestore emulator is ready."
+            break
+          fi
+          sleep 1
+        done
+
+
+
     - name: Install dependencies
       run: |
         sudo apt-get update -qq
@@ -128,14 +143,27 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: "3.11"
-    - name: Start FireStore Emulator
+    - name: Start Firestore Emulator and Wait for Readiness
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
         curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
         echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
         sudo apt-get update && sudo apt-get install -y google-cloud-cli google-cloud-cli-firestore-emulator
-        gcloud emulators firestore start --host-port=localhost:8085 &
+
+        # Start the emulator in the background
+        gcloud emulators firestore start --host-port=localhost:8085 > firestore.log 2>&1 &
+        
+        # Wait until the emulator is ready
+        echo "Waiting for Firestore emulator to start..."
+        for i in {1..30}; do
+          if nc -z localhost 8085; then
+            echo "Firestore emulator is ready."
+            break
+          fi
+          sleep 1
+        done
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
