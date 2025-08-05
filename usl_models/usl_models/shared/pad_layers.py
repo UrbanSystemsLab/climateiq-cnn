@@ -1,8 +1,10 @@
 from keras import layers
 import tensorflow as tf
 from typing import Tuple
+from keras.saving import register_keras_serializable
 
 
+@register_keras_serializable(package="Custom")
 class Pad2D(layers.Layer):
     """Implements tf.pad as a layer for 2D tensors.
 
