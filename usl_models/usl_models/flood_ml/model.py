@@ -7,10 +7,10 @@ import keras
 from keras import layers
 import keras_tuner
 import tensorflow as tf
-
+from typing import Self
 from usl_models.flood_ml import constants
 from usl_models.shared import keras_dataclasses
-
+@keras.saving.register_keras_serializable()
 
 def weighted_mse_small_targets(y_true, y_pred):
     """Custom MSE loss that gives higher importance to smaller target values."""
@@ -30,6 +30,7 @@ def weighted_mse_small_targets(y_true, y_pred):
     )
 
 
+@keras.saving.register_keras_serializable()
 def hybrid_loss(y_true, y_pred):
     mse = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
     small_weighted = weighted_mse_small_targets(y_true, y_pred)
@@ -497,6 +498,15 @@ class FloodConvLSTM(keras.Model):
         predictions = tf.stack(tf.unstack(predictions.stack()), axis=1)
         return tf.squeeze(predictions, axis=-1)
 
+    def get_config(self) -> dict:
+        """Keras serialization."""
+        return self._params.get_config()
+    
+    @classmethod
+    def from_config(cls, config: dict) -> Self:
+        """Keras deserialization."""
+        return cls(params=FloodModel.Params.from_config(config))
+    
     @staticmethod
     def _get_temporal_window(temporal: tf.Tensor, t: int, n: int) -> tf.Tensor:
         B, _, M = temporal.shape

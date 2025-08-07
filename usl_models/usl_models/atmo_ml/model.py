@@ -14,7 +14,7 @@ from usl_models.atmo_ml import data_utils
 from usl_models.atmo_ml import constants
 from usl_models.atmo_ml import metrics
 from usl_models.atmo_ml import vars
-
+from typing import Self
 from usl_models.shared import keras_dataclasses
 from usl_models.shared import pad_layers
 
@@ -647,6 +647,6 @@ class AtmoConvLSTM(keras.Model):
         return self._params.get_config()
 
     @classmethod
-    def from_config(cls, config: dict) -> "AtmoConvLSTM":
+    def from_config(cls, config: dict) -> Self:
         """Keras deserialization."""
         return cls(params=AtmoModel.Params.from_config(config))
