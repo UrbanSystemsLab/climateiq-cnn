@@ -41,9 +41,9 @@ class Config:
     output_height: int = constants.MAP_HEIGHT
     output_timesteps: int = constants.OUTPUT_TIME_STEPS
     sto_vars: Tuple[vars.SpatiotemporalOutput, ...] = (
-        vars.SpatiotemporalOutput.RH2,
+        # vars.SpatiotemporalOutput.RH2,
         vars.SpatiotemporalOutput.T2,
-        vars.SpatiotemporalOutput.WSPD_WDIR10,
+        # vars.SpatiotemporalOutput.WSPD_WDIR10,
     )
 
 
@@ -520,19 +520,27 @@ def crop_2d(arr: np.ndarray, height: int, width: int) -> np.ndarray:
 
 
 def preprocess_label(label: np.ndarray, config: Config) -> np.ndarray:
-    """Preprocess label tensor based on the dataset config."""
-    # Scale tensors and prune unused vars.
+    """Preprocess label tensor based on the dataset config.
+
+    This version assumes the label input has all channels, but we only extract
+    and reindex the ones specified in `config.sto_vars`.
+    """
     label_arrays = []
-    for sto_var in config.sto_vars:
-        label_arrays.append(sto_var.scale(label[:, :, sto_var.value]))
+    for i, sto_var in enumerate(config.sto_vars):
+        # Get the full label array and apply the sto_var's scale method
+        # Always slice the i-th band, not sto_var.value
+        unscaled_band = label[:, :, sto_var.value]  # Use original index
+        label_arrays.append(sto_var.scale(unscaled_band))
+
     label = np.stack(label_arrays, axis=-1)
 
-    # Apply cropping if required.
+    # Crop if needed
     H, W, _ = label.shape
     if (config.output_height, config.output_width) != (H, W):
         label = crop_2d(label, config.output_height, config.output_width)
 
     return label
+
 
 
 def load_day_label_cached(
