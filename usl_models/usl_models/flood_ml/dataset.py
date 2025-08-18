@@ -31,56 +31,85 @@ def load_dataset(
     The examples are generated from multiple simulations.
     The dataset iteratively yields examples read from Google Cloud Storage to avoid
     pulling all examples into memory at once.
-
-    Args:
-      sim_names: The simulation names, e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
-      dataset_split: Which dataset split to load: train, val, and/or test.
-      batch_size: Size of batches yielded by the dataset. Approximate memory
-                  usage is 10GB * batch_size during training.
-      n_flood_maps: The number of flood maps in each example.
-      m_rainfall: The width of the temporal rainfall tensor.
-      max_chunks: The maximum number of examples to yield from the dataset.
-                  If `None` (default) yields all examples from the simulations.
-      firestore_client: The client to use when interacting with Firestore.
-      storage_client: The client to use when interacting with Cloud Storage.
     """
-    firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 
-    def generator():
-        """Generator for producing full inputs and labels."""
-        for sim_name in sim_names:
-            for model_input, labels in _iter_model_inputs(
-                firestore_client,
-                storage_client,
-                sim_name,
-                n_flood_maps,
-                m_rainfall,
-                max_chunks,
-                dataset_split,
-            ):
-                yield model_input, labels
+    # Collect metadata about available sims/chunks
+    sim_chunks = metastore.get_all_chunks(
+        sim_names=sim_names,
+        split=dataset_split,
+        max_chunks=max_chunks,
+        firestore_client=firestore_client,
+    )
+    logging.info("Found %d chunks for %s split", len(sim_chunks), dataset_split)
 
-    # Create the dataset for this simulation
-    dataset = tf.data.Dataset.from_generator(
-        generator=generator,
-        output_signature=(
-            dict(
-                geospatial=_geospatial_dataset_signature(),
-                temporal=_temporal_dataset_signature(m_rainfall),
-                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
-            ),
-            tf.TensorSpec(
-                shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+    def generator() -> Iterator[Tuple[dict[str, tf.Tensor], tf.Tensor]]:
+        """Yield (inputs, labels) one example at a time to keep RAM low."""
+        for chunk in sim_chunks:
+            try:
+                # Download rainfall input
+                rain_np = downloader.try_download_tensor(
+                    storage_client.bucket(constants.RAINFALL_BUCKET),
+                    f"{chunk.sim_name}/rainfall/{chunk.chunk_id}.npy",
+                )
+                if rain_np is None:
+                    continue
+
+                # Download flood maps (labels)
+                flood_np = downloader.try_download_tensor(
+                    storage_client.bucket(constants.FLOOD_BUCKET),
+                    f"{chunk.sim_name}/flood/{chunk.chunk_id}.npy",
+                )
+                if flood_np is None:
+                    continue
+
+                # Convert/reshape/cast to expected shapes & dtypes
+                rainfall = tf.convert_to_tensor(rain_np)
+                flood = tf.convert_to_tensor(flood_np)
+
+                rainfall = tf.reshape(
+                    rainfall,
+                    (m_rainfall, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                )
+                flood = tf.reshape(
+                    flood, (n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH)
+                )
+
+                rainfall = tf.cast(rainfall, tf.float32)
+                flood = tf.cast(flood, tf.float32)
+
+                yield {"rainfall": rainfall}, flood
+
+            except Exception as e:
+                logging.warning("Skipping chunk %s due to error: %s", getattr(chunk, "chunk_id", "?"), e)
+                continue
+
+    # Dataset signature
+    output_signature = (
+        {
+            "rainfall": tf.TensorSpec(
+                shape=(m_rainfall, constants.MAP_HEIGHT, constants.MAP_WIDTH),
                 dtype=tf.float32,
-            ),
+            )
+        },
+        tf.TensorSpec(
+            shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+            dtype=tf.float32,
         ),
     )
-    # If no batch specified, do not batch the dataset, which is required
-    # for generating data for batch prediction in VertexAI.
-    if batch_size:
-        dataset = dataset.batch(batch_size)
+
+    dataset = tf.data.Dataset.from_generator(generator, output_signature=output_signature)
+
+    # Shuffle only if this is a training split; tune buffer if needed
+    if dataset_split.lower() == "train":
+        dataset = dataset.shuffle(buffer_size=32, reshuffle_each_iteration=True)
+
+    # Batch + prefetch to keep memory bounded and throughput high
+    dataset = dataset.batch(batch_size, drop_remainder=False)
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+
     return dataset
+
 
 
 def load_dataset_windowed(
