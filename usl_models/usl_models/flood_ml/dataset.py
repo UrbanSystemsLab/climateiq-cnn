@@ -123,18 +123,18 @@ def load_dataset(
 
     # Dataset signature
     output_signature = (
-        {
-            "rainfall": tf.TensorSpec(
-                shape=(m_rainfall, constants.MAP_HEIGHT, constants.MAP_WIDTH),
-                dtype=tf.float32,
-            ),
-            )
-        },
-        tf.TensorSpec(
-            shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+    {
+        "rainfall": tf.TensorSpec(
+            shape=(m_rainfall, constants.MAP_HEIGHT, constants.MAP_WIDTH),
             dtype=tf.float32,
-        ),
-    )
+        )
+    },
+    tf.TensorSpec(
+        shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+        dtype=tf.float32,
+    ),
+)
+
     # If no batch specified, do not batch the dataset, which is required
     # for generating data for batch prediction in VertexAI.
     if batch_size:
