@@ -96,7 +96,10 @@ def load_dataset(
         ),
     )
 
-    dataset = tf.data.Dataset.from_generator(generator, output_signature=output_signature)
+    dataset = tf.data.Dataset.from_generator(
+        generator, 
+        output_signature=output_signature,
+    )
 
     # Non-deterministic ordering is fine for throughput
     options = tf.data.Options()
@@ -109,7 +112,6 @@ def load_dataset(
     dataset = dataset.batch(batch_size, drop_remainder=False)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset
-
 
 
 def load_dataset_windowed(
@@ -362,12 +364,17 @@ def _generate_temporal_tensor(
     gcs_url = temporal_metadata["as_vector_gcs_uri"]
     logging.info("Retrieving temporal features from %s.", gcs_url)
 
-    temporal_vector = tf.cast(downloader.download_as_tensor(storage_client, gcs_url), tf.float32)
+    temporal_vector = tf.cast(
+        downloader.download_as_tensor(storage_client, gcs_url),
+        tf.float32,
+    )
     temporal_vector = tf.transpose(
-        tf.tile(tf.reshape(temporal_vector, (1, tf.shape(temporal_vector)[0])), [m_rainfall, 1])
+        tf.tile(
+            tf.reshape(temporal_vector, (1, tf.shape(temporal_vector)[0])), 
+            [m_rainfall, 1],
+        )
     )
     return temporal_vector, int(temporal_metadata["rainfall_duration"])
-
 
 
 def _iter_geo_feature_label_tensors(
@@ -386,13 +393,22 @@ def _iter_geo_feature_label_tensors(
         feature_url = feature_metadata["feature_matrix_path"]
         label_url = label_metadata["gcs_uri"]
 
-        logging.info("Retrieving features from %s and labels from %s", feature_url, label_url)
-        feature_tensor = tf.cast(downloader.download_as_tensor(storage_client, feature_url), tf.float32)
-        label_tensor = tf.cast(downloader.download_as_tensor(storage_client, label_url), tf.float32)
+        logging.info(
+            "Retrieving features from %s and labels from %s", 
+            feature_url, 
+            label_url,
+        )
+        feature_tensor = tf.cast(
+            downloader.download_as_tensor(storage_client, feature_url), 
+            tf.float32,
+        )
+        label_tensor = tf.cast(
+            downloader.download_as_tensor(storage_client, label_url),
+            tf.float32,
+        )
 
         reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])  # (T, H, W)
         yield feature_tensor, reshaped_label_tensor
-
 
 
 def _iter_model_inputs_for_prediction(
