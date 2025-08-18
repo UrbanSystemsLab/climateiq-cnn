@@ -24,42 +24,13 @@ def load_dataset(
     firestore_client: firestore.Client = None,
     storage_client: storage.Client | None = None,
 ) -> tf.data.Dataset:
-    """Creates a dataset which generates chunks for the flood model.
+    """Creates a dataset which streams chunks for the flood model (no full in‑mem load).
 
-    This dataset produces the input for `model.call_n`.
-    For training with teacher-forcing, `load_dataset_windowed` should be used instead.
-    The examples are generated from multiple simulations.
-    The dataset iteratively yields examples read from Google Cloud Storage to avoid
-    pulling all examples into memory at once.
-
-    Args:
-      sim_names: The simulation names, e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
-      dataset_split: Which dataset split to load: train, val, and/or test.
-      batch_size: Size of batches yielded by the dataset. Approximate memory
-                  usage is 10GB * batch_size during training.
-      n_flood_maps: The number of flood maps in each example.
-      m_rainfall: The width of the temporal rainfall tensor.
-      max_chunks: The maximum number of examples to yield from the dataset.
-                  If `None` (default) yields all examples from the simulations.
-      firestore_client: The client to use when interacting with Firestore.
-      storage_client: The client to use when interacting with Cloud Storage.
+    Produces inputs for `model.call_n`. For teacher-forcing training, use
+    `load_dataset_windowed`. Examples are yielded directly from GCS to keep RAM bounded.
     """
-    firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 
-    def generator():
-        """Generator for producing full inputs and labels."""
-        for sim_name in sim_names:
-            for model_input, labels in _iter_model_inputs(
-                firestore_client,
-                storage_client,
-                sim_name,
-                n_flood_maps,
-                m_rainfall,
-                max_chunks,
-                dataset_split,
-            ):
-                yield model_input, labels
     # Collect metadata about available sims/chunks
     sim_chunks = metastore.get_all_chunks(
         sim_names=sim_names,
@@ -73,7 +44,6 @@ def load_dataset(
         """Yield (inputs, labels) one example at a time to keep RAM low."""
         for chunk in sim_chunks:
             try:
-                # Download rainfall input
                 rain_np = downloader.try_download_tensor(
                     storage_client.bucket(constants.RAINFALL_BUCKET),
                     f"{chunk.sim_name}/rainfall/{chunk.chunk_id}.npy",
@@ -81,18 +51,6 @@ def load_dataset(
                 if rain_np is None:
                     continue
 
-    # Create the dataset for this simulation
-    dataset = tf.data.Dataset.from_generator(
-        generator=generator,
-        output_signature=(
-            dict(
-                geospatial=_geospatial_dataset_signature(),
-                temporal=_temporal_dataset_signature(m_rainfall),
-                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
-            ),
-            tf.TensorSpec(
-                shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
-                # Download flood maps (labels)
                 flood_np = downloader.try_download_tensor(
                     storage_client.bucket(constants.FLOOD_BUCKET),
                     f"{chunk.sim_name}/flood/{chunk.chunk_id}.npy",
@@ -100,56 +58,56 @@ def load_dataset(
                 if flood_np is None:
                     continue
 
-                # Convert/reshape/cast to expected shapes & dtypes
-                rainfall = tf.convert_to_tensor(rain_np)
-                flood = tf.convert_to_tensor(flood_np)
-
-                rainfall = tf.reshape(
-                    rainfall,
-                    (m_rainfall, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                rainfall = tf.cast(
+                    tf.reshape(
+                        tf.convert_to_tensor(rain_np),
+                        (m_rainfall, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                    ),
+                    tf.float32,
                 )
-                flood = tf.reshape(
-                    flood, (n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH)
+                flood = tf.cast(
+                    tf.reshape(
+                        tf.convert_to_tensor(flood_np),
+                        (n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                    ),
+                    tf.float32,
                 )
-
-                rainfall = tf.cast(rainfall, tf.float32)
-                flood = tf.cast(flood, tf.float32)
 
                 yield {"rainfall": rainfall}, flood
 
             except Exception as e:
-                logging.warning("Skipping chunk %s due to error: %s", getattr(chunk, "chunk_id", "?"), e)
+                logging.warning(
+                    "Skipping chunk %s due to error: %s",
+                    getattr(chunk, "chunk_id", "?"),
+                    e,
+                )
                 continue
 
-    # Dataset signature
     output_signature = (
-    {
-        "rainfall": tf.TensorSpec(
-            shape=(m_rainfall, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+        {
+            "rainfall": tf.TensorSpec(
+                shape=(m_rainfall, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                dtype=tf.float32,
+            )
+        },
+        tf.TensorSpec(
+            shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH),
             dtype=tf.float32,
-        )
-    },
-    tf.TensorSpec(
-        shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH),
-        dtype=tf.float32,
-    ),
-)
-
-    # If no batch specified, do not batch the dataset, which is required
-    # for generating data for batch prediction in VertexAI.
-    if batch_size:
-        dataset = dataset.batch(batch_size)
+        ),
+    )
 
     dataset = tf.data.Dataset.from_generator(generator, output_signature=output_signature)
 
-    # Shuffle only if this is a training split; tune buffer if needed
+    # Non-deterministic ordering is fine for throughput
+    options = tf.data.Options()
+    options.experimental_deterministic = False
+    dataset = dataset.with_options(options)
+
     if dataset_split.lower() == "train":
         dataset = dataset.shuffle(buffer_size=32, reshuffle_each_iteration=True)
 
-    # Batch + prefetch to keep memory bounded and throughput high
     dataset = dataset.batch(batch_size, drop_remainder=False)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
-
     return dataset
 
 
@@ -164,10 +122,9 @@ def load_dataset_windowed(
     firestore_client: firestore.Client | None = None,
     storage_client: storage.Client | None = None,
 ) -> tf.data.Dataset:
-    """Creates a streaming, windowed dataset for teacher‑forcing training.
+    """Streaming, windowed dataset for teacher‑forcing training (no full in‑mem load).
 
-    Produces inputs for `model.call`. Keeps memory bounded by yielding
-    windows directly from GCS-backed generators (no full in-memory loads).
+    Produces inputs for `model.call`. Windows are generated on-the-fly per chunk.
     """
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
@@ -175,7 +132,6 @@ def load_dataset_windowed(
     def generator():
         """Yield (window_input, window_label) one window at a time."""
         for sim_name in sim_names:
-            # Stream one chunk at a time; do not accumulate in memory.
             for model_input, labels in _iter_model_inputs(
                 firestore_client,
                 storage_client,
@@ -185,24 +141,30 @@ def load_dataset_windowed(
                 max_chunks,
                 dataset_split,
             ):
-                # Generate sliding windows on-the-fly per chunk
+                # labels: (T, H, W)
                 for window_input, window_label in _generate_windows(
                     model_input, labels, n_flood_maps
                 ):
-                    # Defensive casts to keep dtypes stable and avoid silent upcasts
-                    window_input = dict(
-                        geospatial=tf.cast(window_input["geospatial"], tf.float32),
-                        temporal=tf.cast(window_input["temporal"], tf.float32),
-                        spatiotemporal=tf.cast(window_input["spatiotemporal"], tf.float32),
+                    yield (
+                        {
+                            "geospatial": tf.cast(
+                                window_input["geospatial"], tf.float32
+                            ),
+                            "temporal": tf.cast(
+                                window_input["temporal"], tf.float32
+                            ),
+                            "spatiotemporal": tf.cast(
+                                window_input["spatiotemporal"], tf.float32
+                            ),
+                        },
+                        tf.cast(window_label, tf.float32),
                     )
-                    window_label = tf.cast(window_label, tf.float32)
-                    yield (window_input, window_label)
 
     dataset = tf.data.Dataset.from_generator(
         generator=generator,
         output_signature=(
-            dict(
-                geospatial=tf.TensorSpec(
+            {
+                "geospatial": tf.TensorSpec(
                     shape=(
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
@@ -210,15 +172,19 @@ def load_dataset_windowed(
                     ),
                     dtype=tf.float32,
                 ),
-                temporal=tf.TensorSpec(
-                    shape=(n_flood_maps, m_rainfall),
+                "temporal": tf.TensorSpec(
+                    shape=(n_flood_maps, m_rainfall), dtype=tf.float32
+                ),
+                "spatiotemporal": tf.TensorSpec(
+                    shape=(
+                        n_flood_maps,
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                        1,
+                    ),
                     dtype=tf.float32,
                 ),
-                spatiotemporal=tf.TensorSpec(
-                    shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
-                    dtype=tf.float32,
-                ),
-            ),
+            },
             tf.TensorSpec(
                 shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
             ),
@@ -229,7 +195,6 @@ def load_dataset_windowed(
     options.experimental_deterministic = False
     dataset = dataset.with_options(options)
 
-    # Shuffle only for training; buffer tunes RAM vs. randomness
     if dataset_split.lower() == "train":
         dataset = dataset.shuffle(buffer_size=512, reshuffle_each_iteration=True)
 
@@ -238,7 +203,6 @@ def load_dataset_windowed(
 
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset
-
 
 
 def load_prediction_dataset(
