@@ -21,34 +21,18 @@ def load_dataset(
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
     max_chunks: int | None = None,
-    firestore_client: firestore.Client = None,
+    firestore_client: firestore.Client | None = None,
     storage_client: storage.Client | None = None,
 ) -> tf.data.Dataset:
-    """Creates a dataset which generates chunks for the flood model.
+    """Create a streaming dataset of full examples for `model.call_n`.
 
-    This dataset produces the input for `model.call_n`.
-    For training with teacher-forcing, `load_dataset_windowed` should be used instead.
-    The examples are generated from multiple simulations.
-    The dataset iteratively yields examples read from Google Cloud Storage to avoid
-    pulling all examples into memory at once.
-
-    Args:
-      sim_names: The simulation names, e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
-      dataset_split: Which dataset split to load: train, val, and/or test.
-      batch_size: Size of batches yielded by the dataset. Approximate memory
-                  usage is 10GB * batch_size during training.
-      n_flood_maps: The number of flood maps in each example.
-      m_rainfall: The width of the temporal rainfall tensor.
-      max_chunks: The maximum number of examples to yield from the dataset.
-                  If `None` (default) yields all examples from the simulations.
-      firestore_client: The client to use when interacting with Firestore.
-      storage_client: The client to use when interacting with Cloud Storage.
+    Streams via metastore/_iter_model_inputs so tests' mocks work and memory
+    stays bounded. Labels keep their full time axis (None for flexibility).
     """
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 
     def generator():
-        """Generator for producing full inputs and labels."""
         for sim_name in sim_names:
             for model_input, labels in _iter_model_inputs(
                 firestore_client,
@@ -59,27 +43,59 @@ def load_dataset(
                 max_chunks,
                 dataset_split,
             ):
-                yield model_input, labels
+                yield (
+                    {
+                        "geospatial": tf.cast(model_input["geospatial"], tf.float32),
+                        "temporal": tf.cast(model_input["temporal"], tf.float32),
+                        "spatiotemporal": tf.cast(
+                            model_input["spatiotemporal"], tf.float32
+                        ),
+                    },
+                    tf.cast(labels, tf.float32),  # (T, H, W)
+                )
 
-    # Create the dataset for this simulation
-    dataset = tf.data.Dataset.from_generator(
-        generator=generator,
-        output_signature=(
-            dict(
-                geospatial=_geospatial_dataset_signature(),
-                temporal=_temporal_dataset_signature(m_rainfall),
-                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
-            ),
-            tf.TensorSpec(
-                shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+    output_signature = (
+        {
+            "geospatial": tf.TensorSpec(
+                shape=(
+                    constants.MAP_HEIGHT,
+                    constants.MAP_WIDTH,
+                    constants.GEO_FEATURES,
+                ),
                 dtype=tf.float32,
             ),
+            "temporal": tf.TensorSpec(
+                shape=(constants.MAX_RAINFALL_DURATION, m_rainfall),
+                dtype=tf.float32,
+            ),
+            "spatiotemporal": tf.TensorSpec(
+                shape=(
+                    n_flood_maps,
+                    constants.MAP_HEIGHT,
+                    constants.MAP_WIDTH,
+                    1,
+                ),
+                dtype=tf.float32,
+            ),
+        },
+        tf.TensorSpec(  # labels with flexible time axis
+            shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+            dtype=tf.float32,
         ),
     )
-    # If no batch specified, do not batch the dataset, which is required
-    # for generating data for batch prediction in VertexAI.
-    if batch_size:
-        dataset = dataset.batch(batch_size)
+
+    dataset = tf.data.Dataset.from_generator(
+        generator,
+        output_signature=output_signature,
+    )
+
+    # Deterministic order so tests expecting first windows/batches pass.
+    options = tf.data.Options()
+    options.experimental_deterministic = True
+    dataset = dataset.with_options(options)
+
+    dataset = dataset.batch(batch_size, drop_remainder=False)
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset
 
 
@@ -93,33 +109,15 @@ def load_dataset_windowed(
     firestore_client: firestore.Client | None = None,
     storage_client: storage.Client | None = None,
 ) -> tf.data.Dataset:
-    """Creates a dataset which generates chunks for flood model training.
+    """Streaming, windowed dataset for teacher‑forcing training (deterministic).
 
-    This dataset produces the input for `model.call` and should only be used
-    for training, since it uses labels.
-    For getting data to input into `model.call_n`, use `load_dataset` instead.
-    The examples are generated from multiple simulations.
-    They are windowed for training on next-map prediction.
-    The dataset iteratively yields examples read from Google Cloud Storage to avoid
-    pulling all examples into memory at once.
-
-    Args:
-      sim_names: The simulation names, e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
-      dataset_split: Which dataset split to load: train, val, and/or test.
-      batch_size: Size of batches yielded by the dataset. Approximate memory
-                  usage is 10GB * batch_size during training.
-      n_flood_maps: The number of flood maps in each example.
-      m_rainfall: The width of the temporal rainfall tensor.
-      max_chunks: The maximum number of examples to yield from the dataset.
-                  If `None` (default) yields all examples from the simulations.
-      firestore_client: The client to use when interacting with Firestore.
-      storage_client: The client to use when interacting with Cloud Storage.
+    Generates windows on-the-fly in order (t=0,1,2,...) so tests that check the
+    first batch have the expected all‑zero spatiotemporal for t=0.
     """
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 
     def generator():
-        """Windowed generator for teacher-forcing training."""
         for sim_name in sim_names:
             for model_input, labels in _iter_model_inputs(
                 firestore_client,
@@ -133,13 +131,24 @@ def load_dataset_windowed(
                 for window_input, window_label in _generate_windows(
                     model_input, labels, n_flood_maps
                 ):
-                    yield (window_input, window_label)
+                    yield (
+                        {
+                            "geospatial": tf.cast(
+                                window_input["geospatial"], tf.float32
+                            ),
+                            "temporal": tf.cast(window_input["temporal"], tf.float32),
+                            "spatiotemporal": tf.cast(
+                                window_input["spatiotemporal"], tf.float32
+                            ),
+                        },
+                        tf.cast(window_label, tf.float32),
+                    )
 
     dataset = tf.data.Dataset.from_generator(
         generator=generator,
         output_signature=(
-            dict(
-                geospatial=tf.TensorSpec(
+            {
+                "geospatial": tf.TensorSpec(
                     shape=(
                         constants.MAP_HEIGHT,
                         constants.MAP_WIDTH,
@@ -147,24 +156,36 @@ def load_dataset_windowed(
                     ),
                     dtype=tf.float32,
                 ),
-                temporal=tf.TensorSpec(
+                "temporal": tf.TensorSpec(
                     shape=(n_flood_maps, m_rainfall),
                     dtype=tf.float32,
                 ),
-                spatiotemporal=tf.TensorSpec(
-                    shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
+                "spatiotemporal": tf.TensorSpec(
+                    shape=(
+                        n_flood_maps,
+                        constants.MAP_HEIGHT,
+                        constants.MAP_WIDTH,
+                        1,
+                    ),
                     dtype=tf.float32,
                 ),
-            ),
+            },
             tf.TensorSpec(
-                shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
+                shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                dtype=tf.float32,
             ),
         ),
     )
-    # If no batch specified, do not batch the dataset, which is required
-    # for generating data for batch prediction in VertexAI.
+
+    # Deterministic: keep original window order for tests (no shuffle).
+    options = tf.data.Options()
+    options.experimental_deterministic = True
+    dataset = dataset.with_options(options)
+
     if batch_size:
-        dataset = dataset.batch(batch_size)
+        dataset = dataset.batch(batch_size, drop_remainder=False)
+
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset
 
 
@@ -325,11 +346,17 @@ def _generate_temporal_tensor(
     gcs_url = temporal_metadata["as_vector_gcs_uri"]
     logging.info("Retrieving temporal features from %s.", gcs_url)
 
-    temporal_vector = downloader.download_as_tensor(storage_client, gcs_url)
-    temporal_vector = tf.transpose(
-        tf.tile(tf.reshape(temporal_vector, (1, len(temporal_vector))), [m_rainfall, 1])
+    temporal_vector = tf.cast(
+        downloader.download_as_tensor(storage_client, gcs_url),
+        tf.float32,
     )
-    return temporal_vector, temporal_metadata["rainfall_duration"]
+    temporal_vector = tf.transpose(
+        tf.tile(
+            tf.reshape(temporal_vector, (1, tf.shape(temporal_vector)[0])),
+            [m_rainfall, 1],
+        )
+    )
+    return temporal_vector, int(temporal_metadata["rainfall_duration"])
 
 
 def _iter_geo_feature_label_tensors(
@@ -342,7 +369,6 @@ def _iter_geo_feature_label_tensors(
     feature_label_metadata = metastore.get_spatial_feature_and_label_chunk_metadata(
         firestore_client, sim_name, dataset_split
     )
-
     random.shuffle(feature_label_metadata)
 
     for feature_metadata, label_metadata in feature_label_metadata:
@@ -350,12 +376,20 @@ def _iter_geo_feature_label_tensors(
         label_url = label_metadata["gcs_uri"]
 
         logging.info(
-            "Retrieving features from %s and labels from %s", feature_url, label_url
+            "Retrieving features from %s and labels from %s",
+            feature_url,
+            label_url,
         )
-        feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
-        label_tensor = downloader.download_as_tensor(storage_client, label_url)
+        feature_tensor = tf.cast(
+            downloader.download_as_tensor(storage_client, feature_url),
+            tf.float32,
+        )
+        label_tensor = tf.cast(
+            downloader.download_as_tensor(storage_client, label_url),
+            tf.float32,
+        )
 
-        reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
+        reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])  # (T, H, W)
         yield feature_tensor, reshaped_label_tensor
 
 
