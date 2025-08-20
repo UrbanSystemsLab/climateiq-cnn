@@ -10,13 +10,15 @@ from google.cloud import storage  # type:ignore[attr-defined]
 import tensorflow as tf
 import pathlib
 from typing import Any, Iterator, Tuple
-
 import numpy as np
 from usl_models.flood_ml import constants
 from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
 from usl_models.shared import downloader
 
+TEMPORAL_FILENAME = "temporal.npy"
+FEATURE_DIRNAME = "geospatial"
+LABEL_DIRNAME = "labels"
 def load_dataset(
     sim_names: list[str],
     dataset_split: str,
@@ -453,103 +455,141 @@ def _spatiotemporal_dataset_signature(n_flood_maps: int) -> tf.TensorSpec:
 
 def download_dataset(
     sim_names: list[str],
-    dataset_split: str,
     output_path: pathlib.Path,
     firestore_client: firestore.Client | None = None,
     storage_client: storage.Client | None = None,
+    dataset_splits: list[str] | None = None,
 ) -> None:
-    """Download a dataset split from GCS to a local directory."""
+    """Download simulations from GCS to a local filecache.
+
+    The FloodML data lives in a metastore where metadata in Firestore points to
+    feature, label and temporal rainfall arrays stored in GCS.  This utility
+    retrieves all of those arrays and stores them on disk so that subsequent
+    training can run without repeatedly downloading from GCS.
+
+    Args:
+      sim_names: Names of simulations to download.
+      output_path: Directory where the cached files should be stored.
+      firestore_client: Client used to query Firestore metadata.
+      storage_client: Client used to download objects from GCS.
+      dataset_splits: Dataset splits to download (train/val/test).  If ``None``
+        only the ``train`` split is downloaded.
+    """
 
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
-
-    output_path.mkdir(parents=True, exist_ok=True)
+    dataset_splits = dataset_splits or ["train"]
 
     for sim_name in sim_names:
-        sim_dir = output_path / sim_name / dataset_split
-        feature_dir = sim_dir / "features"
-        label_dir = sim_dir / "labels"
-        feature_dir.mkdir(parents=True, exist_ok=True)
-        label_dir.mkdir(parents=True, exist_ok=True)
+        sim_path = output_path / sim_name
+        sim_path.mkdir(parents=True, exist_ok=True)
 
+        # Download temporal (rainfall scenario) vector.
         temporal_meta = metastore.get_temporal_feature_metadata(
             firestore_client, sim_name
         )
-        temporal, _ = _generate_temporal_tensor(
-            temporal_meta, storage_client, sim_name, constants.M_RAINFALL
+        temporal_array = downloader.download_as_array(
+            storage_client, temporal_meta["as_vector_gcs_uri"]
         )
-        np.save(sim_dir / "temporal.npy", temporal.numpy())
+        np.save(sim_path / TEMPORAL_FILENAME, temporal_array)
 
-        metadata = metastore.get_spatial_feature_and_label_chunk_metadata(
-            firestore_client, sim_name, dataset_split
+        for split in dataset_splits:
+            feature_label_metadata = metastore.get_spatial_feature_and_label_chunk_metadata(
+                firestore_client, sim_name, split
+            )
+
+            features_dir = sim_path / split / FEATURE_DIRNAME
+            labels_dir = sim_path / split / LABEL_DIRNAME
+            features_dir.mkdir(parents=True, exist_ok=True)
+            labels_dir.mkdir(parents=True, exist_ok=True)
+
+            for feature_meta, label_meta in feature_label_metadata:
+                stem = f"{feature_meta['x_index']}_{feature_meta['y_index']}"
+                feature_arr = downloader.download_as_array(
+                    storage_client, feature_meta["feature_matrix_path"]
+                )
+                label_arr = downloader.download_as_array(
+                    storage_client, label_meta["gcs_uri"]
+                )
+                np.save(features_dir / f"{stem}.npy", feature_arr)
+                np.save(labels_dir / f"{stem}.npy", label_arr)
+
+
+def _iter_model_inputs_cached(
+    sim_dir: pathlib.Path,
+    dataset_split: str,
+    n_flood_maps: int,
+    m_rainfall: int,
+    max_chunks: int | None,
+    shuffle: bool = True,
+) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor]]:
+    """Yields model inputs from arrays cached on disk."""
+
+    temporal_path = sim_dir / TEMPORAL_FILENAME
+    temporal_vec = np.load(temporal_path)
+    temporal_tensor = tf.transpose(
+        tf.tile(
+            tf.reshape(tf.convert_to_tensor(temporal_vec, dtype=tf.float32), (1, -1)),
+            [m_rainfall, 1],
         )
+    )
 
-        for idx, (feature_meta, label_meta) in enumerate(metadata):
-            feature_array = downloader.download_as_array(
-                storage_client, feature_meta["feature_matrix_path"]
-            )
-            label_array = downloader.download_as_array(
-                storage_client, label_meta["gcs_uri"]
-            )
-            np.save(feature_dir / f"{idx}.npy", feature_array)
-            np.save(label_dir / f"{idx}.npy", label_array)
+    feature_dir = sim_dir / dataset_split / FEATURE_DIRNAME
+    label_dir = sim_dir / dataset_split / LABEL_DIRNAME
+
+    feature_files = {f.stem: f for f in feature_dir.glob("*.npy")}
+    label_files = {f.stem: f for f in label_dir.glob("*.npy")}
+    stems = sorted(set(feature_files) & set(label_files))
+    if shuffle:
+        random.shuffle(stems)
+
+    for i, stem in enumerate(stems):
+        if max_chunks is not None and i >= max_chunks:
+            return
+        geospatial = tf.convert_to_tensor(
+            np.load(feature_files[stem]), dtype=tf.float32
+        )
+        label_arr = np.load(label_files[stem])
+        label_tensor = tf.transpose(
+            tf.convert_to_tensor(label_arr, dtype=tf.float32), perm=[2, 0, 1]
+        )
+        model_input = model.FloodModel.Input(
+            temporal=temporal_tensor,
+            geospatial=geospatial,
+            spatiotemporal=tf.zeros(
+                shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1)
+            ),
+        )
+        yield model_input, label_tensor
 
 
 def load_dataset_cached(
+    filecache_dir: pathlib.Path,
     sim_names: list[str],
     dataset_split: str,
-    filecache_dir: pathlib.Path,
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
     max_chunks: int | None = None,
+    shuffle: bool = True,
 ) -> tf.data.Dataset:
-    """Loads a dataset split from files stored on disk."""
+    """Creates a dataset from locally cached simulations."""
 
-    def generator() -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor]]:
+    def generator():
         for sim_name in sim_names:
-            sim_dir = filecache_dir / sim_name / dataset_split
-            temporal_vec = np.load(sim_dir / "temporal.npy")
-            temporal = tf.transpose(
-                tf.tile(
-                    tf.reshape(
-                        tf.convert_to_tensor(temporal_vec, dtype=tf.float32),
-                        (1, len(temporal_vec)),
-                    ),
-                    [m_rainfall, 1],
-                )
-            )
-
-            feature_files = sorted((sim_dir / "features").glob("*.npy"))
-            label_files = sorted((sim_dir / "labels").glob("*.npy"))
-
-            for i, (f_file, l_file) in enumerate(zip(feature_files, label_files)):
-                if max_chunks is not None and i >= max_chunks:
-                    return
-
-                geospatial = tf.convert_to_tensor(
-                    np.load(f_file), dtype=tf.float32
-                )
-                labels = tf.convert_to_tensor(np.load(l_file), dtype=tf.float32)
-                labels = tf.transpose(labels, perm=[2, 0, 1])
-
-                model_input = model.FloodModel.Input(
-                    temporal=temporal,
-                    geospatial=geospatial,
-                    spatiotemporal=tf.zeros(
-                        shape=(
-                            n_flood_maps,
-                            constants.MAP_HEIGHT,
-                            constants.MAP_WIDTH,
-                            1,
-                        )
-                    ),
-                )
-
+            sim_dir = filecache_dir / sim_name
+            for model_input, labels in _iter_model_inputs_cached(
+                sim_dir,
+                dataset_split,
+                n_flood_maps,
+                m_rainfall,
+                max_chunks,
+                shuffle,
+            ):
                 yield model_input, labels
 
     dataset = tf.data.Dataset.from_generator(
-        generator,
+        generator=generator,
         output_signature=(
             dict(
                 geospatial=_geospatial_dataset_signature(),
@@ -565,71 +605,55 @@ def load_dataset_cached(
 
     if batch_size:
         dataset = dataset.batch(batch_size)
-
     return dataset
 
 
-def load_dataset_cached_windowed(
+def load_dataset_windowed_cached(
+    filecache_dir: pathlib.Path,
     sim_names: list[str],
     dataset_split: str,
-    filecache_dir: pathlib.Path,
     batch_size: int = 4,
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
     max_chunks: int | None = None,
+    shuffle: bool = True,
 ) -> tf.data.Dataset:
-    """Loads a windowed dataset split from cached files."""
+    """Creates a windowed dataset from locally cached simulations."""
 
-    def generator() -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor]]:
+    def generator():
         for sim_name in sim_names:
-            sim_dir = filecache_dir / sim_name / dataset_split
-            temporal_vec = np.load(sim_dir / "temporal.npy")
-            temporal = tf.convert_to_tensor(temporal_vec, dtype=tf.float32)
-
-            feature_files = sorted((sim_dir / "features").glob("*.npy"))
-            label_files = sorted((sim_dir / "labels").glob("*.npy"))
-
-            for i, (f_file, l_file) in enumerate(zip(feature_files, label_files)):
-                if max_chunks is not None and i >= max_chunks:
-                    return
-
-                geospatial = tf.convert_to_tensor(np.load(f_file), dtype=tf.float32)
-                labels = tf.convert_to_tensor(np.load(l_file), dtype=tf.float32)
-                labels = tf.transpose(labels, perm=[2, 0, 1])
-
-                model_input = model.FloodModel.Input(
-                    temporal=temporal,
-                    geospatial=geospatial,
-                    spatiotemporal=tf.zeros(
-                        shape=(
-                            n_flood_maps,
-                            constants.MAP_HEIGHT,
-                            constants.MAP_WIDTH,
-                            1,
-                        )
-                    ),
-                )
-
+            sim_dir = filecache_dir / sim_name
+            for model_input, labels in _iter_model_inputs_cached(
+                sim_dir,
+                dataset_split,
+                n_flood_maps,
+                m_rainfall,
+                max_chunks,
+                shuffle,
+            ):
                 for window_input, window_label in _generate_windows(
                     model_input, labels, n_flood_maps
                 ):
                     yield window_input, window_label
 
     dataset = tf.data.Dataset.from_generator(
-        generator,
+        generator=generator,
         output_signature=(
             dict(
                 geospatial=_geospatial_dataset_signature(),
-                temporal=tf.TensorSpec(shape=(n_flood_maps, m_rainfall), dtype=tf.float32),
-                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
+                temporal=tf.TensorSpec(
+                    shape=(n_flood_maps, m_rainfall), dtype=tf.float32
+                ),
+                spatiotemporal=tf.TensorSpec(
+                    shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
+                    dtype=tf.float32,
+                ),
             ),
             tf.TensorSpec(
                 shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
             ),
         ),
     )
-
     if batch_size:
         dataset = dataset.batch(batch_size)
-
     return dataset
