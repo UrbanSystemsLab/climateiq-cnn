@@ -1,10 +1,7 @@
 """tf.data.Datasets for training FloodML model on CityCAT data."""
-
-
 import logging
 import random
 from typing import Any, Iterator, Tuple
-
 from google.cloud import firestore  # type:ignore[attr-defined]
 from google.cloud import storage  # type:ignore[attr-defined]
 import tensorflow as tf
@@ -657,3 +654,5 @@ def load_dataset_windowed_cached(
     if batch_size:
         dataset = dataset.batch(batch_size)
     return dataset
+
+
