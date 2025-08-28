@@ -16,9 +16,15 @@ from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
 from usl_models.shared import downloader
 
+
+
 TEMPORAL_FILENAME = "temporal.npy"
 FEATURE_DIRNAME = "geospatial"
 LABEL_DIRNAME = "labels"
+
+def _is_prediction_sim(name: str) -> bool:
+    return "prediction" in name.lower()
+
 def load_dataset(
     sim_names: list[str],
     dataset_split: str,
@@ -240,6 +246,88 @@ def load_prediction_dataset(
         prediction_dataset = prediction_dataset.batch(batch_size)
     return prediction_dataset
 
+def load_prediction_dataset_cached(
+    filecache_dir: pathlib.Path,
+    sim_name: str,
+    batch_size: int = 4,
+    n_flood_maps: int = constants.N_FLOOD_MAPS,
+    m_rainfall: int = constants.M_RAINFALL,
+) -> tf.data.Dataset:
+    """Load cached prediction dataset without labels."""
+    
+    def generator():
+        sim_dir = filecache_dir / sim_name
+        
+        # Find all .npy files in the directory
+        npy_files = list(sim_dir.rglob("*.npy"))
+        
+        # Separate temporal and spatial files
+        temporal_files = [f for f in npy_files if "temporal" in f.name.lower() or "rainfall" in f.name.lower()]
+        spatial_files = [f for f in npy_files if f not in temporal_files]
+        
+        # Load temporal data if exists, otherwise create dummy
+        if temporal_files:
+            temporal_vec = np.load(temporal_files[0])
+        else:
+            # Create dummy temporal data if not found
+            temporal_vec = np.zeros(constants.MAX_RAINFALL_DURATION)
+            
+        temporal_tensor = tf.transpose(
+            tf.tile(
+                tf.reshape(tf.convert_to_tensor(temporal_vec, dtype=tf.float32), (1, -1)),
+                [m_rainfall, 1],
+            )
+        )
+        
+        # Process each spatial file
+        for spatial_file in sorted(spatial_files):
+            try:
+                geospatial = tf.convert_to_tensor(
+                    np.load(spatial_file), dtype=tf.float32
+                )
+                
+                # Check if shape matches expected dimensions
+                if len(geospatial.shape) != 3 or geospatial.shape[2] != constants.GEO_FEATURES:
+                    print(f"Skipping {spatial_file.name}: unexpected shape {geospatial.shape}")
+                    continue
+                    
+                model_input = {
+                    "temporal": temporal_tensor,
+                    "geospatial": geospatial,
+                    "spatiotemporal": tf.zeros(
+                        shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
+                        dtype=tf.float32
+                    ),
+                }
+                
+                metadata = {
+                    "feature_chunk": spatial_file.stem,
+                    "rainfall": len(temporal_vec),
+                }
+                
+                yield model_input, metadata
+            except Exception as e:
+                print(f"Error loading {spatial_file}: {e}")
+                continue
+    
+    dataset = tf.data.Dataset.from_generator(
+        generator=generator,
+        output_signature=(
+            dict(
+                geospatial=_geospatial_dataset_signature(),
+                temporal=_temporal_dataset_signature(m_rainfall),
+                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
+            ),
+            dict(
+                feature_chunk=tf.TensorSpec(shape=(), dtype=tf.string),
+                rainfall=tf.TensorSpec(shape=(), dtype=tf.int32),
+            ),
+        ),
+    )
+    
+    if batch_size:
+        dataset = dataset.batch(batch_size)
+    return dataset
 
 def _generate_windows(
     model_input: model.FloodModel.Input, labels: tf.Tensor, n_flood_maps: int
@@ -453,6 +541,9 @@ def _spatiotemporal_dataset_signature(n_flood_maps: int) -> tf.TensorSpec:
         dtype=tf.float32,
     )
 
+
+
+
 def download_dataset(
     sim_names: list[str],
     output_path: pathlib.Path,
@@ -462,20 +553,9 @@ def download_dataset(
 ) -> None:
     """Download simulations from GCS to a local filecache.
 
-    The FloodML data lives in a metastore where metadata in Firestore points to
-    feature, label and temporal rainfall arrays stored in GCS.  This utility
-    retrieves all of those arrays and stores them on disk so that subsequent
-    training can run without repeatedly downloading from GCS.
-
-    Args:
-      sim_names: Names of simulations to download.
-      output_path: Directory where the cached files should be stored.
-      firestore_client: Client used to query Firestore metadata.
-      storage_client: Client used to download objects from GCS.
-      dataset_splits: Dataset splits to download (train/val/test).  If ``None``
-        only the ``train`` split is downloaded.
+    - Training/val/test sims: download temporal + (features, labels) per split.
+    - Prediction sims (name contains 'prediction', case-insensitive): download **inputs only** (no labels).
     """
-
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
     dataset_splits = dataset_splits or ["train"]
@@ -484,7 +564,61 @@ def download_dataset(
         sim_path = output_path / sim_name
         sim_path.mkdir(parents=True, exist_ok=True)
 
-        # Download temporal (rainfall scenario) vector.
+        # === PREDICTION-ONLY FLOW (no labels) ===
+        if _is_prediction_sim(sim_name):
+            print(f"[Prediction] Inputs-only download for: {sim_name}")
+
+          # === PREDICTION-ONLY FLOW (no labels) ===
+        if _is_prediction_sim(sim_name):
+             print(f"[Prediction] Inputs-only download for: {sim_name}")
+
+    # Use the bucket that actually contains Atlanta_Prediction chunks
+        bucket_name = "test-climateiq-study-area-feature-chunks"
+        bucket = storage_client.bucket(bucket_name)
+
+    # Try both spellings just in case someone passes a lower-case p
+        def _prediction_prefix_candidates(name: str):
+            base = name.split("/")[-1]
+            parent = "/".join(name.split("/")[:-1])
+            cands = [base, base.replace("prediction", "Prediction")]
+            if parent:
+               cands = [f"{parent}/{c}" for c in cands]
+            return [c + "/" for c in dict.fromkeys(cands)]
+
+        prefixes = _prediction_prefix_candidates(sim_name)
+        total_downloaded = 0
+        for prefix in prefixes:
+           print(f"  Trying prefix: gs://{bucket_name}/{prefix}")
+           count = 0
+           for blob in bucket.list_blobs(prefix=prefix):
+               if blob.name.endswith("/"):
+                  continue
+               rel = blob.name[len(prefix):]
+                # Never download labels; only .npy
+               if "labels/" in rel.lower():
+                  continue
+               if not rel.lower().endswith(".npy"):
+                   continue
+               local_file = (output_path / sim_name / rel)
+               local_file.parent.mkdir(parents=True, exist_ok=True)
+               blob.download_to_filename(str(local_file))
+               print(f"    ✓ {blob.name} -> {local_file}")
+               count += 1
+           print(f"  Downloaded {count} from {prefix}")
+           total_downloaded += count
+           if count > 0:
+              break
+
+        if total_downloaded == 0:
+           print("⚠️ No files downloaded. Check project/creds and the exact folder name in GCS.")
+        else:
+           print(f"  Total files downloaded: {total_downloaded}")
+        continue  # skip train/val/test branch
+
+
+        # =========================
+        # TRAIN / VAL / TEST (features + labels)
+        # =========================
         temporal_meta = metastore.get_temporal_feature_metadata(
             firestore_client, sim_name
         )
@@ -513,6 +647,7 @@ def download_dataset(
                 )
                 np.save(features_dir / f"{stem}.npy", feature_arr)
                 np.save(labels_dir / f"{stem}.npy", label_arr)
+
 
 
 def _iter_model_inputs_cached(
