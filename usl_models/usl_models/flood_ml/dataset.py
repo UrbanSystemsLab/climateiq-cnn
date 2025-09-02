@@ -459,60 +459,110 @@ def download_dataset(
     firestore_client: firestore.Client | None = None,
     storage_client: storage.Client | None = None,
     dataset_splits: list[str] | None = None,
+    include_labels: bool = True,
+    rainfall_sim_name: str | None = None,
 ) -> None:
-    """Download simulations from GCS to a local filecache.
-
-    The FloodML data lives in a metastore where metadata in Firestore points to
-    feature, label and temporal rainfall arrays stored in GCS.  This utility
-    retrieves all of those arrays and stores them on disk so that subsequent
-    training can run without repeatedly downloading from GCS.
+    """
+    Download simulations from GCS to a local filecache.
 
     Args:
-      sim_names: Names of simulations to download.
+      sim_names: For training: simulation names like "City-Config/Rainfall_Data_22.txt".
+                 For prediction: **study area** names like "Atlanta_Prediction".
       output_path: Directory where the cached files should be stored.
       firestore_client: Client used to query Firestore metadata.
       storage_client: Client used to download objects from GCS.
-      dataset_splits: Dataset splits to download (train/val/test).  If ``None``
-        only the ``train`` split is downloaded.
+      dataset_splits: Dataset splits to download (train/val/test). If None,
+                      only the "train" split is downloaded (ignored in prediction mode).
+      include_labels: If False (prediction), download features only.
+      rainfall_sim_name: When include_labels=False, explicit rainfall sim to fetch
+                         the temporal vector from, e.g., "City/Config/Rainfall_Data_22.txt".
     """
-
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
-    dataset_splits = dataset_splits or ["train"]
+
+    if include_labels:
+        dataset_splits = dataset_splits or ["train"]
+    else:
+        dataset_splits = []  # ignored in prediction mode
 
     for sim_name in sim_names:
-        sim_path = output_path / sim_name
-        sim_path.mkdir(parents=True, exist_ok=True)
+        if include_labels:
+            # ---------------- TRAINING ----------------
+            sim_path = output_path / sim_name
+            sim_path.mkdir(parents=True, exist_ok=True)
 
-        # Download temporal (rainfall scenario) vector.
-        temporal_meta = metastore.get_temporal_feature_metadata(
-            firestore_client, sim_name
-        )
-        temporal_array = downloader.download_as_array(
-            storage_client, temporal_meta["as_vector_gcs_uri"]
-        )
-        np.save(sim_path / TEMPORAL_FILENAME, temporal_array)
-
-        for split in dataset_splits:
-            feature_label_metadata = metastore.get_spatial_feature_and_label_chunk_metadata(
-                firestore_client, sim_name, split
+            # 1. Download temporal vector
+            temporal_meta = metastore.get_temporal_feature_metadata(
+                firestore_client, sim_name
             )
+            temporal_array = downloader.download_as_array(
+                storage_client, temporal_meta["as_vector_gcs_uri"]
+            )
+            np.save(sim_path / TEMPORAL_FILENAME, temporal_array)
 
-            features_dir = sim_path / split / FEATURE_DIRNAME
-            labels_dir = sim_path / split / LABEL_DIRNAME
+            # 2. Download geospatial features + labels
+            for split in dataset_splits:
+                feature_label_metadata = metastore.get_spatial_feature_and_label_chunk_metadata(
+                    firestore_client, sim_name, split
+                )
+                features_dir = sim_path / split / FEATURE_DIRNAME
+                labels_dir = sim_path / split / LABEL_DIRNAME
+                features_dir.mkdir(parents=True, exist_ok=True)
+                labels_dir.mkdir(parents=True, exist_ok=True)
+
+                for feature_meta, label_meta in feature_label_metadata:
+                    stem = f"{feature_meta['x_index']}_{feature_meta['y_index']}"
+                    feature_arr = downloader.download_as_array(
+                        storage_client, feature_meta["feature_matrix_path"]
+                    )
+                    label_arr = downloader.download_as_array(
+                        storage_client, label_meta["gcs_uri"]
+                    )
+                    np.save(features_dir / f"{stem}.npy", feature_arr)
+                    np.save(labels_dir / f"{stem}.npy", label_arr)
+
+        else:
+            # ---------------- PREDICTION ----------------
+            if not rainfall_sim_name:
+                raise ValueError(
+                    "Prediction mode requires `rainfall_sim_name`, "
+                    "e.g. 'Atlanta-Atlanta_config/Rainfall_Data_22.txt'."
+                )
+
+            # Derive rainfall filename stem (e.g., 'Rainfall_Data_22')
+            rainfall_stem = pathlib.Path(rainfall_sim_name).stem
+
+            # Folder path: e.g., filecache/Atlanta_Prediction/Rainfall_Data_22
+            sim_path = output_path / sim_name / rainfall_stem
+            sim_path.mkdir(parents=True, exist_ok=True)
+
+            # 1. Download temporal vector from rainfall simulation
+            temporal_meta = metastore.get_temporal_feature_metadata(
+                firestore_client, rainfall_sim_name
+            )
+            temporal_array = downloader.download_as_array(
+                storage_client, temporal_meta["as_vector_gcs_uri"]
+            )
+            np.save(sim_path / TEMPORAL_FILENAME, temporal_array)
+
+            # 2. Download geospatial features from the study area
+            features_dir = sim_path / FEATURE_DIRNAME
             features_dir.mkdir(parents=True, exist_ok=True)
-            labels_dir.mkdir(parents=True, exist_ok=True)
 
-            for feature_meta, label_meta in feature_label_metadata:
-                stem = f"{feature_meta['x_index']}_{feature_meta['y_index']}"
+            feature_metadata_list = metastore.get_spatial_feature_chunk_metadata_for_prediction(
+                firestore_client, sim_name
+            )
+            for feature_meta in feature_metadata_list:
+                stem = (
+                    f"{feature_meta['x_index']}_{feature_meta['y_index']}"
+                    if ("x_index" in feature_meta and "y_index" in feature_meta)
+                    else pathlib.PurePosixPath(feature_meta["feature_matrix_path"]).stem
+                )
                 feature_arr = downloader.download_as_array(
                     storage_client, feature_meta["feature_matrix_path"]
                 )
-                label_arr = downloader.download_as_array(
-                    storage_client, label_meta["gcs_uri"]
-                )
                 np.save(features_dir / f"{stem}.npy", feature_arr)
-                np.save(labels_dir / f"{stem}.npy", label_arr)
+
 
 
 def _iter_model_inputs_cached(
