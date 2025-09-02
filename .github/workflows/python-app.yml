@@ -24,6 +24,11 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: "3.11"
+    - name: Set up Java 21
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '21'
     - name: Start FireStore Emulator
       run: |
         sudo apt-get update -qq
@@ -128,6 +133,11 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: "3.11"
+    - name: Set up Java 21
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '21'
     - name: Start FireStore Emulator
       run: |
         sudo apt-get update -qq

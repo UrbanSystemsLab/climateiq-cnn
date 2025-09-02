@@ -1,5 +1,3 @@
-"""Flood model definition."""
-
 import logging
 from typing import Iterator, TypedDict, List, Callable, Literal, TypeAlias, Any
 import dataclasses
@@ -7,15 +5,45 @@ import numpy as np
 from usl_models.shared import pad_layers
 import keras
 from keras import layers
+from keras.saving import register_keras_serializable
 import keras_tuner
 import tensorflow as tf
 
 from usl_models.flood_ml import constants
 from usl_models.shared import keras_dataclasses
+from usl_models.flood_ml import customloss
 
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
 PadMode: TypeAlias = Literal["REFLECT", "CONSTANT"]
+
+
+@register_keras_serializable()
+class SpatialAttention(layers.Layer):
+    def __init__(self, **kwargs):
+        """Initialize the spatial attention instance."""
+        super().__init__(**kwargs)
+        self.conv = layers.Conv2D(
+            1, kernel_size=7, padding="same", activation="sigmoid"
+        )
+
+    def call(self, inputs):
+        """Compute the attention weights."""
+        avg_pool = tf.reduce_mean(inputs, axis=-1, keepdims=True)
+        max_pool = tf.reduce_max(inputs, axis=-1, keepdims=True)
+        concat = tf.concat([avg_pool, max_pool], axis=-1)
+        attention = self.conv(concat)
+        return inputs * attention
+
+    def get_config(self):
+        """Getcongif."""
+        base_config = super().get_config()
+        return base_config
+
+    @classmethod
+    def from_config(cls, config):
+        """fromcongif."""
+        return cls(**config)
 
 
 class FloodModel:
@@ -83,7 +111,9 @@ class FloodModel:
         chunk_id: str | tf.Tensor
 
     def __init__(
-        self, params: Params | None = None, spatial_dims: tuple[int, int] | None = None
+        self,
+        params: Params | None = None,
+        spatial_dims: tuple[int, int] | None = None,
     ):
         """Initialize the FloodModel instance."""
         self._params = params or self.Params()
@@ -133,7 +163,8 @@ class FloodModel:
         model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
         model.compile(
             optimizer=self._params.optimizer,
-            loss=keras.losses.MeanSquaredError(),
+            # loss=keras.losses.MeanSquaredError(),
+            loss=customloss.make_hybrid_loss,
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),
@@ -262,6 +293,7 @@ class FloodModel:
 ###############################################################################
 
 
+@register_keras_serializable()
 class FloodConvLSTM(keras.Model):
     """Flood ConvLSTM model.
 
@@ -352,6 +384,9 @@ class FloodConvLSTM(keras.Model):
         conv_lstm_height = self._spatial_height // 4
         conv_lstm_width = self._spatial_width // 4
         conv_lstm_channels = 16 + 64 + self._params.m_rainfall
+
+        self.pre_attention = SpatialAttention()  # attention before ConvLSTM
+
         self.conv_lstm = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
@@ -371,18 +406,21 @@ class FloodConvLSTM(keras.Model):
             name="conv_lstm",
         )
 
-        # Output CNN (upsampling via TransposeConv)
-        output_cnn_params = {"padding": "same", "activation": "relu"}
+        self.attention = SpatialAttention()  # attention after ConvLSTM
+
         self.output_cnn = keras.Sequential(
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
                     (conv_lstm_height, conv_lstm_width, self._params.lstm_units)
                 ),
-                layers.Conv2DTranspose(8, 4, strides=4, **output_cnn_params),
-                layers.Conv2DTranspose(1, 1, strides=1, **output_cnn_params),
-            ],
-            name="output_cnn",
+                layers.Conv2DTranspose(
+                    8, 4, strides=4, padding="same", activation="relu"
+                ),
+                layers.Conv2DTranspose(
+                    1, 1, strides=1, padding="same", activation="relu"
+                ),
+            ]
         )
 
     def call(self, input: FloodModel.Input) -> tf.Tensor:
@@ -425,10 +463,10 @@ class FloodConvLSTM(keras.Model):
         temp_input = temporal[:, :, tf.newaxis, tf.newaxis, :]
         temp_input = tf.tile(temp_input, [1, 1, H_out, W_out, 1])
 
-        # Concatenate and feed into remaining ConvLSTM and TransposeConv layers
-        # [B, n, H', W', k'] -> [B, H, W, 1]
         lstm_input = tf.concat([st_cnn_output, geo_cnn_output, temp_input], axis=-1)
+        lstm_input = self.pre_attention(lstm_input)
         lstm_output = self.conv_lstm(lstm_input)
+        lstm_output = self.attention(lstm_output)
         output = self.output_cnn(lstm_output)
 
         return output
@@ -504,4 +542,19 @@ class FloodConvLSTM(keras.Model):
                 temporal[:, tf.maximum(t - n, 0) : t],
             ],
             axis=1,
+        )
+
+    def get_config(self):
+        """Get_config."""
+        return {
+            "params": self._params.to_dict(),
+            "spatial_dims": (self._spatial_height, self._spatial_width),
+        }
+
+    @classmethod
+    def from_config(cls, config):
+        """From_config."""
+        return cls(
+            params=FloodModel.Params.from_dict(config["params"]),
+            spatial_dims=tuple(config["spatial_dims"]),
         )
