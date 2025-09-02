@@ -336,25 +336,60 @@ def _iter_geo_feature_label_tensors(
     firestore_client: firestore.Client,
     storage_client: storage.Client,
     sim_name: str,
-    dataset_split: str,
+    dataset_split: str | None,
 ) -> Iterator[tuple[tf.Tensor, tf.Tensor]]:
     """Yields feature and label tensors from chunks stored in GCS."""
-    feature_label_metadata = metastore.get_spatial_feature_and_label_chunk_metadata(
-        firestore_client, sim_name, dataset_split
+    if dataset_split is not None:
+        # Use the metastore API that tests are mocking.
+        pairs = metastore.get_spatial_feature_and_label_chunk_metadata(
+            firestore_client, sim_name, dataset_split
+        )
+        # DO NOT shuffle; metastore now returns a deterministic, sorted order.
+        for feature_meta, label_meta in pairs:
+            feature_tensor = downloader.download_as_tensor(
+                storage_client, feature_meta["feature_matrix_path"]
+            )
+            label_tensor = downloader.download_as_tensor(
+                storage_client, label_meta["gcs_uri"]
+            )
+            reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
+            yield feature_tensor, reshaped_label_tensor
+        return
+
+    # === Full dataset path (all splits combined) ===
+    # 1) All feature chunks for this sim.
+    feature_metadata = metastore.get_spatial_feature_chunk_metadata(
+        firestore_client, sim_name
     )
 
-    random.shuffle(feature_label_metadata)
+    # 2) All label chunks (no split filter).
+    label_chunks_collection = metastore._get_simulation_doc(
+        firestore_client, sim_name
+    ).collection("label_chunks")
+    label_metadata = [doc.to_dict() for doc in label_chunks_collection.stream()]
 
-    for feature_metadata, label_metadata in feature_label_metadata:
-        feature_url = feature_metadata["feature_matrix_path"]
-        label_url = label_metadata["gcs_uri"]
+    # 3) Index by (x_index, y_index)
+    features_by_chunk_index = {
+        (f["x_index"], f["y_index"]): f for f in feature_metadata
+    }
+    labels_by_chunk_index = {(f["x_index"], f["y_index"]): f for f in label_metadata}
 
-        logging.info(
-            "Retrieving features from %s and labels from %s", feature_url, label_url
+    # 4) Local (non-mocked) missing-features check
+    missing_features = [
+        k for k in labels_by_chunk_index.keys() if k not in features_by_chunk_index
+    ]
+    if missing_features:
+        raise AssertionError(f"Missing features for: {missing_features}")
+
+    # 5) Deterministic order for stitching: sort by (x, y)
+    ordered_items = sorted(labels_by_chunk_index.items())
+
+    for index, label in ordered_items:
+        feature = features_by_chunk_index[index]
+        feature_tensor = downloader.download_as_tensor(
+            storage_client, feature["feature_matrix_path"]
         )
-        feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
-        label_tensor = downloader.download_as_tensor(storage_client, label_url)
-
+        label_tensor = downloader.download_as_tensor(storage_client, label["gcs_uri"])
         reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
         yield feature_tensor, reshaped_label_tensor
 

@@ -92,58 +92,37 @@ def get_spatial_feature_chunk_metadata(
 
 
 def get_spatial_feature_and_label_chunk_metadata(
-    db: firestore.Client, sim_name: str, dataset_split: str
+    db: firestore.Client, sim_name: str, dataset_split: str | None
 ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-    """Retrieves metadata for the location of (feature, label) pairs in GCS.
-
-    Args:
-      db: The firestore client to use when retrieving metadata.
-      sim_name: The simulation for which to retrieve metadata.
-      dataset_split: Which dataset to retrieve: train, val, or test.
-
-    Returns:
-      A sequence of (feature, label) tuples, where `feature` is a dictionary with key
-      'feature_matrix_path' stating the location in GCS of the feature tensor and
-      `label` is a dictionary with key 'gcs_uri' stating the location in GCS of the
-      accompanying label tensor.
-
-    Raises:
-      ValueError: If a simulation `sim_name` can not be found.
-      AssertionError: If the labels and spatial features for the simulation do not
-                      contain the same set of chunks.
-    """
     feature_metadata = get_spatial_feature_chunk_metadata(db, sim_name)
 
-    # Retrieve all label chunks for the simulation.
-    label_chunks_collection = (
-        _get_simulation_doc(db, sim_name)
-        .collection("label_chunks")
-        .where(filter=firestore.FieldFilter("dataset", "==", dataset_split))
-    )
-    label_metadata = [doc.to_dict() for doc in label_chunks_collection.stream()]
+    # If a split is provided, filter; otherwise load all label chunks.
+    if dataset_split is not None:
+        label_q = (
+            _get_simulation_doc(db, sim_name)
+            .collection("label_chunks")
+            .where(filter=firestore.FieldFilter("dataset", "==", dataset_split))
+        )
+    else:
+        label_q = _get_simulation_doc(db, sim_name).collection("label_chunks")
 
-    # Map the features and labels by their chunk indices.
-    features_by_chunk_index = {
-        (feature["x_index"], feature["y_index"]): feature
-        for feature in feature_metadata
-    }
-    labels_by_chunk_index = {
-        (label["x_index"], label["y_index"]): label for label in label_metadata
-    }
+    label_metadata = [doc.to_dict() for doc in label_q.stream()]
 
-    # Ensure we have the same chunk indices for features and labels.
-    missing_features = _missing_keys(labels_by_chunk_index, features_by_chunk_index)
+    # Map by (x_index, y_index)
+    features_by_idx = {(f["x_index"], f["y_index"]): f for f in feature_metadata}
+    labels_by_idx = {(f["x_index"], f["y_index"]): f for f in label_metadata}
+
+    # Sanity check
+    missing_features = _missing_keys(labels_by_idx, features_by_idx)
     if missing_features:
         raise AssertionError(
             "Features and label chunks do not line up. "
             f'Indices missing from features: {", ".join(map(str, missing_features))}'
         )
 
-    # Return feature & matching label metadata associated with the same indices.
-    return [
-        (features_by_chunk_index[index], label)
-        for index, label in labels_by_chunk_index.items()
-    ]
+    # Order consistently (sorted grid order is useful for stitching later)
+    ordered_indices = sorted(labels_by_idx.keys())
+    return [(features_by_idx[idx], labels_by_idx[idx]) for idx in ordered_indices]
 
 
 def get_temporal_feature_metadata_for_prediction(
