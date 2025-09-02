@@ -43,10 +43,7 @@ def _norm_stem(name: str) -> str:
         return f"{parts[-2]}_{parts[-1]}"
     return stem
 
-def _is_prediction_name(name: str) -> bool:
-    """Only check the sim family (before the rainfall filename)."""
-    base = name.split("%2F", 1)[0].split("/", 1)[0]
-    return "prediction" in base.lower()
+
 
 def load_dataset(
     sim_names: list[str],
@@ -892,58 +889,6 @@ def load_prediction_dataset_cached(
         ),
     )
     return ds.batch(batch_size) if batch_size else ds
-
-
-def load_dataset_cached_auto(
-    *,
-    filecache_dir: Path,
-    sim_names: list[str],
-    dataset_split: str,
-    batch_size: int = 4,
-    n_flood_maps: int = constants.N_FLOOD_MAPS,
-    m_rainfall: int = constants.M_RAINFALL,
-    max_chunks: int | None = None,
-    strict_labels: bool = False,
-):
-    """
-    Auto-select:
-      - ALL names contain 'prediction' → load_prediction_dataset_cached (features-only)
-      - NONE contain 'prediction'      → load_dataset_cached (features + labels for train/val)
-      - MIXED                          → raise ValueError (avoid mismatched outputs)
-    """
-    if not sim_names:
-        raise ValueError("sim_names is empty.")
-
-    flags = [_is_prediction_name(s) for s in sim_names]
-    any_pred, all_pred = any(flags), all(flags)
-
-    if all_pred:
-        return load_prediction_dataset_cached(
-            filecache_dir=filecache_dir,
-            sim_names=sim_names,
-            dataset_split=dataset_split,
-            batch_size=batch_size,
-            n_flood_maps=n_flood_maps,
-            m_rainfall=m_rainfall,
-            max_chunks=max_chunks,
-        )
-
-    if not any_pred:
-        return load_dataset_cached(
-            filecache_dir=filecache_dir,
-            sim_names=sim_names,
-            dataset_split=dataset_split,
-            batch_size=batch_size,
-            n_flood_maps=n_flood_maps,
-            m_rainfall=m_rainfall,
-            max_chunks=max_chunks,
-            strict_labels=strict_labels,
-        )
-
-    raise ValueError(
-        "Mixed prediction and non-prediction sim_names. "
-        "Split the list and call separately so outputs have consistent structure."
-    )
 
 
 def load_dataset_windowed_cached(
