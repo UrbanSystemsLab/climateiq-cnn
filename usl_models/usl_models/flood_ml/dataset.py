@@ -43,93 +43,10 @@ def _norm_stem(name: str) -> str:
         return f"{parts[-2]}_{parts[-1]}"
     return stem
 
-
-
-def _decode_once(name: str) -> str:
-    return name.replace("%2F", "/", 1) if "%2F" in name else name
-
-
 def _is_prediction_name(name: str) -> bool:
     """Only check the sim family (before the rainfall filename)."""
     base = name.split("%2F", 1)[0].split("/", 1)[0]
     return "prediction" in base.lower()
-
-
-def _np_f32(p: Path) -> np.ndarray:
-    return np.load(str(p)).astype(np.float32, copy=False)
-
-
-def _temporal_matrix(
-    temporal_vec: np.ndarray, m_rainfall: int, n_flood_maps: int
-) -> tf.Tensor:
-    """
-    Return [n_flood_maps, m_rainfall].
-    If temporal_vec has length T != n_flood_maps, we pad/truncate on the rows.
-    """
-    if temporal_vec.ndim > 1:
-        temporal_vec = temporal_vec.reshape(-1)
-    t = tf.convert_to_tensor(temporal_vec, dtype=tf.float32)  # [T]
-    t = tf.tile(tf.reshape(t, (-1, 1)), [1, m_rainfall])  # [T, m_rainfall]
-    t = t[:n_flood_maps, :]  # trim to n_flood_maps rows
-    rows = tf.shape(t)[0]
-    need = n_flood_maps - rows
-    # Pad rows if needed (dynamic-safe)
-    t = tf.cond(
-        need > 0,
-        lambda: tf.concat([t, tf.zeros((need, m_rainfall), tf.float32)], axis=0),
-        lambda: t,
-    )
-    return t  # shape is [n_flood_maps, m_rainfall]
-
-
-def _conform_geo(arr: np.ndarray) -> np.ndarray:
-    """Return [MAP_H, MAP_W, GEO_FEATURES], cropping/padding H/W/C as needed."""
-    H, W, C = constants.MAP_HEIGHT, constants.MAP_WIDTH, constants.GEO_FEATURES
-    if arr.ndim == 2:
-        arr = arr[..., None]  # [H,W,1]
-    out = np.zeros((H, W, arr.shape[2]), np.float32)
-    hh, ww = min(H, arr.shape[0]), min(W, arr.shape[1])
-    out[:hh, :ww, : arr.shape[2]] = arr[:hh, :ww, :]
-    if out.shape[2] > C:
-        out = out[:, :, :C]
-    elif out.shape[2] < C:
-        pad = np.zeros((H, W, C - out.shape[2]), np.float32)
-        out = np.concatenate([out, pad], axis=-1)
-    return out
-
-
-def _maybe_spatiotemporal(sim_dir: Path, split: str, n_flood_maps: int) -> tf.Tensor:
-    """Optional cached spatiotemporal slices; otherwise zeros."""
-    sdir = sim_dir / split / SPATIOTEMP_DIR
-    if not sdir.exists():
-        return tf.zeros(
-            (n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1), tf.float32
-        )
-    files = sorted(sdir.glob("*.npy"))
-    if not files:
-        return tf.zeros(
-            (n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1), tf.float32
-        )
-    mats = [_np_f32(p) for p in files]
-    mats = [m if m.ndim == 3 else m[..., None] for m in mats]  # [H,W,1+] each
-    sp = np.stack(mats, axis=0)  # [N,H,W,C]
-    # conform to (n_flood_maps, H, W, 1)
-    if sp.shape[-1] != 1:  # collapse extra channels if present
-        sp = sp[..., :1]
-    if sp.shape[0] > n_flood_maps:
-        sp = sp[:n_flood_maps]
-    elif sp.shape[0] < n_flood_maps:
-        pad = np.zeros((n_flood_maps - sp.shape[0],) + sp.shape[1:], np.float32)
-        sp = np.concatenate([sp, pad], axis=0)
-    # H/W crop/pad if needed
-    H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
-    if sp.shape[1] != H or sp.shape[2] != W:
-        fixed = np.zeros((sp.shape[0], H, W, 1), np.float32)
-        hh, ww = min(H, sp.shape[1]), min(W, sp.shape[2])
-        fixed[:, :hh, :ww, :] = sp[:, :hh, :ww, :1]
-        sp = fixed
-    return tf.convert_to_tensor(sp, tf.float32)
-
 
 def load_dataset(
     sim_names: list[str],
