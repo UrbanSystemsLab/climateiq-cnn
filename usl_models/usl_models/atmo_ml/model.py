@@ -48,14 +48,17 @@ class AtmoModel:
         # LSTM parameters.
         lstm_units: int = 64
         lstm_kernel_size: int = 5
-        lstm_dropout: float = 0.2
-        lstm_recurrent_dropout: float = 0.2
+        lstm_dropout: float = 0.1
+        lstm_recurrent_dropout: float = 0.1
 
         # New activation parameters for each block.
         spatial_activation: Activation = "relu"
         st_activation: Activation = "relu"
         lstm_activation: Activation = "tanh"
         output_activation: Activation = "relu"
+        task_loss_weights: Tuple[float, ...] = (1.0, 1.0, 2.0)
+        adaptive_weighting: bool = True
+        corr_loss_weight: float = 0.2 
 
         # The optimizer configuration.
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
@@ -78,6 +81,7 @@ class AtmoModel:
             vars.SpatiotemporalOutput.T2,
             vars.SpatiotemporalOutput.WSPD_WDIR10,
         )
+
 
         pad_mode: PadMode = "REFLECT"
 
@@ -183,11 +187,11 @@ class AtmoModel:
         return hypermodel
 
     def _build_model(self) -> keras.Model:
-        """Creates the correct internal (Keras) model architecture."""
+        """Create model with homoscedastic uncertainty weighting (Kendall & Gal)."""
+        # ----- Metrics you want on the concatenated outputs -----
         eval_metrics = [
             keras.metrics.MeanAbsoluteError(),
             keras.metrics.RootMeanSquaredError(),
-            keras.metrics.MeanSquaredLogarithmicError(),
             metrics.NormalizedRootMeanSquaredError(),
             metrics.SSIMMetric(),
             metrics.PSNRMetric(),
@@ -195,14 +199,57 @@ class AtmoModel:
         for sto_var in self._params.sto_vars:
             eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var))
 
+        # ----- Base network (AtmoConvLSTM) -----
+        # IMPORTANT: In AtmoConvLSTM, only the final conv in each output head uses activation="linear".
         model = AtmoConvLSTM(self._params)
-        model.compile(
-            optimizer=self._params.optimizer,
-            loss=keras.losses.MeanSquaredError(),
-            metrics=eval_metrics,
+
+        # ----- Learnable log-variances, one per task -----
+        num_tasks = len(self._params.sto_vars)
+        log_vars = model.add_weight(
+            name="log_vars",
+            shape=(num_tasks,),
+            initializer="zeros",
+            trainable=True,
         )
+
+        # ----- Uncertainty-weighted loss (Kendall & Gal, 2018) -----
+        def balanced_loss(y_true, y_pred):
+            # Per-task MSE, averaged over B,T,H,W
+            task_losses = []
+            for i in range(num_tasks):
+                t_true = y_true[..., i:i+1]
+                t_pred = y_pred[..., i:i+1]
+                per_elem = keras.losses.mean_squared_error(t_true, t_pred)  # [B,T,H,W]
+                task_losses.append(tf.reduce_mean(per_elem))
+            task_losses = tf.stack(task_losses)  # [num_tasks]
+
+            # Priors (from params.task_loss_weights, fallback to 1.0)
+            given = tf.constant(self._params.task_loss_weights, dtype=tf.float32)
+            priors = tf.ones_like(task_losses, dtype=tf.float32)
+            idx = tf.range(num_tasks)
+            priors = tf.where(idx < tf.shape(given)[0], tf.gather(given, idx), priors)
+            priors = tf.clip_by_value(priors, 1e-6, 1e6)
+
+            # s_i = log_vars[i] - log(prior_i)  (clipped for stability)
+            s = tf.clip_by_value(log_vars - tf.math.log(priors), -2.0, 2.0)
+
+            # ½·e^(−s)·L + ½·s
+            weighted = 0.5 * tf.exp(-s) * task_losses + 0.5 * s
+            return tf.reduce_sum(weighted)
+
+        # ----- Optimizer -----
+        optimizer = (
+            keras.optimizers.Adam(learning_rate=5e-4, clipnorm=1.0)
+            if self._params.adaptive_weighting else self._params.optimizer
+        )
+
+        # ----- Compile & build -----
+        model.compile(optimizer=optimizer, loss=balanced_loss, metrics=eval_metrics)
         model.build(self.get_input_shape_batched(self._params))
         return model
+
+
+
 
     def summary(self, expand_nested: bool = False):
         """Print the model summary."""
@@ -422,6 +469,8 @@ class AtmoConvLSTM(keras.Model):
                     activation=self._params.lstm_activation,
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
+                    recurrent_initializer="orthogonal",
+                    kernel_initializer="he_normal",
                 ),
             ],
             name="conv_lstm",
@@ -460,7 +509,11 @@ class AtmoConvLSTM(keras.Model):
                                     OUTPUT_K_SIZE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(1, OUTPUT_K_SIZE, **output_cnn_params),
+                                layers.Conv2D(
+                                    1, OUTPUT_K_SIZE,
+                                    activation="linear",
+                                    padding=output_cnn_params["padding"],
+),
                             ]
                         )
                     ),
@@ -496,7 +549,12 @@ class AtmoConvLSTM(keras.Model):
                                     OUTPUT_K_SIZE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(1, OUTPUT_K_SIZE, **output_cnn_params),
+                                layers.Conv2D(
+                                    1, OUTPUT_K_SIZE,
+                                    activation="linear",
+                                    padding=output_cnn_params["padding"],
+                                ),
+
                             ]
                         )
                     ),
@@ -521,6 +579,7 @@ class AtmoConvLSTM(keras.Model):
                                     strides=C1_STRIDE,
                                     **output_cnn_params,
                                 ),
+                                layers.BatchNormalization(),
                                 layers.Conv2D(
                                     LSTM_FILTERS // 4,
                                     OUTPUT_K_SIZE,
@@ -532,7 +591,11 @@ class AtmoConvLSTM(keras.Model):
                                     OUTPUT_K_SIZE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(1, OUTPUT_K_SIZE, **output_cnn_params),
+                                layers.Conv2D(
+                                    1, OUTPUT_K_SIZE,
+                                    activation="sigmoid",
+                                    padding=output_cnn_params["padding"],
+                                ),
                             ]
                         )
                     ),
@@ -574,7 +637,11 @@ class AtmoConvLSTM(keras.Model):
                                     OUTPUT_K_SIZE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(2, OUTPUT_K_SIZE, **output_cnn_params),
+                                layers.Conv2D(
+                                    2, OUTPUT_K_SIZE,
+                                    activation="linear",
+                                    padding=output_cnn_params["padding"],
+                                ),
                             ]
                         )
                     ),
@@ -626,21 +693,33 @@ class AtmoConvLSTM(keras.Model):
         lstm_output = self.conv_lstm(lstm_input)
 
         # Split up paired tensors into individual time steps.
+        # Split up paired tensors into individual time steps.
         trconv_input = data_utils.split_time_step_pairs(lstm_output)[:, -T_O:]
 
-        outputs = []
-        if self._t2_output_cnn is not None:
-            outputs.append(self._t2_output_cnn(trconv_input))
-        if self._rh2_output_cnn is not None:
-            outputs.append(self._rh2_output_cnn(trconv_input))
-        if self._wspd10_output_cnn is not None:
-            outputs.append(self._wspd10_output_cnn(trconv_input))
-        if self._wdir10_output_cnn is not None:
-            outputs.append(self._wdir10_output_cnn(trconv_input))
+        # ---- collect heads by variable ----
+        outputs_by_var = {}
 
-        output = tf.concat(outputs, axis=-1)
+        if self._t2_output_cnn is not None:
+            outputs_by_var[vars.SpatiotemporalOutput.T2] = self._t2_output_cnn(trconv_input)
+        if self._rh2_output_cnn is not None:
+            outputs_by_var[vars.SpatiotemporalOutput.RH2] = self._rh2_output_cnn(trconv_input)
+        if self._wspd10_output_cnn is not None:
+            outputs_by_var[vars.SpatiotemporalOutput.WSPD_WDIR10] = self._wspd10_output_cnn(trconv_input)
+        if self._wdir10_output_cnn is not None:
+            wdir = self._wdir10_output_cnn(trconv_input)
+            outputs_by_var[vars.SpatiotemporalOutput.WSPD_WDIR10_COS] = wdir[..., :1]
+            outputs_by_var[vars.SpatiotemporalOutput.WSPD_WDIR10_SIN] = wdir[..., 1:]
+
+        # ---- concatenate strictly in params.sto_vars order ----
+        ordered = []
+        for v in self._params.sto_vars:
+            if v in outputs_by_var:
+                ordered.append(outputs_by_var[v])
+
+        output = tf.concat(ordered, axis=-1)
         tf.ensure_shape(output, (B, T_O, H, W, None))
         return output
+
 
     def get_config(self) -> dict:
         """Keras serialization."""
