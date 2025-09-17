@@ -58,7 +58,7 @@ class AtmoModel:
         output_activation: Activation = "relu"
         task_loss_weights: Tuple[float, ...] = (1.0, 1.0, 2.0)
         adaptive_weighting: bool = True
-        corr_loss_weight: float = 0.2 
+        corr_loss_weight: float = 0.2
 
         # The optimizer configuration.
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
@@ -81,7 +81,6 @@ class AtmoModel:
             vars.SpatiotemporalOutput.T2,
             vars.SpatiotemporalOutput.WSPD_WDIR10,
         )
-
 
         pad_mode: PadMode = "REFLECT"
 
@@ -217,8 +216,8 @@ class AtmoModel:
             # Per-task MSE, averaged over B,T,H,W
             task_losses = []
             for i in range(num_tasks):
-                t_true = y_true[..., i:i+1]
-                t_pred = y_pred[..., i:i+1]
+                t_true = y_true[..., i : i + 1]
+                t_pred = y_pred[..., i : i + 1]
                 per_elem = keras.losses.mean_squared_error(t_true, t_pred)  # [B,T,H,W]
                 task_losses.append(tf.reduce_mean(per_elem))
             task_losses = tf.stack(task_losses)  # [num_tasks]
@@ -240,16 +239,14 @@ class AtmoModel:
         # ----- Optimizer -----
         optimizer = (
             keras.optimizers.Adam(learning_rate=5e-4, clipnorm=1.0)
-            if self._params.adaptive_weighting else self._params.optimizer
+            if self._params.adaptive_weighting
+            else self._params.optimizer
         )
 
         # ----- Compile & build -----
         model.compile(optimizer=optimizer, loss=balanced_loss, metrics=eval_metrics)
         model.build(self.get_input_shape_batched(self._params))
         return model
-
-
-
 
     def summary(self, expand_nested: bool = False):
         """Print the model summary."""
@@ -510,10 +507,11 @@ class AtmoConvLSTM(keras.Model):
                                     **output_cnn_params,
                                 ),
                                 layers.Conv2D(
-                                    1, OUTPUT_K_SIZE,
+                                    1,
+                                    OUTPUT_K_SIZE,
                                     activation="linear",
                                     padding=output_cnn_params["padding"],
-),
+                                ),
                             ]
                         )
                     ),
@@ -550,11 +548,11 @@ class AtmoConvLSTM(keras.Model):
                                     **output_cnn_params,
                                 ),
                                 layers.Conv2D(
-                                    1, OUTPUT_K_SIZE,
+                                    1,
+                                    OUTPUT_K_SIZE,
                                     activation="linear",
                                     padding=output_cnn_params["padding"],
                                 ),
-
                             ]
                         )
                     ),
@@ -592,7 +590,8 @@ class AtmoConvLSTM(keras.Model):
                                     **output_cnn_params,
                                 ),
                                 layers.Conv2D(
-                                    1, OUTPUT_K_SIZE,
+                                    1,
+                                    OUTPUT_K_SIZE,
                                     activation="sigmoid",
                                     padding=output_cnn_params["padding"],
                                 ),
@@ -638,7 +637,8 @@ class AtmoConvLSTM(keras.Model):
                                     **output_cnn_params,
                                 ),
                                 layers.Conv2D(
-                                    2, OUTPUT_K_SIZE,
+                                    2,
+                                    OUTPUT_K_SIZE,
                                     activation="linear",
                                     padding=output_cnn_params["padding"],
                                 ),
@@ -700,11 +700,17 @@ class AtmoConvLSTM(keras.Model):
         outputs_by_var = {}
 
         if self._t2_output_cnn is not None:
-            outputs_by_var[vars.SpatiotemporalOutput.T2] = self._t2_output_cnn(trconv_input)
+            outputs_by_var[vars.SpatiotemporalOutput.T2] = self._t2_output_cnn(
+                trconv_input
+            )
         if self._rh2_output_cnn is not None:
-            outputs_by_var[vars.SpatiotemporalOutput.RH2] = self._rh2_output_cnn(trconv_input)
+            outputs_by_var[vars.SpatiotemporalOutput.RH2] = self._rh2_output_cnn(
+                trconv_input
+            )
         if self._wspd10_output_cnn is not None:
-            outputs_by_var[vars.SpatiotemporalOutput.WSPD_WDIR10] = self._wspd10_output_cnn(trconv_input)
+            outputs_by_var[vars.SpatiotemporalOutput.WSPD_WDIR10] = (
+                self._wspd10_output_cnn(trconv_input)
+            )
         if self._wdir10_output_cnn is not None:
             wdir = self._wdir10_output_cnn(trconv_input)
             outputs_by_var[vars.SpatiotemporalOutput.WSPD_WDIR10_COS] = wdir[..., :1]
@@ -719,7 +725,6 @@ class AtmoConvLSTM(keras.Model):
         output = tf.concat(ordered, axis=-1)
         tf.ensure_shape(output, (B, T_O, H, W, None))
         return output
-
 
     def get_config(self) -> dict:
         """Keras serialization."""
