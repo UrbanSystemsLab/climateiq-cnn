@@ -2,6 +2,8 @@
 
 import logging
 import random
+import pathlib
+import numpy as np
 from typing import Any, Iterator, Tuple
 
 from google.cloud import firestore  # type:ignore[attr-defined]
@@ -12,6 +14,10 @@ from usl_models.flood_ml import constants
 from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
 from usl_models.shared import downloader
+
+TEMPORAL_FILENAME = "temporal.npy"
+FEATURE_DIRNAME = "geospatial"
+LABEL_DIRNAME = "labels"
 
 
 def load_dataset(
@@ -447,3 +453,339 @@ def _spatiotemporal_dataset_signature(n_flood_maps: int) -> tf.TensorSpec:
         ),
         dtype=tf.float32,
     )
+
+
+def download_dataset(
+    sim_names: list[str],
+    output_path: pathlib.Path,
+    firestore_client: firestore.Client | None = None,
+    storage_client: storage.Client | None = None,
+    dataset_splits: list[str] | None = None,
+    include_labels: bool = True,
+    rainfall_sim_name: str | None = None,
+    allow_missing_sim: bool = False,
+) -> None:
+    """Download simulations from GCS to a local filecache.
+
+    Args:
+      sim_names: For training: simulation names like "City-Config/Rainfall_Data_22.txt".
+                 For prediction: study area names like "Atlanta_Prediction".
+      output_path: Directory where the cached files should be stored.
+      firestore_client: Client used to query Firestore metadata.
+      storage_client: Client used to download objects from GCS.
+      dataset_splits: Dataset splits to download (train/val/test).
+      include_labels: If False (prediction), download features only.
+      rainfall_sim_name: Required when include_labels=False.
+      allow_missing_sim: If T, sim_names that aren't found in Firestore (study areas).
+    """
+    firestore_client = firestore_client or firestore.Client()
+    storage_client = storage_client or storage.Client()
+
+    if include_labels:
+        dataset_splits = dataset_splits or ["train"]
+    else:
+        dataset_splits = []  # Not needed for prediction
+
+    for sim_name in sim_names:
+        if include_labels:
+            # TRAINING MODE
+            sim_path = output_path / sim_name
+            sim_path.mkdir(parents=True, exist_ok=True)
+
+            # Download temporal vector
+            try:
+                temporal_meta = metastore.get_temporal_feature_metadata(
+                    firestore_client, sim_name
+                )
+            except ValueError as e:
+                if not allow_missing_sim:
+                    raise ValueError(f"No such simulation {sim_name} found.") from e
+                continue
+
+            temporal_array = downloader.download_as_array(
+                storage_client, temporal_meta["as_vector_gcs_uri"]
+            )
+            np.save(sim_path / TEMPORAL_FILENAME, temporal_array)
+
+            # Download feature + label chunks
+            for split in dataset_splits:
+                feature_label_metadata = (
+                    metastore.get_spatial_feature_and_label_chunk_metadata(
+                        firestore_client, sim_name, split
+                    )
+                )
+                features_dir = sim_path / split / FEATURE_DIRNAME
+                labels_dir = sim_path / split / LABEL_DIRNAME
+                features_dir.mkdir(parents=True, exist_ok=True)
+                labels_dir.mkdir(parents=True, exist_ok=True)
+
+                for feature_meta, label_meta in feature_label_metadata:
+                    stem = f"{feature_meta['x_index']}_{feature_meta['y_index']}"
+                    feature_arr = downloader.download_as_array(
+                        storage_client, feature_meta["feature_matrix_path"]
+                    )
+                    label_arr = downloader.download_as_array(
+                        storage_client, label_meta["gcs_uri"]
+                    )
+                    np.save(features_dir / f"{stem}.npy", feature_arr)
+                    np.save(labels_dir / f"{stem}.npy", label_arr)
+
+        else:
+            # PREDICTION MODE
+            if not rainfall_sim_name:
+                raise ValueError("rainfall_sim_name must be provided for prediction")
+
+            # Preserve `.txt` extension for rainfall sim
+            rainfall_stem = pathlib.Path(rainfall_sim_name).name
+            sim_path = output_path / sim_name / rainfall_stem
+            sim_path.mkdir(parents=True, exist_ok=True)
+
+            # Download temporal vector from rainfall sim
+            temporal_meta = metastore.get_temporal_feature_metadata(
+                firestore_client, rainfall_sim_name
+            )
+            temporal_array = downloader.download_as_array(
+                storage_client, temporal_meta["as_vector_gcs_uri"]
+            )
+            np.save(sim_path / TEMPORAL_FILENAME, temporal_array)
+
+            # Download features from study area
+            features_dir = sim_path / FEATURE_DIRNAME
+            features_dir.mkdir(parents=True, exist_ok=True)
+
+            feature_metadata_list = (
+                metastore.get_spatial_feature_chunk_metadata_for_prediction(
+                    firestore_client, sim_name
+                )
+            )
+
+            for feature_meta in feature_metadata_list:
+                stem = (
+                    f"{feature_meta['x_index']}_{feature_meta['y_index']}"
+                    if "x_index" in feature_meta and "y_index" in feature_meta
+                    else pathlib.PurePosixPath(feature_meta["feature_matrix_path"]).stem
+                )
+                feature_arr = downloader.download_as_array(
+                    storage_client, feature_meta["feature_matrix_path"]
+                )
+                np.save(features_dir / f"{stem}.npy", feature_arr)
+
+
+def _iter_model_inputs_cached(
+    sim_dir: pathlib.Path,
+    dataset_split: str,
+    n_flood_maps: int,
+    m_rainfall: int,
+    max_chunks: int | None,
+    include_labels: bool = True,
+    shuffle: bool = True,
+) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor | None]]:
+    """Yields model inputs from arrays cached on disk."""
+    temporal_path = sim_dir / TEMPORAL_FILENAME
+    temporal_vec = np.load(temporal_path)
+    temporal_tensor = tf.transpose(
+        tf.tile(
+            tf.reshape(tf.convert_to_tensor(temporal_vec, dtype=tf.float32), (1, -1)),
+            [m_rainfall, 1],
+        )
+    )
+
+    feature_dir = sim_dir / dataset_split / FEATURE_DIRNAME
+    feature_files = {f.stem: f for f in feature_dir.glob("*.npy")}
+
+    if include_labels:
+        label_dir = sim_dir / dataset_split / LABEL_DIRNAME
+        label_files = {f.stem: f for f in label_dir.glob("*.npy")}
+        stems = sorted(set(feature_files) & set(label_files))
+    else:
+        stems = sorted(feature_files)
+
+    if shuffle:
+        random.shuffle(stems)
+
+    for i, stem in enumerate(stems):
+        if max_chunks is not None and i >= max_chunks:
+            return
+        geospatial = tf.convert_to_tensor(
+            np.load(feature_files[stem]), dtype=tf.float32
+        )
+        model_input = model.FloodModel.Input(
+            temporal=temporal_tensor,
+            geospatial=geospatial,
+            spatiotemporal=tf.zeros(
+                shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1)
+            ),
+        )
+
+        if include_labels:
+            label_arr = np.load(label_files[stem])
+            label_tensor = tf.transpose(
+                tf.convert_to_tensor(label_arr, dtype=tf.float32), perm=[2, 0, 1]
+            )
+            yield model_input, label_tensor
+        else:
+            yield model_input, None
+
+
+def load_dataset_cached(
+    filecache_dir: pathlib.Path,
+    sim_names: list[str],
+    dataset_split: str | None = "train",
+    batch_size: int = 4,
+    n_flood_maps: int = constants.N_FLOOD_MAPS,
+    m_rainfall: int = constants.M_RAINFALL,
+    max_chunks: int | None = None,
+    shuffle: bool = True,
+    include_labels: bool = True,
+    rainfall_sim_name: str | None = None,
+) -> tf.data.Dataset:
+    """Loads data from local filecache for training or prediction.
+
+    - include_labels=True → training mode (expects labels).
+    - include_labels=False → prediction mode (features only).
+    """
+
+    def generator():
+        for sim_name in sim_names:
+            # TRAINING MODE
+            if include_labels:
+                sim_dir = filecache_dir / sim_name
+                for model_input, labels in _iter_model_inputs_cached(
+                    sim_dir,
+                    dataset_split or "train",
+                    n_flood_maps,
+                    m_rainfall,
+                    max_chunks,
+                    shuffle,
+                ):
+                    yield model_input, labels
+            else:
+                # PREDICTION MODE
+                if rainfall_sim_name is None:
+                    raise ValueError("Missing rainfall_sim_name for prediction")
+
+                # e.g. filecache/Atlanta_Prediction/Rainfall_Data_22.txt
+                sim_dir = (
+                    filecache_dir / sim_name / pathlib.Path(rainfall_sim_name).name
+                )
+
+                temporal_path = sim_dir / TEMPORAL_FILENAME
+                temporal_vec = np.load(temporal_path)
+                temporal_tensor = tf.transpose(
+                    tf.tile(
+                        tf.reshape(
+                            tf.convert_to_tensor(temporal_vec, dtype=tf.float32),
+                            (1, -1),
+                        ),
+                        [m_rainfall, 1],
+                    )
+                )
+
+                feature_dir = sim_dir / FEATURE_DIRNAME
+                feature_files = sorted(feature_dir.glob("*.npy"))
+                if shuffle:
+                    random.shuffle(feature_files)
+
+                for i, f in enumerate(feature_files):
+                    if max_chunks is not None and i >= max_chunks:
+                        return
+                    geospatial = tf.convert_to_tensor(np.load(f), dtype=tf.float32)
+                    model_input = model.FloodModel.Input(
+                        temporal=temporal_tensor,
+                        geospatial=geospatial,
+                        spatiotemporal=tf.zeros(
+                            shape=(
+                                n_flood_maps,
+                                constants.MAP_HEIGHT,
+                                constants.MAP_WIDTH,
+                                1,
+                            )
+                        ),
+                    )
+                    # Return dummy zero labels (or None) for prediction
+                    yield model_input, tf.zeros(
+                        (constants.MAP_HEIGHT, constants.MAP_WIDTH)
+                    )
+
+    # Dataset signature differs slightly depending on include_labels
+    if include_labels:
+        output_signature = (
+            dict(
+                geospatial=_geospatial_dataset_signature(),
+                temporal=_temporal_dataset_signature(m_rainfall),
+                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
+            ),
+            tf.TensorSpec(
+                shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                dtype=tf.float32,
+            ),
+        )
+    else:
+        output_signature = (
+            dict(
+                geospatial=_geospatial_dataset_signature(),
+                temporal=_temporal_dataset_signature(m_rainfall),
+                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
+            ),
+            tf.TensorSpec(
+                shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
+            ),
+        )
+
+    dataset = tf.data.Dataset.from_generator(
+        generator=generator, output_signature=output_signature
+    )
+    if batch_size:
+        dataset = dataset.batch(batch_size)
+    return dataset
+
+
+def load_dataset_windowed_cached(
+    filecache_dir: pathlib.Path,
+    sim_names: list[str],
+    dataset_split: str,
+    batch_size: int = 4,
+    n_flood_maps: int = constants.N_FLOOD_MAPS,
+    m_rainfall: int = constants.M_RAINFALL,
+    max_chunks: int | None = None,
+    shuffle: bool = True,
+) -> tf.data.Dataset:
+    """Creates a windowed dataset from locally cached simulations."""
+
+    def generator():
+        for sim_name in sim_names:
+            sim_dir = filecache_dir / sim_name
+            for model_input, labels in _iter_model_inputs_cached(
+                sim_dir,
+                dataset_split,
+                n_flood_maps,
+                m_rainfall,
+                max_chunks,
+                shuffle,
+            ):
+                for window_input, window_label in _generate_windows(
+                    model_input, labels, n_flood_maps
+                ):
+                    yield window_input, window_label
+
+    dataset = tf.data.Dataset.from_generator(
+        generator=generator,
+        output_signature=(
+            dict(
+                geospatial=_geospatial_dataset_signature(),
+                temporal=tf.TensorSpec(
+                    shape=(n_flood_maps, m_rainfall), dtype=tf.float32
+                ),
+                spatiotemporal=tf.TensorSpec(
+                    shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
+                    dtype=tf.float32,
+                ),
+            ),
+            tf.TensorSpec(
+                shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
+            ),
+        ),
+    )
+    if batch_size:
+        dataset = dataset.batch(batch_size)
+    return dataset
