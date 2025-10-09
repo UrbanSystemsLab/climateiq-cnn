@@ -579,8 +579,8 @@ def _iter_model_inputs_cached(
     max_chunks: int | None,
     include_labels: bool = True,
     shuffle: bool = True,
-) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor | None]]:
-    """Yields model inputs from arrays cached on disk."""
+) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor | None, str]]:
+    """Yields model inputs, optional labels, chunk name from arrays cached on disk."""
     temporal_path = sim_dir / TEMPORAL_FILENAME
     temporal_vec = np.load(temporal_path)
     temporal_tensor = tf.transpose(
@@ -606,6 +606,7 @@ def _iter_model_inputs_cached(
     for i, stem in enumerate(stems):
         if max_chunks is not None and i >= max_chunks:
             return
+
         geospatial = tf.convert_to_tensor(
             np.load(feature_files[stem]), dtype=tf.float32
         )
@@ -613,7 +614,8 @@ def _iter_model_inputs_cached(
             temporal=temporal_tensor,
             geospatial=geospatial,
             spatiotemporal=tf.zeros(
-                shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1)
+                shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
+                dtype=tf.float32,
             ),
         )
 
@@ -622,9 +624,9 @@ def _iter_model_inputs_cached(
             label_tensor = tf.transpose(
                 tf.convert_to_tensor(label_arr, dtype=tf.float32), perm=[2, 0, 1]
             )
-            yield model_input, label_tensor
+            yield model_input, label_tensor, stem
         else:
-            yield model_input, None
+            yield model_input, None, stem
 
 
 def load_dataset_cached(
@@ -641,36 +643,49 @@ def load_dataset_cached(
 ) -> tf.data.Dataset:
     """Loads data from local filecache for training or prediction.
 
-    - include_labels=True → training mode (expects labels).
-    - include_labels=False → prediction mode (features only).
+    Always yields (model_input, label_tensor, metadata_dict).
+
+    - Training mode (include_labels=True): real labels (T,H,W) and metadata.
+    - Prediction mode (include_labels=False): dummy zero labels and metadata.
     """
 
     def generator():
         for sim_name in sim_names:
-            # TRAINING MODE
             if include_labels:
+                # === TRAINING MODE ===
                 sim_dir = filecache_dir / sim_name
-                for model_input, labels in _iter_model_inputs_cached(
-                    sim_dir,
-                    dataset_split or "train",
-                    n_flood_maps,
-                    m_rainfall,
-                    max_chunks,
-                    shuffle,
+                for model_input, labels, chunk_name in _iter_model_inputs_cached(
+                    sim_dir=sim_dir,
+                    dataset_split=dataset_split or "train",
+                    n_flood_maps=n_flood_maps,
+                    m_rainfall=m_rainfall,
+                    max_chunks=max_chunks,
+                    include_labels=True,
+                    shuffle=shuffle,
                 ):
-                    yield model_input, labels
+                    metadata = {
+                        "feature_chunk": tf.convert_to_tensor(
+                            chunk_name, dtype=tf.string
+                        ),
+                        "rainfall": tf.convert_to_tensor(
+                            labels.shape[0], dtype=tf.int32
+                        ),
+                    }
+                    yield model_input, labels, metadata
+
             else:
-                # PREDICTION MODE
+                # === PREDICTION MODE ===
                 if rainfall_sim_name is None:
                     raise ValueError("Missing rainfall_sim_name for prediction")
 
-                # e.g. filecache/Atlanta_Prediction/Rainfall_Data_22.txt
                 sim_dir = (
                     filecache_dir / sim_name / pathlib.Path(rainfall_sim_name).name
                 )
 
                 temporal_path = sim_dir / TEMPORAL_FILENAME
                 temporal_vec = np.load(temporal_path)
+                rainfall = int(temporal_vec.shape[0])  # simple metadata
+
                 temporal_tensor = tf.transpose(
                     tf.tile(
                         tf.reshape(
@@ -689,6 +704,7 @@ def load_dataset_cached(
                 for i, f in enumerate(feature_files):
                     if max_chunks is not None and i >= max_chunks:
                         return
+
                     geospatial = tf.convert_to_tensor(np.load(f), dtype=tf.float32)
                     model_input = model.FloodModel.Input(
                         temporal=temporal_tensor,
@@ -699,42 +715,52 @@ def load_dataset_cached(
                                 constants.MAP_HEIGHT,
                                 constants.MAP_WIDTH,
                                 1,
-                            )
+                            ),
+                            dtype=tf.float32,
                         ),
                     )
-                    # Return dummy zero labels (or None) for prediction
-                    yield model_input, tf.zeros(
-                        (constants.MAP_HEIGHT, constants.MAP_WIDTH)
-                    )
 
-    # Dataset signature differs slightly depending on include_labels
+                    metadata = {
+                        "feature_chunk": tf.convert_to_tensor(f.stem, dtype=tf.string),
+                        "rainfall": tf.convert_to_tensor(rainfall, dtype=tf.int32),
+                    }
+
+                    # Dummy zero labels for consistency
+                    dummy_label = tf.zeros(
+                        (constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
+                    )
+                    yield model_input, dummy_label, metadata
+
+    # === Dataset signature (updated to support sequence labels) ===
     if include_labels:
-        output_signature = (
-            dict(
-                geospatial=_geospatial_dataset_signature(),
-                temporal=_temporal_dataset_signature(m_rainfall),
-                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
-            ),
-            tf.TensorSpec(
-                shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
-                dtype=tf.float32,
-            ),
+        label_signature = tf.TensorSpec(
+            shape=(None, constants.MAP_HEIGHT, constants.MAP_WIDTH),
+            dtype=tf.float32,
         )
     else:
-        output_signature = (
-            dict(
-                geospatial=_geospatial_dataset_signature(),
-                temporal=_temporal_dataset_signature(m_rainfall),
-                spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
-            ),
-            tf.TensorSpec(
-                shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
-            ),
+        label_signature = tf.TensorSpec(
+            shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH),
+            dtype=tf.float32,
         )
 
-    dataset = tf.data.Dataset.from_generator(
-        generator=generator, output_signature=output_signature
+    output_signature = (
+        dict(
+            geospatial=_geospatial_dataset_signature(),
+            temporal=_temporal_dataset_signature(m_rainfall),
+            spatiotemporal=_spatiotemporal_dataset_signature(n_flood_maps),
+        ),
+        label_signature,
+        dict(
+            feature_chunk=tf.TensorSpec(shape=(), dtype=tf.string),
+            rainfall=tf.TensorSpec(shape=(), dtype=tf.int32),
+        ),
     )
+
+    dataset = tf.data.Dataset.from_generator(
+        generator=generator,
+        output_signature=output_signature,
+    )
+
     if batch_size:
         dataset = dataset.batch(batch_size)
     return dataset
@@ -748,6 +774,7 @@ def load_dataset_windowed_cached(
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
     max_chunks: int | None = None,
+    include_labels=True,
     shuffle: bool = True,
 ) -> tf.data.Dataset:
     """Creates a windowed dataset from locally cached simulations."""
@@ -755,13 +782,14 @@ def load_dataset_windowed_cached(
     def generator():
         for sim_name in sim_names:
             sim_dir = filecache_dir / sim_name
-            for model_input, labels in _iter_model_inputs_cached(
+            for model_input, labels, _ in _iter_model_inputs_cached(
                 sim_dir,
                 dataset_split,
                 n_flood_maps,
                 m_rainfall,
                 max_chunks,
-                shuffle,
+                include_labels=True,
+                shuffle=shuffle,
             ):
                 for window_input, window_label in _generate_windows(
                     model_input, labels, n_flood_maps
