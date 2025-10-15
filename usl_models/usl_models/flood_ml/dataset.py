@@ -774,30 +774,39 @@ def load_dataset_windowed_cached(
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
     max_chunks: int | None = None,
-    include_labels=True,
+    include_labels: bool = True,
     shuffle: bool = True,
 ) -> tf.data.Dataset:
-    """Creates a windowed dataset from locally cached simulations."""
+    """Memory-efficient streaming dataset loader.
 
-    def generator():
+    Loads windowed flood simulations lazily from the local cache, one chunk at a time.
+    Only keeps ~`batch_size` examples in memory at once.
+    """
+
+    def sample_generator():
+        # Iterate through simulation directories one by one
         for sim_name in sim_names:
             sim_dir = filecache_dir / sim_name
+            # Yield per-chunk data lazily
             for model_input, labels, _ in _iter_model_inputs_cached(
                 sim_dir,
                 dataset_split,
                 n_flood_maps,
                 m_rainfall,
-                max_chunks,
-                include_labels=True,
+                max_chunks=max_chunks,
+                include_labels=include_labels,
                 shuffle=shuffle,
             ):
+                # Each call yields a large (temporal + spatial) tensor set
+                # We break it further into windows — still streamed
                 for window_input, window_label in _generate_windows(
                     model_input, labels, n_flood_maps
                 ):
                     yield window_input, window_label
 
+    # Wrap generator in tf.data.Dataset for streaming pipeline
     dataset = tf.data.Dataset.from_generator(
-        generator=generator,
+        generator=sample_generator,
         output_signature=(
             dict(
                 geospatial=_geospatial_dataset_signature(),
@@ -814,6 +823,13 @@ def load_dataset_windowed_cached(
             ),
         ),
     )
-    if batch_size:
-        dataset = dataset.batch(batch_size)
+    # Shuffle only a small buffer, to avoid loading everything in memory
+    if shuffle:
+        dataset = dataset.shuffle(
+            buffer_size=batch_size * 8, reshuffle_each_iteration=True
+        )
+    # Batch and prefetch for GPU streaming
+    dataset = dataset.batch(batch_size, drop_remainder=False).prefetch(tf.data.AUTOTUNE)
+    # Optionally: cache small metadata if you repeatedly iterate over same dataset
+    # dataset = dataset.cache()   # use only if memory allows
     return dataset
