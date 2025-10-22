@@ -779,32 +779,98 @@ def load_dataset_windowed_cached(
 ) -> tf.data.Dataset:
     """Memory-efficient streaming dataset loader.
 
-    Loads windowed flood simulations lazily from the local cache, one chunk at a time.
+    Loads windowed flood simulations lazily from the local cache, one
+    chunk at a time.
     Only keeps ~`batch_size` examples in memory at once.
+    Shuffle happens at the (sim_name, chunk) key level before data loading.
+    include_labels respected for training / prediction use cases.
     """
 
     def sample_generator():
-        # Iterate through simulation directories one by one
+        # Step 1. Gather all chunk keys (sim_dir, stem)
+        all_keys = []
         for sim_name in sim_names:
             sim_dir = filecache_dir / sim_name
-            # Yield per-chunk data lazily
-            for model_input, labels, _ in _iter_model_inputs_cached(
-                sim_dir,
-                dataset_split,
-                n_flood_maps,
-                m_rainfall,
-                max_chunks=max_chunks,
-                include_labels=include_labels,
-                shuffle=shuffle,
-            ):
-                # Each call yields a large (temporal + spatial) tensor set
-                # We break it further into windows — still streamed
-                for window_input, window_label in _generate_windows(
-                    model_input, labels, n_flood_maps
-                ):
-                    yield window_input, window_label
+            feature_dir = sim_dir / dataset_split / FEATURE_DIRNAME
+            label_dir = (
+                sim_dir / dataset_split / LABEL_DIRNAME if include_labels else None
+            )
 
-    # Wrap generator in tf.data.Dataset for streaming pipeline
+            if not feature_dir.exists():
+                continue
+
+            feature_files = {f.stem: f for f in feature_dir.glob("*.npy")}
+            if include_labels:
+                if not label_dir or not label_dir.exists():
+                    continue
+                label_files = {f.stem: f for f in label_dir.glob("*.npy")}
+                stems = sorted(set(feature_files) & set(label_files))
+            else:
+                stems = sorted(feature_files)
+
+            if max_chunks is not None:
+                stems = stems[:max_chunks]
+
+            for stem in stems:
+                all_keys.append((sim_dir, stem))
+
+        # Step 2. Shuffle keys before loading data
+        if shuffle:
+            random.shuffle(all_keys)
+
+        # Step 3. Iterate over shuffled keys lazily
+        for sim_dir, stem in all_keys:
+            temporal_path = sim_dir / TEMPORAL_FILENAME
+            if not temporal_path.exists():
+                continue
+
+            temporal_vec = np.load(temporal_path)
+            temporal_tensor = tf.transpose(
+                tf.tile(
+                    tf.reshape(
+                        tf.convert_to_tensor(temporal_vec, dtype=tf.float32),
+                        (1, -1),
+                    ),
+                    [m_rainfall, 1],
+                )
+            )
+
+            feature_path = sim_dir / dataset_split / FEATURE_DIRNAME / f"{stem}.npy"
+            if not feature_path.exists():
+                continue
+
+            geospatial = tf.convert_to_tensor(np.load(feature_path), dtype=tf.float32)
+
+            if include_labels:
+                label_path = sim_dir / dataset_split / LABEL_DIRNAME / f"{stem}.npy"
+                if not label_path.exists():
+                    continue
+                label_arr = np.load(label_path)
+                labels = tf.transpose(
+                    tf.convert_to_tensor(label_arr, dtype=tf.float32),
+                    perm=[2, 0, 1],
+                )
+            else:
+                labels = tf.zeros(
+                    (constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                    dtype=tf.float32,
+                )
+
+            model_input = model.FloodModel.Input(
+                temporal=temporal_tensor,
+                geospatial=geospatial,
+                spatiotemporal=tf.zeros(
+                    shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
+                    dtype=tf.float32,
+                ),
+            )
+
+            for window_input, window_label in _generate_windows(
+                model_input, labels, n_flood_maps
+            ):
+                yield window_input, window_label
+
+    # Step 4. Wrap in tf.data.Dataset
     dataset = tf.data.Dataset.from_generator(
         generator=sample_generator,
         output_signature=(
@@ -819,17 +885,15 @@ def load_dataset_windowed_cached(
                 ),
             ),
             tf.TensorSpec(
-                shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH), dtype=tf.float32
+                shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                dtype=tf.float32,
             ),
         ),
     )
-    # Shuffle only a small buffer, to avoid loading everything in memory
-    if shuffle:
-        dataset = dataset.shuffle(
-            buffer_size=batch_size * 8, reshuffle_each_iteration=True
-        )
-    # Batch and prefetch for GPU streaming
+
+    # Step 6. Batch + Prefetch
     dataset = dataset.batch(batch_size, drop_remainder=False).prefetch(tf.data.AUTOTUNE)
-    # Optionally: cache small metadata if you repeatedly iterate over same dataset
-    # dataset = dataset.cache()   # use only if memory allows
+
+    # Optionally: cache small metadata if you repeatedly iterate over the same dataset
+    # dataset = dataset.cache()  # use only if memory allows
     return dataset
