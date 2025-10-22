@@ -219,7 +219,8 @@ class AtmoModel:
             eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var))
 
         # ----- Base network (AtmoConvLSTM) -----
-        # IMPORTANT: In AtmoConvLSTM, only the final conv in each output head uses activation="linear".
+        # In AtmoConvLSTM, only the final conv in each head uses activation="linear".
+
         model = AtmoConvLSTM(self._params)
 
         # ----- Learnable log-variances, one per task -----
