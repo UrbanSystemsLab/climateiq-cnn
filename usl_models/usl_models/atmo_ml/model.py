@@ -1,23 +1,18 @@
 """AtmoML model definition."""
 
-import logging
 import dataclasses
-from typing import TypedDict, TypeAlias, List, Callable, Literal, Tuple, Iterable
+import logging
+from typing import (Callable, Iterable, List, Literal, Tuple, TypeAlias,
+                    TypedDict)
 
 import keras
-from keras import layers
 import keras_tuner
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+from keras import layers
 
-from usl_models.atmo_ml import data_utils
-from usl_models.atmo_ml import constants
-from usl_models.atmo_ml import metrics
-from usl_models.atmo_ml import vars
-
-from usl_models.shared import keras_dataclasses
-from usl_models.shared import pad_layers
-
+from usl_models.atmo_ml import constants, data_utils, metrics, vars
+from usl_models.shared import keras_dataclasses, pad_layers
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
 
@@ -52,7 +47,6 @@ class AtmoModel:
         lstm_recurrent_dropout: float = 0.2
         uncertainty_reg: float = 0.5  # Regularization strength (0 to disable)
 
-
         # New activation parameters for each block.
         spatial_activation: Activation = "relu"
         st_activation: Activation = "relu"
@@ -61,7 +55,7 @@ class AtmoModel:
         # Loss weighting parameters.
         task_loss_weights: Tuple[float, ...] = (1.0, 1.0, 1.0)
         adaptive_weighting: bool = False
-        learning_rate: float = 1e-3 
+        learning_rate: float = 1e-3
         clipnorm: float | None = None
 
         # The optimizer configuration.
@@ -75,7 +69,7 @@ class AtmoModel:
 
         lu_index_vocab_size: int = constants.LU_INDEX_VOCAB_SIZE
         lu_index_embedding_dim: int = constants.EMBEDDING_DIM
-        spatial_features: int = constants.NUM_SPATIAL_FEATURES
+        spatial_features: int = constants.NUM_SAPTIAL_FEATURES
         spatiotemporal_features: int = constants.NUM_SPATIOTEMPORAL_FEATURES
         spatial_filters: int = 128
         spatiotemporal_filters: int = 64
@@ -160,15 +154,15 @@ class AtmoModel:
     @classmethod
     def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "AtmoModel":
         """Loads the model from a checkpoint URI.
-        
+
         We load weights only to keep custom methods intact.
         This only works if the model architecture is identical to the architecture
         used during export.
-        
+
         Args:
             artifact_uri: The path to the SavedModel directory.
                 This should end in `/model` if using a GCloud artifact.
-        
+
         Returns:
             The loaded AtmoModel.
         """
@@ -181,17 +175,17 @@ class AtmoModel:
             # Note: We can't access balanced_loss here since it's defined inside _build_model
             # So we provide a dummy function just for loading
             custom_objects = {"balanced_loss": lambda y_true, y_pred: y_pred}
-            loaded_model = keras.models.load_model(artifact_uri, 
-                                                compile=False,
-                                                custom_objects=custom_objects)
-        
+            loaded_model = keras.models.load_model(
+                artifact_uri, compile=False, custom_objects=custom_objects
+            )
+
         params = AtmoModel.Params.from_config(loaded_model.get_config())
         model = cls(params=params, **kwargs)
         assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
-        
+
         # Load weights - this should work if architectures match
         model._model.set_weights(loaded_model.get_weights())
-        
+
         return model
 
     @classmethod
@@ -205,8 +199,9 @@ class AtmoModel:
         return hypermodel
 
     def _build_model(self) -> keras.Model:
-        """Create model with homoscedastic uncertainty weighting (Kendall & Gal)."""
-        # ----- Metrics you want on the concatenated outputs -----
+        """Creates the model - always same structure, no if statements."""
+
+        # Standard metrics - always the same
         eval_metrics = [
             keras.metrics.MeanAbsoluteError(),
             keras.metrics.RootMeanSquaredError(),
@@ -218,75 +213,32 @@ class AtmoModel:
         for sto_var in self._params.sto_vars:
             eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var))
 
-        # ----- Base network (AtmoConvLSTM) -----
-        # In AtmoConvLSTM, only the final conv in each head uses activation="linear".
-
+        # Build model
         model = AtmoConvLSTM(self._params)
 
-        # ----- Learnable log-variances, one per task -----
+        # ALWAYS create log_vars (no conditional)
         num_tasks = len(self._params.sto_vars)
         log_vars = model.add_weight(
             name="log_vars",
             shape=(num_tasks,),
             initializer="zeros",
-            trainable=True,
-        )
-    
-        use_adaptive = (
-                self._params.adaptive_weighting and not 
-                all(w == 1.0 for w in self._params.task_loss_weights)
+            trainable=self._params.adaptive_weighting,  # Control via parameter
         )
 
-        if use_adaptive:
-            # Create log_vars FIRST (before defining balanced_loss)
-            num_tasks = len(self._params.sto_vars)
-            log_vars = model.add_weight(
-                name="log_vars",
-                shape=(num_tasks,),
-                initializer="zeros",
-                trainable=True,
-            )
-            
-            # ----- Uncertainty-weighted loss (Kendall & Gal, 2018) -----
-            def balanced_loss(y_true, y_pred):
-                # Per-task MSE, averaged over B,T,H,W
-                task_losses = []
-                for i in range(num_tasks):
-                    t_true = y_true[..., i : i + 1]
-                    t_pred = y_pred[..., i : i + 1]
-                    per_elem = keras.losses.mean_squared_error(t_true, t_pred)  # [B,T,H,W]
-                    task_losses.append(tf.reduce_mean(per_elem))
-                
-                task_losses = tf.stack(task_losses)  # [num_tasks]
-                
-                # Priors (from params.task_loss_weights, fallback to 1.0)
-                given = tf.constant(self._params.task_loss_weights, dtype=tf.float32)
-                priors = tf.ones_like(task_losses, dtype=tf.float32)
-                idx = tf.range(num_tasks)
-                priors = tf.where(idx < tf.shape(given)[0], tf.gather(given, idx), priors)
-                priors = tf.clip_by_value(priors, 1e-6, 1e6)
-                
-                # s_i = log_vars[i] - log(prior_i) (clipped for stability)
-                s = tf.clip_by_value(log_vars - tf.math.log(priors), -2.0, 2.0)
-                
-                # ½·e^(−s)·L + ½·s
-                weighted = 0.5 * tf.exp(-s) * task_losses + self._params.uncertainty_reg * s
-                return tf.reduce_sum(weighted)
-            
-            loss_fn = balanced_loss
-        else:
-            # ----- Standard MSE loss (backward compatible) -----
-            loss_fn = keras.losses.MeanSquaredError()
+        # Import loss function from separate file
+        from usl_models.atmo_ml.losses import create_balanced_loss
 
-        # ----- Optimizer -----
-        optimizer = (
-            keras.optimizers.Adam(learning_rate=5e-4, clipnorm=1.0)
-            if self._params.adaptive_weighting
-            else self._params.optimizer
+        # ALWAYS use balanced loss (it reduces to MSE when appropriate)
+        loss_fn = create_balanced_loss(
+            num_tasks=num_tasks,
+            task_weights=self._params.task_loss_weights,
+            log_vars=log_vars,
         )
 
-        # ----- Compile & build -----
-        model.compile(optimizer=self._params.optimizer, loss=loss_fn, metrics=eval_metrics)
+        model.compile(
+            optimizer=self._params.optimizer, loss=loss_fn, metrics=eval_metrics
+        )
+
         model.build(self.get_input_shape_batched(self._params))
         return model
 
@@ -482,13 +434,13 @@ class AtmoConvLSTM(keras.Model):
             ],
             name="spatiotemporal_cnn",
         )
-        
+
         if self._params.lstm_activation == "tanh":
-            kernel_init = "glorot_uniform"        # better for tanh
+            kernel_init = "glorot_uniform"  # better for tanh
         elif self._params.lstm_activation == "relu":
-            kernel_init = "he_normal"        # better for relu
+            kernel_init = "he_normal"  # better for relu
         else:
-            kernel_init = "glorot_uniform" # default 
+            kernel_init = "glorot_uniform"  # default
         # ConvLSTM
         # The spatial dimensions have been reduced (C1_S x C2_S) by the CNNs.
         # The "channel" dimension is double the sum of the channels from the CNNs,
