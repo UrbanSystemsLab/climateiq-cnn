@@ -1,18 +1,40 @@
 """AtmoML model definition."""
+import tensorflow as tf
 
-import dataclasses
+# Enable memory growth for all GPUs
+for gpu in tf.config.list_physical_devices('GPU'):
+    tf.config.experimental.set_memory_growth(gpu, True)
+    
 import logging
-from typing import (Callable, Iterable, List, Literal, Tuple, TypeAlias,
-                    TypedDict)
+import dataclasses
+from typing import TypedDict, TypeAlias, List, Callable, Literal, Tuple, Iterable, Any, TYPE_CHECKING
 
 import keras
-import keras_tuner
-import numpy as np
-import tensorflow as tf
 from keras import layers
+try:
+    import keras_tuner
+    HAS_KERAS_TUNER = True
+except ImportError:
+    HAS_KERAS_TUNER = False
+    keras_tuner = None
 
-from usl_models.atmo_ml import constants, data_utils, metrics, vars
-from usl_models.shared import keras_dataclasses, pad_layers
+if TYPE_CHECKING:
+    # Only import for type checking, not at runtime
+    try:
+        from keras_tuner import HyperModel
+    except ImportError:
+        HyperModel = Any
+
+import tensorflow as tf
+import numpy as np
+
+from usl_models.atmo_ml import data_utils
+from usl_models.atmo_ml import constants
+from usl_models.atmo_ml import metrics
+from usl_models.atmo_ml import vars
+
+from usl_models.shared import keras_dataclasses
+from usl_models.shared import pad_layers
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
 
@@ -53,8 +75,8 @@ class AtmoModel:
         lstm_activation: Activation = "tanh"
         output_activation: Activation = "relu"
         # Loss weighting parameters.
-        task_loss_weights: Tuple[float, ...] = (1.0, 1.0, 1.0)
-        adaptive_weighting: bool = False
+        task_loss_weights: Tuple[float, ...] = (1.0, 1.0, 1.5)
+        adaptive_weighting: bool = True
         learning_rate: float = 1e-3
         clipnorm: float | None = None
 
@@ -189,9 +211,13 @@ class AtmoModel:
         return model
 
     @classmethod
-    def get_hypermodel(cls, **kwargs) -> keras_tuner.HyperModel:
+    def get_hypermodel(cls, **kwargs) -> "HyperModel":
         """Returns a hypermodel with the given param overrides."""
-
+        if not HAS_KERAS_TUNER:
+            raise ImportError(
+                "keras_tuner is required for hyperparameter tuning. "
+                "Try: conda install -c conda-forge libstdcxx-ng"
+            )
         def hypermodel(hp: keras_tuner.HyperParameters):
             hp_kwargs = {k: hp.Choice(k, v) for k, v in kwargs.items()}
             return cls(cls.Params(**hp_kwargs))._model
@@ -199,9 +225,9 @@ class AtmoModel:
         return hypermodel
 
     def _build_model(self) -> keras.Model:
-        """Creates the model - always same structure, no if statements."""
-
-        # Standard metrics - always the same
+        """Creates model with working uncertainty weighting."""
+        
+        # Standard metrics
         eval_metrics = [
             keras.metrics.MeanAbsoluteError(),
             keras.metrics.RootMeanSquaredError(),
@@ -212,34 +238,54 @@ class AtmoModel:
         ]
         for sto_var in self._params.sto_vars:
             eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var))
-
+        
         # Build model
         model = AtmoConvLSTM(self._params)
-
-        # ALWAYS create log_vars (no conditional)
+        
+        # CRITICAL: Create log_vars as tf.Variable, not model weight
         num_tasks = len(self._params.sto_vars)
-        log_vars = model.add_weight(
-            name="log_vars",
-            shape=(num_tasks,),
-            initializer="zeros",
-            trainable=self._params.adaptive_weighting,  # Control via parameter
-        )
-
-        # Import loss function from separate file
+        
+        if self._params.adaptive_weighting:
+            log_vars = tf.Variable(
+                initial_value=[0.0, 0.0, 0.5],  # Initialize wind higher
+                trainable=True,
+                dtype=tf.float32,
+                name='log_vars'
+            )
+        else:
+            log_vars = tf.Variable(
+                initial_value=[0.0, 0.0, 0.0],
+                trainable=False,
+                dtype=tf.float32,
+                name='log_vars'
+            )
+        
+        # Store for later access
+        model.log_vars = log_vars
+        
+        # Import loss function
         from usl_models.atmo_ml.losses import create_balanced_loss
-
-        # ALWAYS use balanced loss (it reduces to MSE when appropriate)
+        
+        # Create loss
         loss_fn = create_balanced_loss(
             num_tasks=num_tasks,
             task_weights=self._params.task_loss_weights,
             log_vars=log_vars,
         )
-
+        
+        # Compile
         model.compile(
-            optimizer=self._params.optimizer, loss=loss_fn, metrics=eval_metrics
+            optimizer=self._params.optimizer,
+            loss=loss_fn,
+            metrics=eval_metrics
         )
-
+        
         model.build(self.get_input_shape_batched(self._params))
+        
+        # Add log_vars to trainable variables if adaptive
+        if self._params.adaptive_weighting:
+            model.trainable_variables.append(log_vars)
+        
         return model
 
     def summary(self, expand_nested: bool = False):
@@ -577,7 +623,6 @@ class AtmoConvLSTM(keras.Model):
                                     strides=C1_STRIDE,
                                     **output_cnn_params,
                                 ),
-                                layers.BatchNormalization(),
                                 layers.Conv2D(
                                     LSTM_FILTERS // 4,
                                     OUTPUT_K_SIZE,
