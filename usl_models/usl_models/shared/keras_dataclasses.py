@@ -12,8 +12,6 @@ from typing import (
     dataclass_transform,
 )
 
-import keras.src.saving.legacy.saved_model.utils
-
 import keras
 
 
@@ -39,14 +37,8 @@ class Base(DataclassInstance):
         """Get config for keras serialization."""
         config = {}
 
-        # Force non-legacy serialization.
-        with keras.src.saving.legacy.saved_model.utils.keras_option_scope(
-            save_traces=False, in_tf_saved_model_scope=False
-        ):
-            for f in dataclasses.fields(self):
-                config[f.name] = keras.saving.serialize_keras_object(
-                    getattr(self, f.name)
-                )
+        for f in dataclasses.fields(self):
+            config[f.name] = keras.saving.serialize_keras_object(getattr(self, f.name))
 
         return config
 

@@ -11,39 +11,12 @@ import tensorflow as tf
 
 from usl_models.flood_ml import constants
 from usl_models.shared import keras_dataclasses
+from usl_models.shared import spatial_attention
 from usl_models.flood_ml import customloss
 
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
 PadMode: TypeAlias = Literal["REFLECT", "CONSTANT"]
-
-
-@register_keras_serializable()
-class SpatialAttention(layers.Layer):
-    def __init__(self, **kwargs):
-        """Initialize the spatial attention instance."""
-        super().__init__(**kwargs)
-        self.conv = layers.Conv2D(
-            1, kernel_size=7, padding="same", activation="sigmoid"
-        )
-
-    def call(self, inputs):
-        """Compute the attention weights."""
-        avg_pool = tf.reduce_mean(inputs, axis=-1, keepdims=True)
-        max_pool = tf.reduce_max(inputs, axis=-1, keepdims=True)
-        concat = tf.concat([avg_pool, max_pool], axis=-1)
-        attention = self.conv(concat)
-        return inputs * attention
-
-    def get_config(self):
-        """Getcongif."""
-        base_config = super().get_config()
-        return base_config
-
-    @classmethod
-    def from_config(cls, config):
-        """fromcongif."""
-        return cls(**config)
 
 
 class FloodModel:
@@ -386,7 +359,9 @@ class FloodConvLSTM(keras.Model):
         conv_lstm_width = self._spatial_width // 4
         conv_lstm_channels = 16 + 64 + self._params.m_rainfall
 
-        self.pre_attention = SpatialAttention()  # attention before ConvLSTM
+        self.pre_attention = (
+            spatial_attention.SpatialAttention()
+        )  # attention before ConvLSTM
 
         self.conv_lstm = keras.Sequential(
             [
@@ -407,7 +382,9 @@ class FloodConvLSTM(keras.Model):
             name="conv_lstm",
         )
 
-        self.attention = SpatialAttention()  # attention after ConvLSTM
+        self.attention = (
+            spatial_attention.SpatialAttention()
+        )  # attention after ConvLSTM
 
         self.output_cnn = keras.Sequential(
             [
@@ -467,7 +444,7 @@ class FloodConvLSTM(keras.Model):
         lstm_input = tf.concat([st_cnn_output, geo_cnn_output, temp_input], axis=-1)
         lstm_input = self.pre_attention(lstm_input)
         lstm_output = self.conv_lstm(lstm_input)
-        lstm_output = self.attention(lstm_output)
+        # lstm_output = self.attention(lstm_output)
         output = self.output_cnn(lstm_output)
 
         return output

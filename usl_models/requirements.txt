@@ -1,7 +1,7 @@
 matplotlib==3.9.2
 numpy==1.26.4
-tensorflow[and-cuda]==2.15.1
-keras==2.15.0
+tensorflow[and-cuda]==2.16.1
+keras==3.13.0
 keras-tuner==1.4.7
 google-cloud-aiplatform==1.43.0
 google-cloud-storage==2.15.0

@@ -92,3 +92,12 @@ root@eaf6dfb394d4:/# cd /usl_models/
 root@eaf6dfb394d4:/usl_models# pip install -e .
 ```
 to replicate VertexAI's installation of the usl_models package.
+
+### Cuda installation
+
+We currently use Cuda 12.3 for compatability with Tensorflow 2.16.1.
+
+Tensorflow compatibiltiy table: https://www.tensorflow.org/install/source#gpu
+
+Debian installer instructions:
+https://developer.nvidia.com/cuda-12-3-0-download-archive?target_os=Linux&target_arch=x86_64&Distribution=Debian&target_version=11&target_type=deb_network
