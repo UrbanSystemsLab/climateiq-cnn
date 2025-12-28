@@ -2,7 +2,7 @@
 
 import logging
 import dataclasses
-from typing import TypedDict, TypeAlias, List, Callable, Literal, Tuple, Iterable
+from typing import TypedDict, TypeAlias, List, Callable, Literal, Tuple, Iterable, Self
 
 import keras
 from keras import layers
@@ -151,7 +151,7 @@ class AtmoModel:
             self._model = self._build_model()
 
     @classmethod
-    def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "AtmoModel":
+    def from_checkpoint(cls, artifact_uri: str, **kwargs) -> Self:
         """Loads the model from a checkpoint URI.
 
         We load weights only to keep custom methods intact.
@@ -647,6 +647,6 @@ class AtmoConvLSTM(keras.Model):
         return self._params.get_config()
 
     @classmethod
-    def from_config(cls, config: dict) -> "AtmoConvLSTM":
+    def from_config(cls, config: dict) -> Self:
         """Keras deserialization."""
         return cls(params=AtmoModel.Params.from_config(config))

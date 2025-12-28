@@ -9,4 +9,7 @@
     "editor.formatOnSave": true,
     "notebook.formatOnSave.enabled": true,
     "python.envFile": "${workspaceFolder}/.env",
+    "python.analysis.ignore": [
+        "*"
+    ],
 }

@@ -1,5 +1,6 @@
 from enum import Enum
 import dataclasses
+from typing import Self
 
 import numpy as np
 import tensorflow as tf
@@ -72,7 +73,7 @@ class SpatiotemporalOutput(Enum):
         return {"value": self.value}
 
     @classmethod
-    def from_config(cls, config: dict) -> "SpatiotemporalOutput":
+    def from_config(cls, config: dict) -> Self:
         """Get config for tensorflow serialization."""
         return cls(config["value"])
 

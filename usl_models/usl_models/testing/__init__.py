@@ -3,7 +3,7 @@ import io
 import unittest
 from unittest import mock
 import urllib.parse
-from typing import Any
+from typing import Any, Self
 import pathlib
 
 import numpy as np
@@ -68,13 +68,13 @@ class MockBlob(mock.MagicMock):
         self._buf.seek(0)
         return buf
 
-    def with_buf(self, buf: io.BytesIO) -> "MockBlob":
+    def with_buf(self, buf: io.BytesIO) -> Self:
         """Sets the buffer of this blob."""
         self._buf = buf
         self.open.side_effect = self._buf_open
         return self
 
-    def with_npy(self, arr: np.ndarray, allow_pickle=True) -> "MockBlob":
+    def with_npy(self, arr: np.ndarray, allow_pickle=True) -> Self:
         """Sets the buffer to a serialized np array."""
         buf = io.BytesIO()
         np.save(buf, arr, allow_pickle=allow_pickle)
@@ -82,7 +82,7 @@ class MockBlob(mock.MagicMock):
         self.with_buf(buf)
         return self
 
-    def with_path(self, path: str) -> "MockBlob":
+    def with_path(self, path: str) -> Self:
         """Sets the path and name of a blob."""
         parsed_path: pathlib.Path = pathlib.Path(path)
         self.bucket.name = parsed_path.parents[-2]
@@ -90,7 +90,7 @@ class MockBlob(mock.MagicMock):
         self.name = parsed_path.name
         return self
 
-    def with_exists(self, exists: bool) -> "MockBlob":
+    def with_exists(self, exists: bool) -> Self:
         """Sets existance bool."""
         self.exists.return_value = exists
         return self
@@ -100,7 +100,7 @@ class MockBlob(mock.MagicMock):
 class MockBucket(mock.MagicMock):
     """Mock `storage.Bucket`."""
 
-    def with_blobs(self, blobs: dict[str, MockBlob]) -> "MockBucket":
+    def with_blobs(self, blobs: dict[str, MockBlob]) -> Self:
         """Construct mock bucket with dictionary of blobs."""
 
         def _list_blobs(prefix: str, max_results: int | None = None):
@@ -125,7 +125,7 @@ class MockBucket(mock.MagicMock):
 class MockStorageClient(mock.MagicMock):
     """Mock `storage.Client`."""
 
-    def with_buckets(self, buckets: dict[str, MockBucket]) -> "MockStorageClient":
+    def with_buckets(self, buckets: dict[str, MockBucket]) -> Self:
         """Adds mock buckets to the storage client."""
         self.bucket.side_effect = lambda bucket_name: buckets[bucket_name]
         return self

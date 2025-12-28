@@ -1,5 +1,5 @@
 import logging
-from typing import Iterator, TypedDict, List, Callable, Literal, TypeAlias, Any
+from typing import Iterator, TypedDict, List, Callable, Literal, TypeAlias, Any, Self
 import dataclasses
 import numpy as np
 from usl_models.shared import pad_layers
@@ -85,7 +85,7 @@ class FloodModel:
             }
 
         @classmethod
-        def from_dict(cls, d: dict[str, Any]) -> "FloodModel.Params":
+        def from_dict(cls, d: dict[str, Any]) -> Self:
             """Create Params instance from dictionary."""
             d = d.copy()
             optimizer_info = d.pop("optimizer")
@@ -121,7 +121,7 @@ class FloodModel:
         self._model = self._build_model()
 
     @classmethod
-    def from_checkpoint(cls, artifact_uri: str, **kwargs) -> "FloodModel":
+    def from_checkpoint(cls, artifact_uri: str, **kwargs) -> Self:
         """Loads the model from a checkpoint URI.
 
         We load weights only to keep custom methods (e.g. `call_n`) intact.
@@ -138,7 +138,7 @@ class FloodModel:
         Returns:
             The loaded FloodModel.
         """
-        loaded_model = keras.models.load_model(artifact_uri)
+        loaded_model: keras.Model = keras.models.load_model(artifact_uri)
         params = FloodModel.Params.from_config(loaded_model.get_config())
         model = cls(params=params, **kwargs)
         model._model.set_weights(loaded_model.get_weights())
@@ -170,6 +170,7 @@ class FloodModel:
                 keras.metrics.RootMeanSquaredError(),
                 # Optional: add your custom metrics here
             ],
+            run_eagerly=True,
         )
         return model
 
@@ -242,7 +243,7 @@ class FloodModel:
         steps_per_epoch: int | None = None,
         early_stopping: int | None = None,
         callbacks: List[Callable] | None = None,
-    ):
+    ) -> keras.callbacks.History:
         """Fit the model to the given dataset."""
         if callbacks is None:
             callbacks = []

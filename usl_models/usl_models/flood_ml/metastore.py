@@ -1,6 +1,7 @@
 import datetime
 from typing import Any, Sequence, TypeVar
 import urllib.parse
+import logging
 
 from google.cloud import firestore  # type:ignore[attr-defined]
 
@@ -113,6 +114,7 @@ def get_spatial_feature_and_label_chunk_metadata(
                       contain the same set of chunks.
     """
     feature_metadata = get_spatial_feature_chunk_metadata(db, sim_name)
+    logging.info("feature metadata: %s", str(feature_metadata))
 
     # Retrieve all label chunks for the simulation.
     label_chunks_collection = (

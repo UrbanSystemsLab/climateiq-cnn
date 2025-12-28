@@ -127,7 +127,7 @@ class FloodModelTest(unittest.TestCase):
 
         model = flood_model.FloodModel(self._params, spatial_dims=(height, width))
         epochs = 2
-        train_dataset = mock_dataset(
+        train_dataset: tf.data.Dataset = mock_dataset(
             self._params,
             height=height,
             width=width,
@@ -141,6 +141,7 @@ class FloodModelTest(unittest.TestCase):
             batch_size=batch_size,
             batch_count=epochs,
         )
+        print("Spec", train_dataset.element_spec)
         history = model.fit(
             train_dataset, val_dataset=val_dataset, epochs=epochs, steps_per_epoch=1
         )

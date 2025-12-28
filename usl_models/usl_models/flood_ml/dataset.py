@@ -20,6 +20,23 @@ FEATURE_DIRNAME = "geospatial"
 LABEL_DIRNAME = "labels"
 
 
+def pad_geospatial_tensor(geospatial: tf.Tensor) -> tf.Tensor:
+    (_HEIGHT, _WIDTH, GEO_FEATURES) = geospatial.shape
+    if GEO_FEATURES != constants.GEO_FEATURES:
+        return tf.pad(
+            geospatial,
+            paddings=[
+                [0, 0],
+                [0, 0],
+                [0, constants.GEO_FEATURES - GEO_FEATURES],
+            ],
+            mode="CONSTANT",
+            constant_values=0,
+        )
+    else:
+        return geospatial
+
+
 def load_dataset(
     sim_names: list[str],
     dataset_split: str,
@@ -27,7 +44,7 @@ def load_dataset(
     n_flood_maps: int = constants.N_FLOOD_MAPS,
     m_rainfall: int = constants.M_RAINFALL,
     max_chunks: int | None = None,
-    firestore_client: firestore.Client = None,
+    firestore_client: firestore.Client | None = None,
     storage_client: storage.Client | None = None,
 ) -> tf.data.Dataset:
     """Creates a dataset which generates chunks for the flood model.
@@ -127,6 +144,7 @@ def load_dataset_windowed(
     def generator():
         """Windowed generator for teacher-forcing training."""
         for sim_name in sim_names:
+            logging.info("Loading sim name %s", sim_name)
             for model_input, labels in _iter_model_inputs(
                 firestore_client,
                 storage_client,
@@ -308,7 +326,7 @@ def _iter_model_inputs(
 
         model_input = model.FloodModel.Input(
             temporal=temporal,
-            geospatial=geospatial,
+            geospatial=pad_geospatial_tensor(geospatial),
             spatiotemporal=tf.zeros(
                 shape=(
                     n_flood_maps,
@@ -348,6 +366,7 @@ def _iter_geo_feature_label_tensors(
     feature_label_metadata = metastore.get_spatial_feature_and_label_chunk_metadata(
         firestore_client, sim_name, dataset_split
     )
+    logging.info("found %d label metadata", len(feature_label_metadata))
 
     random.shuffle(feature_label_metadata)
 
@@ -383,15 +402,17 @@ def _iter_model_inputs_for_prediction(
         city_cat_config,
         m_rainfall,
     )
+    logging.info("temporal tensor:", temporal.shape)
 
     for feature_tensor, chunk_name in _iter_study_area_tensors(
         firestore_client, storage_client, study_area_name
     ):
         metadata = {"feature_chunk": chunk_name, "rainfall": rainfall}
+        logging.info("metadata: %s", str(metadata))
 
         model_input = model.FloodModel.Input(
             temporal=temporal,
-            geospatial=feature_tensor,
+            geospatial=pad_geospatial_tensor(feature_tensor),
             spatiotemporal=tf.zeros(
                 shape=(
                     n_flood_maps,
@@ -413,6 +434,7 @@ def _iter_study_area_tensors(
     all_feature_metadata = metastore.get_spatial_feature_chunk_metadata_for_prediction(
         firestore_client, study_area_name
     )
+    logging.info("Found metadata: %d", len(all_feature_metadata))
 
     random.shuffle(all_feature_metadata)
 
@@ -487,6 +509,7 @@ def download_dataset(
         dataset_splits = []  # Not needed for prediction
 
     for sim_name in sim_names:
+        print("downloading", sim_name)
         if include_labels:
             # TRAINING MODE
             sim_path = output_path / sim_name
@@ -506,6 +529,7 @@ def download_dataset(
                 storage_client, temporal_meta["as_vector_gcs_uri"]
             )
             np.save(sim_path / TEMPORAL_FILENAME, temporal_array)
+            print(sim_path / TEMPORAL_FILENAME)
 
             # Download feature + label chunks
             for split in dataset_splits:
@@ -612,7 +636,7 @@ def _iter_model_inputs_cached(
         )
         model_input = model.FloodModel.Input(
             temporal=temporal_tensor,
-            geospatial=geospatial,
+            geospatial=pad_geospatial_tensor(geospatial),
             spatiotemporal=tf.zeros(
                 shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
                 dtype=tf.float32,
@@ -708,7 +732,7 @@ def load_dataset_cached(
                     geospatial = tf.convert_to_tensor(np.load(f), dtype=tf.float32)
                     model_input = model.FloodModel.Input(
                         temporal=temporal_tensor,
-                        geospatial=geospatial,
+                        geospatial=pad_geospatial_tensor(geospatial),
                         spatiotemporal=tf.zeros(
                             shape=(
                                 n_flood_maps,
@@ -797,11 +821,13 @@ def load_dataset_windowed_cached(
             )
 
             if not feature_dir.exists():
+                print("feature dir does not exist", feature_dir)
                 continue
 
             feature_files = {f.stem: f for f in feature_dir.glob("*.npy")}
             if include_labels:
                 if not label_dir or not label_dir.exists():
+                    print("label dir does not exist", label_dir)
                     continue
                 label_files = {f.stem: f for f in label_dir.glob("*.npy")}
                 stems = sorted(set(feature_files) & set(label_files))
@@ -822,6 +848,7 @@ def load_dataset_windowed_cached(
         for sim_dir, stem in all_keys:
             temporal_path = sim_dir / TEMPORAL_FILENAME
             if not temporal_path.exists():
+                print("No temporal path", temporal_path)
                 continue
 
             temporal_vec = np.load(temporal_path)
@@ -835,8 +862,11 @@ def load_dataset_windowed_cached(
                 )
             )
 
-            feature_path = sim_dir / dataset_split / FEATURE_DIRNAME / f"{stem}.npy"
+            feature_path: pathlib.Path = (
+                sim_dir / dataset_split / FEATURE_DIRNAME / f"{stem}.npy"
+            )
             if not feature_path.exists():
+                print("No feature path", feature_path)
                 continue
 
             geospatial = tf.convert_to_tensor(np.load(feature_path), dtype=tf.float32)
@@ -844,6 +874,7 @@ def load_dataset_windowed_cached(
             if include_labels:
                 label_path = sim_dir / dataset_split / LABEL_DIRNAME / f"{stem}.npy"
                 if not label_path.exists():
+                    print("No label path", label_path)
                     continue
                 label_arr = np.load(label_path)
                 labels = tf.transpose(
@@ -856,9 +887,23 @@ def load_dataset_windowed_cached(
                     dtype=tf.float32,
                 )
 
+            # Pad missing geo features
+            (_HEIGHT, _WIDTH, GEO_FEATURES) = geospatial.shape
+            if GEO_FEATURES != constants.GEO_FEATURES:
+                geospatial = tf.pad(
+                    geospatial,
+                    paddings=[
+                        [0, 0],
+                        [0, 0],
+                        [0, constants.GEO_FEATURES - GEO_FEATURES],
+                    ],
+                    mode="CONSTANT",
+                    constant_values=0,
+                )
+
             model_input = model.FloodModel.Input(
                 temporal=temporal_tensor,
-                geospatial=geospatial,
+                geospatial=pad_geospatial_tensor(geospatial),
                 spatiotemporal=tf.zeros(
                     shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
                     dtype=tf.float32,
@@ -892,7 +937,7 @@ def load_dataset_windowed_cached(
     )
 
     # Step 6. Batch + Prefetch
-    dataset = dataset.batch(batch_size, drop_remainder=False).prefetch(tf.data.AUTOTUNE)
+    dataset = dataset.batch(batch_size, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
 
     # Optionally: cache small metadata if you repeatedly iterate over the same dataset
     # dataset = dataset.cache()  # use only if memory allows
