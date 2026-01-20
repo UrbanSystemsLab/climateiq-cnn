@@ -164,7 +164,7 @@ class FloodModel:
         model.compile(
             optimizer=self._params.optimizer,
             # loss=keras.losses.MeanSquaredError(),
-            loss=customloss.make_hybrid_loss,
+            loss=customloss.flood_weighted_mse,
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),

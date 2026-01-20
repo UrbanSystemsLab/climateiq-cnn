@@ -51,3 +51,15 @@ def make_hybrid_loss(y_true, y_pred):
     # mse = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
     # small_weighted = weighted_mse_small_targets(y_true, y_pred)
     return logcosh
+
+
+@register_keras_serializable(package="Custom", name="flood_weighted_mse")
+def flood_weighted_mse(
+    y_true, y_pred, flood_thresh=0.05, flood_weight=30.0, alpha=10.0  # start moderate
+):
+    err2 = tf.square(y_pred - y_true)
+
+    # smooth weight in [1, 1+flood_weight]
+    w = 1.0 + flood_weight * tf.sigmoid(alpha * (y_true - flood_thresh))
+
+    return tf.reduce_mean(w * err2)
