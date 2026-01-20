@@ -418,7 +418,7 @@ class FloodConvLSTM(keras.Model):
                     8, 4, strides=4, padding="same", activation="relu"
                 ),
                 layers.Conv2DTranspose(
-                    1, 1, strides=1, padding="same", activation="relu"
+                    1, 1, strides=1, padding="same", activation="linear"
                 ),
             ]
         )
