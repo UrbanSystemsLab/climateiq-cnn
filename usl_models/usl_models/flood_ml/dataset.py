@@ -247,7 +247,7 @@ def _generate_windows(
 ) -> Iterator[Tuple[model.FloodModel.Input, tf.Tensor]]:
     """Generate inputs for a sliding time window of length n_flood_maps timesteps."""
     (T_max, H, W, *_) = labels.shape
-    for t in range(T_max):
+    for t in range(n_flood_maps, T_max):
         window_input = model.FloodModel.Input(
             geospatial=model_input["geospatial"],
             temporal=_extract_temporal(t, n_flood_maps, model_input["temporal"]),

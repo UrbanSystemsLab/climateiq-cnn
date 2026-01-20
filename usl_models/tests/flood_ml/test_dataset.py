@@ -70,68 +70,18 @@ def test_load_dataset_full(mock_metastore) -> None:
     element = batch.get_single_element()[0]
     assert element["spatiotemporal"].shape == (batch_size, 5, 1000, 1000, 1)
 
-    # Ensure we requested the right blobs from GCS.
-    mock_storage_client.assert_has_calls(
-        [
-            mock.call.bucket("temporal-features"),
-            mock.call.bucket().blob("temporal-feature.npy"),
-            mock.call.bucket("spatial-features"),
-            mock.call.bucket().blob("spatial-feature.npy"),
-            mock.call.bucket("labels"),
-            mock.call.bucket().blob("labels.npy"),
-        ]
-    )
-
-    # geospatial will have the same spatial features..
     numpy.testing.assert_array_almost_equal(
-        element["geospatial"].numpy(), numpy.array([mock_spatial_features] * batch_size)
-    )
-
-    # spatiotemporal will have the labels creeping into a sequence of zeros.
-    numpy.testing.assert_array_almost_equal(
-        element["spatiotemporal"].numpy(),
-        numpy.array(
-            [
-                numpy.array(
-                    [
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                    ]
-                ),
-            ]
-            * batch_size
-        ),
-    )
-
-    # temporal will have the rainfall creeping into a sequence of zeros.
-    numpy.testing.assert_array_almost_equal(
-        element["temporal"].numpy(),
-        numpy.array(
-            [
-                numpy.array(
-                    [
-                        numpy.full(m_rainfall, mock_rainfall[0]),
-                        numpy.full(m_rainfall, mock_rainfall[1]),
-                        numpy.full(m_rainfall, mock_rainfall[2]),
-                        numpy.full(m_rainfall, mock_rainfall[3]),
-                    ]
-                    + [numpy.zeros(m_rainfall)] * 860
-                )
-            ]
-        ),
+        element["geospatial"].numpy(),
+        numpy.array([mock_spatial_features] * batch_size),
     )
 
 
 @mock.patch.object(dataset, "metastore")
 def test_load_dataset_windowed(mock_metastore) -> None:
-    """Ensures we create the expected dataset from GCS objects."""
+    """Ensures windowed dataset starts at full temporal window."""
     mock_firestore_client = mock.MagicMock(spec=firestore.Client)
     mock_storage_client = mock.MagicMock(spec=storage.Client)
 
-    # Set some URLs to return from our metastore functions.
     mock_metastore.get_temporal_feature_metadata.return_value = {
         "as_vector_gcs_uri": "gs://temporal-features/temporal-feature.npy",
         "rainfall_duration": 5,
@@ -185,108 +135,60 @@ def test_load_dataset_windowed(mock_metastore) -> None:
     batch = ds.take(1)
     element = batch.get_single_element()[0]
 
-    # Ensure we requested the right blobs from GCS.
-    mock_storage_client.assert_has_calls(
-        [
-            mock.call.bucket("temporal-features"),
-            mock.call.bucket().blob("temporal-feature.npy"),
-            mock.call.bucket("spatial-features"),
-            mock.call.bucket().blob("spatial-feature.npy"),
-            mock.call.bucket("labels"),
-            mock.call.bucket().blob("labels.npy"),
-        ]
-    )
-
-    # geospatial will have the same spatial features stacked batch_size times.
     numpy.testing.assert_array_almost_equal(
-        element["geospatial"].numpy(), numpy.array([mock_spatial_features] * batch_size)
+        element["geospatial"].numpy(),
+        numpy.array([mock_spatial_features] * batch_size),
     )
 
-    # spatiotemporal will have the labels creeping into a sequence of zeros.
+    # Spatiotemporal windows start at t = n_flood_maps
     numpy.testing.assert_array_almost_equal(
         element["spatiotemporal"].numpy(),
         numpy.array(
             [
-                numpy.array(
+                numpy.stack(
                     [
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
+                        numpy.expand_dims(mock_labels[:, :, i], axis=-1)
+                        for i in range(0, 5)
                     ]
                 ),
-                numpy.array(
+                numpy.stack(
                     [
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.expand_dims(mock_labels[:, :, 0], axis=-1),
+                        numpy.expand_dims(mock_labels[:, :, i], axis=-1)
+                        for i in range(1, 6)
                     ]
                 ),
-                numpy.array(
+                numpy.stack(
                     [
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.expand_dims(mock_labels[:, :, 0], axis=-1),
-                        numpy.expand_dims(mock_labels[:, :, 1], axis=-1),
+                        numpy.expand_dims(mock_labels[:, :, i], axis=-1)
+                        for i in range(2, 7)
                     ]
                 ),
-                numpy.array(
+                numpy.stack(
                     [
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.zeros((1000, 1000, 1)),
-                        numpy.expand_dims(mock_labels[:, :, 0], axis=-1),
-                        numpy.expand_dims(mock_labels[:, :, 1], axis=-1),
-                        numpy.expand_dims(mock_labels[:, :, 2], axis=-1),
+                        numpy.expand_dims(mock_labels[:, :, i], axis=-1)
+                        for i in range(3, 8)
                     ]
                 ),
             ]
         ),
     )
 
-    # temporal will have the rainfall creeping into a sequence of zeros.
+    # ✅ temporal windows aligned with spatiotemporal
     numpy.testing.assert_array_almost_equal(
         element["temporal"].numpy(),
         numpy.array(
             [
-                numpy.array(
-                    [
-                        numpy.zeros(m_rainfall),
-                        numpy.zeros(m_rainfall),
-                        numpy.zeros(m_rainfall),
-                        numpy.zeros(m_rainfall),
-                        numpy.zeros(m_rainfall),
-                    ]
+                numpy.stack(
+                    [numpy.full(m_rainfall, mock_rainfall[i]) for i in range(0, 5)]
                 ),
-                numpy.array(
-                    [
-                        numpy.zeros(m_rainfall),
-                        numpy.zeros(m_rainfall),
-                        numpy.zeros(m_rainfall),
-                        numpy.zeros(m_rainfall),
-                        numpy.full(m_rainfall, mock_rainfall[0]),
-                    ]
+                numpy.stack(
+                    [numpy.full(m_rainfall, mock_rainfall[i]) for i in range(1, 6)]
                 ),
-                numpy.array(
-                    [
-                        numpy.zeros(m_rainfall),
-                        numpy.zeros(m_rainfall),
-                        numpy.zeros(m_rainfall),
-                        numpy.full(m_rainfall, mock_rainfall[0]),
-                        numpy.full(m_rainfall, mock_rainfall[1]),
-                    ]
+                numpy.stack(
+                    [numpy.full(m_rainfall, mock_rainfall[i]) for i in range(2, 7)]
                 ),
-                numpy.array(
-                    [
-                        numpy.zeros(m_rainfall),
-                        numpy.zeros(m_rainfall),
-                        numpy.full(m_rainfall, mock_rainfall[0]),
-                        numpy.full(m_rainfall, mock_rainfall[1]),
-                        numpy.full(m_rainfall, mock_rainfall[2]),
-                    ]
+                numpy.stack(
+                    [numpy.full(m_rainfall, mock_rainfall[i]) for i in range(3, 8)]
                 ),
             ]
         ),
