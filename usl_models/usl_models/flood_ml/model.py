@@ -61,6 +61,10 @@ class FloodModel:
         n_flood_maps: int = 6
         num_features: int = 22
         pad_mode: PadMode = "REFLECT"
+
+        # Short autoregressive unrolling during training (1 = original behavior)
+        unroll_steps: int = 1
+
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
             default_factory=lambda: keras.optimizers.Adam(learning_rate=1e-3)
         )
@@ -75,6 +79,8 @@ class FloodModel:
                 "m_rainfall": self.m_rainfall,
                 "n_flood_maps": self.n_flood_maps,
                 "num_features": self.num_features,
+                "pad_mode": self.pad_mode,
+                "unroll_steps": self.unroll_steps,  # NEW
                 "optimizer": {
                     "class_name": type(self.optimizer).__name__,
                     "config": {
@@ -328,6 +334,9 @@ class FloodConvLSTM(keras.Model):
         self._params = params
         self._spatial_height, self._spatial_width = spatial_dims
 
+        # Number of short autoregressive steps during training
+        self._unroll_steps = int(getattr(params, "unroll_steps", 1))
+
         # CNN padding config
         K_PAD = 2  # 5x5 kernel means 2-pixel padding
         cnn_pad = (K_PAD, K_PAD)
@@ -470,6 +479,170 @@ class FloodConvLSTM(keras.Model):
         output = self.output_cnn(lstm_output)
 
         return output
+
+    # Short autoregressive unrolling during training (memory-friendly)
+    def train_step(self, data):
+        """
+        Short autoregressive unroll training:
+        - step 0 uses the dataset input as-is (teacher forcing)
+        - then we feed back the model prediction into spatiotemporal window
+        - repeat for K steps and average the loss
+
+        UPDATED:
+        - supports multi-step GT
+        - graph-safe (tf.while_loop)
+        """
+        x, y = data
+
+        geospatial = x["geospatial"]
+        temporal = x["temporal"]
+        spatiotemporal = x["spatiotemporal"]
+
+        # ---- normalize y to (B,K,H,W,1) ----
+        if len(y.shape) == 3:
+            y_steps = tf.expand_dims(tf.expand_dims(y, axis=1), axis=-1)
+        elif len(y.shape) == 4:
+            if y.shape[-1] == 1:
+                y_steps = tf.expand_dims(y, axis=1)
+            else:
+                y_steps = tf.expand_dims(y, axis=-1)
+        elif len(y.shape) == 5:
+            y_steps = y
+        else:
+            raise ValueError(f"Unexpected y shape: {y.shape}")
+
+        K = tf.shape(y_steps)[1]
+
+        with tf.GradientTape() as tape:
+            total_loss = tf.constant(0.0)
+            k0 = tf.constant(0)
+
+            last_pred0 = tf.zeros(
+                (tf.shape(spatiotemporal)[0],
+                self._spatial_height,
+                self._spatial_width,
+                1),
+                dtype=tf.float32,
+            )
+
+            def cond(k, *_):
+                return k < K
+
+            def body(k, spatiotemporal, total_loss, last_pred):
+                pred = self(
+                    {
+                        "geospatial": geospatial,
+                        "temporal": temporal,
+                        "spatiotemporal": spatiotemporal,
+                    },
+                    training=True,
+                )
+
+                yk = y_steps[:, k]
+                loss = self.compiled_loss(
+                    yk, pred, regularization_losses=self.losses
+                )
+
+                total_loss += loss
+
+                pred_fb = tf.stop_gradient(pred)
+                spatiotemporal = tf.concat(
+                    [spatiotemporal, tf.expand_dims(pred_fb, axis=1)], axis=1
+                )[:, 1:]
+
+                return k + 1, spatiotemporal, total_loss, pred
+
+            _, _, total_loss, last_pred = tf.while_loop(
+                cond,
+                body,
+                loop_vars=[k0, spatiotemporal, total_loss, last_pred0],
+            )
+
+            total_loss = total_loss / tf.cast(K, tf.float32)
+
+        grads = tape.gradient(total_loss, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+
+        # metrics on first-step prediction
+        self.compiled_metrics.update_state(y_steps[:, 0], last_pred)
+
+        logs = {m.name: m.result() for m in self.metrics}
+        logs["loss"] = total_loss
+        return logs
+    def test_step(self, data):
+        x, y = data
+
+        geospatial = x["geospatial"]
+        temporal = x["temporal"]
+        spatiotemporal = x["spatiotemporal"]
+
+        # normalize y to (B,K,H,W,1)
+        if len(y.shape) == 3:
+            y_steps = tf.expand_dims(tf.expand_dims(y, axis=1), axis=-1)
+        elif len(y.shape) == 4:
+            if y.shape[-1] == 1:
+                y_steps = tf.expand_dims(y, axis=1)
+            else:
+                y_steps = tf.expand_dims(y, axis=-1)
+        elif len(y.shape) == 5:
+            y_steps = y
+        else:
+            raise ValueError(f"Unexpected y shape: {y.shape}")
+
+        K = tf.shape(y_steps)[1]
+
+        total_loss = tf.constant(0.0)
+        k0 = tf.constant(0)
+
+        last_pred0 = tf.zeros(
+            (tf.shape(spatiotemporal)[0],
+            self._spatial_height,
+            self._spatial_width,
+            1),
+            dtype=tf.float32,
+        )
+
+        def cond(k, *_):
+            return k < K
+
+        def body(k, spatiotemporal, total_loss, last_pred):
+            pred = self(
+                {
+                    "geospatial": geospatial,
+                    "temporal": temporal,
+                    "spatiotemporal": spatiotemporal,
+                },
+                training=False,
+            )
+
+            yk = y_steps[:, k]
+            loss = self.compiled_loss(
+                yk, pred, regularization_losses=self.losses
+            )
+
+            total_loss += loss
+
+            spatiotemporal = tf.concat(
+                [spatiotemporal, tf.expand_dims(pred, axis=1)], axis=1
+            )[:, 1:]
+
+            return k + 1, spatiotemporal, total_loss, pred
+
+        _, _, total_loss, last_pred = tf.while_loop(
+            cond,
+            body,
+            loop_vars=[k0, spatiotemporal, total_loss, last_pred0],
+        )
+
+        total_loss = total_loss / tf.cast(K, tf.float32)
+
+        # metrics on first step (or change if you want)
+        self.compiled_metrics.update_state(y_steps[:, 0], last_pred)
+
+        logs = {m.name: m.result() for m in self.metrics}
+        logs["loss"] = total_loss
+        return logs
+
 
     def call_n(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
         """Runs the entire autoregressive model.
