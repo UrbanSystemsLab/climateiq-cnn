@@ -117,6 +117,8 @@ class FloodModel:
     ):
         """Initialize the FloodModel instance."""
         self._params = params or self.Params()
+        # NOTE: spatial_dims makes the model dimension-free w.r.t. H/W.
+        # If training on tiles, pass spatial_dims=(tile_h, tile_w) from the notebook.
         self._spatial_dims = spatial_dims or (constants.MAP_HEIGHT, constants.MAP_WIDTH)
         self._model = self._build_model()
 
