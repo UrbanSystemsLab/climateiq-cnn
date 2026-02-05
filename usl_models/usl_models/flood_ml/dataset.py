@@ -387,7 +387,8 @@ def _generate_temporal_tensor(
 
     temporal_vector = downloader.download_as_tensor(storage_client, gcs_url).numpy()
     temporal_features = _engineer_temporal_features(temporal_vector, m_rainfall)
-    return tf.convert_to_tensor(temporal_features, dtype=tf.float32), temporal_metadata["rainfall_duration"]
+    temporal_tensor = tf.convert_to_tensor(temporal_features, dtype=tf.float32)
+    return temporal_tensor, temporal_metadata["rainfall_duration"]
 
 
 def _iter_geo_feature_label_tensors(
@@ -1005,9 +1006,9 @@ def load_dataset_windowed_patches(
     def _extract_patch(arr: np.ndarray, y0: int, x0: int, is_3d: bool = False):
         """Extract a patch from array. Handles 2D (H,W,C) and 3D (T,H,W)."""
         if is_3d:
-            return arr[:, y0:y0 + patch_size, x0:x0 + patch_size]
+            return arr[:, y0 : y0 + patch_size, x0 : x0 + patch_size]
         else:
-            return arr[y0:y0 + patch_size, x0:x0 + patch_size, :]
+            return arr[y0 : y0 + patch_size, x0 : x0 + patch_size, :]
 
     def sample_generator():
         # Step 1. Gather all chunk keys
@@ -1070,7 +1071,8 @@ def load_dataset_windowed_patches(
             for y0 in range(0, H - patch_size + 1, stride):
                 for x0 in range(0, W - patch_size + 1, stride):
                     if include_labels:
-                        labels_patch = labels_full[:, y0:y0 + patch_size, x0:x0 + patch_size]
+                        y1, x1 = y0 + patch_size, x0 + patch_size
+                        labels_patch = labels_full[:, y0:y1, x0:x1]
                         if _is_valid_patch(labels_patch):
                             valid_patches.append((y0, x0))
                     else:
@@ -1078,7 +1080,11 @@ def load_dataset_windowed_patches(
                         valid_patches.append((y0, x0))
 
             # Limit patches per chunk if specified
-            if max_patches_per_chunk is not None and len(valid_patches) > max_patches_per_chunk:
+            exceeds_limit = (
+                max_patches_per_chunk is not None
+                and len(valid_patches) > max_patches_per_chunk
+            )
+            if exceeds_limit:
                 if shuffle:
                     random.shuffle(valid_patches)
                 valid_patches = valid_patches[:max_patches_per_chunk]
@@ -1089,19 +1095,22 @@ def load_dataset_windowed_patches(
                 geo_tensor = tf.convert_to_tensor(geo_patch, dtype=tf.float32)
 
                 if include_labels:
-                    labels_patch = labels_full[:, y0:y0 + patch_size, x0:x0 + patch_size]
+                    y1, x1 = y0 + patch_size, x0 + patch_size
+                    labels_patch = labels_full[:, y0:y1, x0:x1]
                     labels_tensor = tf.convert_to_tensor(labels_patch, dtype=tf.float32)
                 else:
-                    labels_tensor = tf.zeros(
-                        (patch_size, patch_size), dtype=tf.float32
-                    )
+                    labels_tensor = tf.zeros((patch_size, patch_size), dtype=tf.float32)
 
-                temporal_tensor = tf.convert_to_tensor(temporal_features, dtype=tf.float32)
+                temporal_tensor = tf.convert_to_tensor(
+                    temporal_features, dtype=tf.float32
+                )
 
                 # Generate temporal windows (same as _generate_windows but for patches)
                 num_timesteps = labels_tensor.shape[0] if include_labels else 1
                 for t in range(num_timesteps):
-                    window_temporal = _extract_temporal(t, n_flood_maps, temporal_tensor)
+                    window_temporal = _extract_temporal(
+                        t, n_flood_maps, temporal_tensor
+                    )
                     window_spatiotemporal = _extract_spatiotemporal_patch(
                         t, n_flood_maps, labels_tensor, patch_size
                     )
@@ -1115,7 +1124,10 @@ def load_dataset_windowed_patches(
                     if include_labels:
                         yield window_input, labels_tensor[t]
                     else:
-                        yield window_input, tf.zeros((patch_size, patch_size), dtype=tf.float32)
+                        empty_label = tf.zeros(
+                            (patch_size, patch_size), dtype=tf.float32
+                        )
+                        yield window_input, empty_label
 
     # Build dataset
     dataset = tf.data.Dataset.from_generator(
@@ -1155,7 +1167,7 @@ def _extract_spatiotemporal_patch(
     zeros = tf.zeros(shape=(max(n - t, 0), patch_size, patch_size), dtype=tf.float32)
 
     if len(labels.shape) == 3:  # (T, H, W)
-        data = labels[max(t - n, 0):t]
+        data = labels[max(t - n, 0) : t]
     else:  # (H, W) - single frame
         data = tf.zeros((0, patch_size, patch_size), dtype=tf.float32)
 
