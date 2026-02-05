@@ -20,60 +20,6 @@ FEATURE_DIRNAME = "geospatial"
 LABEL_DIRNAME = "labels"
 
 
-def _engineer_temporal_features(rain_1d: np.ndarray, m_rainfall: int) -> np.ndarray:
-    """Engineers m_rainfall temporal features from a 1D rainfall signal.
-
-    The raw rainfall vector is a single channel.  Tiling it m_rainfall times
-    (the previous approach) produces identical columns with zero additional
-    information.  Instead we derive distinct temporal features so the ConvLSTM
-    can learn richer temporal dynamics.
-
-    Features produced (in order up to m_rainfall):
-      0: Raw rainfall intensity
-      1: Normalised cumulative rainfall (fraction of total up to t)
-      2: Rainfall rate-of-change (finite difference)
-      3: Rolling mean rainfall (5-step / 25-min window)
-      4: Remaining rainfall (fraction of total from t onward)
-      5: Binary rain indicator (1 where rainfall > 0)
-
-    Args:
-        rain_1d: 1D array of shape (T_MAX,) — raw rainfall per timestep.
-        m_rainfall: Number of temporal feature columns to produce.
-
-    Returns:
-        Array of shape (T_MAX, m_rainfall).
-    """
-    features: list[np.ndarray] = []
-
-    # 0: raw rainfall
-    features.append(rain_1d.copy())
-
-    # 1: cumulative rainfall, normalised by total
-    cum = np.cumsum(rain_1d)
-    total = cum[-1] if cum[-1] > 0 else 1.0
-    features.append(cum / total)
-
-    # 2: rate-of-change (first difference)
-    diff = np.zeros_like(rain_1d)
-    diff[1:] = rain_1d[1:] - rain_1d[:-1]
-    features.append(diff)
-
-    # 3: rolling mean (window = 5 timesteps)
-    features.append(
-        np.convolve(rain_1d, np.ones(5, dtype=rain_1d.dtype) / 5, mode="same")
-    )
-
-    # 4: remaining rainfall (reverse cumsum, normalised)
-    rem = np.cumsum(rain_1d[::-1])[::-1].copy()
-    rem_total = rem[0] if rem[0] > 0 else 1.0
-    features.append(rem / rem_total)
-
-    # 5: binary indicator
-    features.append((rain_1d > 0).astype(rain_1d.dtype))
-
-    return np.stack(features[:m_rainfall], axis=-1)
-
-
 def load_dataset(
     sim_names: list[str],
     dataset_split: str,
@@ -381,14 +327,15 @@ def _generate_temporal_tensor(
     sim_name: str,
     m_rainfall: int,
 ) -> tuple[tf.Tensor, int]:
-    """Creates a temporal tensor with engineered features from GCS."""
+    """Creates a temporal tensor from the numpy array stored in GCS."""
     gcs_url = temporal_metadata["as_vector_gcs_uri"]
     logging.info("Retrieving temporal features from %s.", gcs_url)
 
-    temporal_vector = downloader.download_as_tensor(storage_client, gcs_url).numpy()
-    temporal_features = _engineer_temporal_features(temporal_vector, m_rainfall)
-    temporal_tensor = tf.convert_to_tensor(temporal_features, dtype=tf.float32)
-    return temporal_tensor, temporal_metadata["rainfall_duration"]
+    temporal_vector = downloader.download_as_tensor(storage_client, gcs_url)
+    temporal_vector = tf.transpose(
+        tf.tile(tf.reshape(temporal_vector, (1, len(temporal_vector))), [m_rainfall, 1])
+    )
+    return temporal_vector, temporal_metadata["rainfall_duration"]
 
 
 def _iter_geo_feature_label_tensors(
@@ -636,8 +583,11 @@ def _iter_model_inputs_cached(
     """Yields model inputs, optional labels, chunk name from arrays cached on disk."""
     temporal_path = sim_dir / TEMPORAL_FILENAME
     temporal_vec = np.load(temporal_path)
-    temporal_tensor = tf.convert_to_tensor(
-        _engineer_temporal_features(temporal_vec, m_rainfall), dtype=tf.float32
+    temporal_tensor = tf.transpose(
+        tf.tile(
+            tf.reshape(tf.convert_to_tensor(temporal_vec, dtype=tf.float32), (1, -1)),
+            [m_rainfall, 1],
+        )
     )
 
     feature_dir = sim_dir / dataset_split / FEATURE_DIRNAME
@@ -736,9 +686,14 @@ def load_dataset_cached(
                 temporal_vec = np.load(temporal_path)
                 rainfall = int(temporal_vec.shape[0])  # simple metadata
 
-                temporal_tensor = tf.convert_to_tensor(
-                    _engineer_temporal_features(temporal_vec, m_rainfall),
-                    dtype=tf.float32,
+                temporal_tensor = tf.transpose(
+                    tf.tile(
+                        tf.reshape(
+                            tf.convert_to_tensor(temporal_vec, dtype=tf.float32),
+                            (1, -1),
+                        ),
+                        [m_rainfall, 1],
+                    )
                 )
 
                 feature_dir = sim_dir / FEATURE_DIRNAME
@@ -870,9 +825,14 @@ def load_dataset_windowed_cached(
                 continue
 
             temporal_vec = np.load(temporal_path)
-            temporal_tensor = tf.convert_to_tensor(
-                _engineer_temporal_features(temporal_vec, m_rainfall),
-                dtype=tf.float32,
+            temporal_tensor = tf.transpose(
+                tf.tile(
+                    tf.reshape(
+                        tf.convert_to_tensor(temporal_vec, dtype=tf.float32),
+                        (1, -1),
+                    ),
+                    [m_rainfall, 1],
+                )
             )
 
             feature_path = sim_dir / dataset_split / FEATURE_DIRNAME / f"{stem}.npy"
@@ -1049,7 +1009,15 @@ def load_dataset_windowed_patches(
                 continue
 
             temporal_vec = np.load(temporal_path)
-            temporal_features = _engineer_temporal_features(temporal_vec, m_rainfall)
+            temporal_tensor = tf.transpose(
+                tf.tile(
+                    tf.reshape(
+                        tf.convert_to_tensor(temporal_vec, dtype=tf.float32),
+                        (1, -1),
+                    ),
+                    [m_rainfall, 1],
+                )
+            )
 
             feature_path = sim_dir / dataset_split / FEATURE_DIRNAME / f"{stem}.npy"
             if not feature_path.exists():
@@ -1100,10 +1068,6 @@ def load_dataset_windowed_patches(
                     labels_tensor = tf.convert_to_tensor(labels_patch, dtype=tf.float32)
                 else:
                     labels_tensor = tf.zeros((patch_size, patch_size), dtype=tf.float32)
-
-                temporal_tensor = tf.convert_to_tensor(
-                    temporal_features, dtype=tf.float32
-                )
 
                 # Generate temporal windows (same as _generate_windows but for patches)
                 num_timesteps = labels_tensor.shape[0] if include_labels else 1
