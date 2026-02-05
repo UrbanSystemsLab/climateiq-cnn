@@ -39,7 +39,7 @@ def load_dataset(
     pulling all examples into memory at once.
 
     Args:
-      sim_names: The simulation names, e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
+      sim_names:  The simulation names, e.g. ["Manhattan-config_v1/Rainfall_Data_1.txt"]
       dataset_split: Which dataset split to load: train, val, and/or test.
       batch_size: Size of batches yielded by the dataset. Approximate memory
                   usage is 10GB * batch_size during training.
@@ -897,3 +897,242 @@ def load_dataset_windowed_cached(
     # Optionally: cache small metadata if you repeatedly iterate over the same dataset
     # dataset = dataset.cache()  # use only if memory allows
     return dataset
+
+
+def load_dataset_windowed_patches(
+    filecache_dir: pathlib.Path,
+    sim_names: list[str],
+    dataset_split: str,
+    patch_size: int = 256,
+    stride: int | None = None,
+    batch_size: int = 4,
+    n_flood_maps: int = constants.N_FLOOD_MAPS,
+    m_rainfall: int = constants.M_RAINFALL,
+    max_chunks: int | None = None,
+    max_patches_per_chunk: int | None = None,
+    min_flood_fraction: float = 0.01,
+    min_max_depth: float = 0.1,
+    include_labels: bool = True,
+    shuffle: bool = True,
+) -> tf.data.Dataset:
+    """Patch-based dataset loader with sliding window and flood filtering.
+
+    Instead of using full 1000x1000 maps, this extracts smaller patches using
+    a sliding window. Only patches containing meaningful flood data are yielded,
+    which focuses training on relevant areas and reduces memory usage.
+
+    Args:
+        filecache_dir: Path to local filecache.
+        sim_names: List of simulation names.
+        dataset_split: "train", "val", or "test".
+        patch_size: Size of square patches to extract (e.g., 256 -> 256x256).
+        stride: Sliding window stride. Defaults to patch_size (no overlap).
+                Use stride < patch_size for overlapping patches.
+        batch_size: Batch size for the dataset.
+        n_flood_maps: Number of historical flood maps as input.
+        m_rainfall: Number of temporal features.
+        max_chunks: Max spatial chunks to use (None = all).
+        max_patches_per_chunk: Max patches to extract per chunk (None = all valid).
+                              Useful to balance dataset across chunks.
+        min_flood_fraction: Minimum fraction of pixels that must be flooded
+                           (across all timesteps) to include the patch.
+        min_max_depth: Minimum max depth (m) in the patch to include it.
+        include_labels: Whether to load labels (True for training).
+        shuffle: Whether to shuffle patches.
+
+    Returns:
+        tf.data.Dataset yielding (inputs, labels) tuples with patch-sized tensors.
+    """
+    if stride is None:
+        stride = patch_size
+
+    H, W = constants.MAP_HEIGHT, constants.MAP_WIDTH
+
+    def _is_valid_patch(labels_patch: np.ndarray) -> bool:
+        """Check if patch contains meaningful flood data."""
+        # labels_patch shape: (T, patch_h, patch_w)
+        max_depth = labels_patch.max()
+        if max_depth < min_max_depth:
+            return False
+
+        # Fraction of pixels that flood at any timestep
+        ever_flooded = (labels_patch > 0).any(axis=0)  # (patch_h, patch_w)
+        flood_fraction = ever_flooded.mean()
+        if flood_fraction < min_flood_fraction:
+            return False
+
+        return True
+
+    def _extract_patch(arr: np.ndarray, y0: int, x0: int, is_3d: bool = False):
+        """Extract a patch from array. Handles 2D (H,W,C) and 3D (T,H,W)."""
+        if is_3d:
+            return arr[:, y0 : y0 + patch_size, x0 : x0 + patch_size]
+        else:
+            return arr[y0 : y0 + patch_size, x0 : x0 + patch_size, :]
+
+    def sample_generator():
+        # Step 1. Gather all chunk keys
+        all_keys = []
+        for sim_name in sim_names:
+            sim_dir = filecache_dir / sim_name
+            feature_dir = sim_dir / dataset_split / FEATURE_DIRNAME
+            label_dir = (
+                sim_dir / dataset_split / LABEL_DIRNAME if include_labels else None
+            )
+
+            if not feature_dir.exists():
+                continue
+
+            feature_files = {f.stem: f for f in feature_dir.glob("*.npy")}
+            if include_labels:
+                if not label_dir or not label_dir.exists():
+                    continue
+                label_files = {f.stem: f for f in label_dir.glob("*.npy")}
+                stems = sorted(set(feature_files) & set(label_files))
+            else:
+                stems = sorted(feature_files)
+
+            if max_chunks is not None:
+                stems = stems[:max_chunks]
+
+            for stem in stems:
+                all_keys.append((sim_dir, stem))
+
+        # Step 2. Shuffle chunk keys
+        if shuffle:
+            random.shuffle(all_keys)
+
+        # Step 3. Process each chunk and extract patches
+        for sim_dir, stem in all_keys:
+            temporal_path = sim_dir / TEMPORAL_FILENAME
+            if not temporal_path.exists():
+                continue
+
+            temporal_vec = np.load(temporal_path)
+            temporal_tensor = tf.transpose(
+                tf.tile(
+                    tf.reshape(
+                        tf.convert_to_tensor(temporal_vec, dtype=tf.float32),
+                        (1, -1),
+                    ),
+                    [m_rainfall, 1],
+                )
+            )
+
+            feature_path = sim_dir / dataset_split / FEATURE_DIRNAME / f"{stem}.npy"
+            if not feature_path.exists():
+                continue
+
+            geospatial_full = np.load(feature_path)  # (H, W, C)
+
+            if include_labels:
+                label_path = sim_dir / dataset_split / LABEL_DIRNAME / f"{stem}.npy"
+                if not label_path.exists():
+                    continue
+                label_arr = np.load(label_path)  # (H, W, T)
+                labels_full = np.transpose(label_arr, (2, 0, 1))  # (T, H, W)
+            else:
+                labels_full = None
+
+            # Step 4. Sliding window to find valid patches
+            valid_patches = []
+            for y0 in range(0, H - patch_size + 1, stride):
+                for x0 in range(0, W - patch_size + 1, stride):
+                    if include_labels:
+                        y1, x1 = y0 + patch_size, x0 + patch_size
+                        labels_patch = labels_full[:, y0:y1, x0:x1]
+                        if _is_valid_patch(labels_patch):
+                            valid_patches.append((y0, x0))
+                    else:
+                        # Without labels, include all patches
+                        valid_patches.append((y0, x0))
+
+            # Limit patches per chunk if specified
+            exceeds_limit = (
+                max_patches_per_chunk is not None
+                and len(valid_patches) > max_patches_per_chunk
+            )
+            if exceeds_limit:
+                if shuffle:
+                    random.shuffle(valid_patches)
+                valid_patches = valid_patches[:max_patches_per_chunk]
+
+            # Step 5. Yield temporal windows for each valid patch
+            for y0, x0 in valid_patches:
+                geo_patch = _extract_patch(geospatial_full, y0, x0, is_3d=False)
+                geo_tensor = tf.convert_to_tensor(geo_patch, dtype=tf.float32)
+
+                if include_labels:
+                    y1, x1 = y0 + patch_size, x0 + patch_size
+                    labels_patch = labels_full[:, y0:y1, x0:x1]
+                    labels_tensor = tf.convert_to_tensor(labels_patch, dtype=tf.float32)
+                else:
+                    labels_tensor = tf.zeros((patch_size, patch_size), dtype=tf.float32)
+
+                # Generate temporal windows (same as _generate_windows but for patches)
+                num_timesteps = labels_tensor.shape[0] if include_labels else 1
+                for t in range(num_timesteps):
+                    window_temporal = _extract_temporal(
+                        t, n_flood_maps, temporal_tensor
+                    )
+                    window_spatiotemporal = _extract_spatiotemporal_patch(
+                        t, n_flood_maps, labels_tensor, patch_size
+                    )
+
+                    window_input = model.FloodModel.Input(
+                        geospatial=geo_tensor,
+                        temporal=window_temporal,
+                        spatiotemporal=window_spatiotemporal,
+                    )
+
+                    if include_labels:
+                        yield window_input, labels_tensor[t]
+                    else:
+                        empty_label = tf.zeros(
+                            (patch_size, patch_size), dtype=tf.float32
+                        )
+                        yield window_input, empty_label
+
+    # Build dataset
+    dataset = tf.data.Dataset.from_generator(
+        generator=sample_generator,
+        output_signature=(
+            dict(
+                geospatial=tf.TensorSpec(
+                    shape=(patch_size, patch_size, constants.GEO_FEATURES),
+                    dtype=tf.float32,
+                ),
+                temporal=tf.TensorSpec(
+                    shape=(n_flood_maps, m_rainfall), dtype=tf.float32
+                ),
+                spatiotemporal=tf.TensorSpec(
+                    shape=(n_flood_maps, patch_size, patch_size, 1),
+                    dtype=tf.float32,
+                ),
+            ),
+            tf.TensorSpec(
+                shape=(patch_size, patch_size),
+                dtype=tf.float32,
+            ),
+        ),
+    )
+
+    dataset = dataset.batch(batch_size, drop_remainder=False).prefetch(tf.data.AUTOTUNE)
+    return dataset
+
+
+def _extract_spatiotemporal_patch(
+    t: int, n: int, labels: tf.Tensor, patch_size: int
+) -> tf.Tensor:
+    """Extract spatiotemporal tensor from patch labels.
+
+    Same logic as _extract_spatiotemporal but for arbitrary patch sizes.
+    """
+    zeros = tf.zeros(shape=(max(n - t, 0), patch_size, patch_size), dtype=tf.float32)
+
+    if len(labels.shape) == 3:  # (T, H, W)
+        data = labels[max(t - n, 0) : t]
+    else:  # (H, W) - single frame
+        data = tf.zeros((0, patch_size, patch_size), dtype=tf.float32)
+
+    return tf.expand_dims(tf.concat([zeros, data], axis=0), axis=-1)
