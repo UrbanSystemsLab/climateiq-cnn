@@ -544,11 +544,12 @@ class FloodConvLSTM(keras.Model):
                 )
 
                 total_loss += loss
+                gt_fb = y_steps[:, k]   # Ground truth at this step (B,H,W,1)
 
-                pred_fb = tf.stop_gradient(pred)
                 spatiotemporal = tf.concat(
-                    [spatiotemporal, tf.expand_dims(pred_fb, axis=1)], axis=1
+                    [spatiotemporal, tf.expand_dims(gt_fb, axis=1)], axis=1
                 )[:, 1:]
+
 
                 return k + 1, spatiotemporal, total_loss, pred
 
