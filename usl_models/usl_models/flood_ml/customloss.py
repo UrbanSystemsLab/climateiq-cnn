@@ -47,7 +47,38 @@ def log_cosh_loss(y_true, y_pred):
 # return loss_fn
 @register_keras_serializable(package="Custom", name="make_hybrid_loss")
 def make_hybrid_loss(y_true, y_pred):
-    logcosh = log_cosh_loss(y_true, y_pred)
-    # mse = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
-    # small_weighted = weighted_mse_small_targets(y_true, y_pred)
-    return logcosh
+    if tf.rank(y_true) == 3:
+        y_true = y_true[..., tf.newaxis]
+    if tf.rank(y_pred) == 3:
+        y_pred = y_pred[..., tf.newaxis]
+
+    mask = tf.math.logical_not(tf.math.is_nan(y_true))
+    y_true = tf.where(mask, y_true, tf.zeros_like(y_true))
+    y_pred = tf.where(mask, y_pred, tf.zeros_like(y_pred))
+
+    flood_mask = y_true > 0
+    has_activity = tf.reduce_any(flood_mask, axis=[1, 2, 3], keepdims=True)
+    valid_mask = tf.cast(mask, tf.float32)
+
+    flood_weight = 2.0
+    background_weight = 1.0
+    weights = tf.where(flood_mask, flood_weight, background_weight)
+    weights = tf.where(has_activity, weights, tf.ones_like(weights))
+    weights = weights * valid_mask
+
+    squared_error = tf.square(y_true - y_pred)
+    weighted_mse = tf.reduce_sum(squared_error * weights) / (
+        tf.reduce_sum(weights) + 1e-6
+    )
+
+    nonflood_mask = tf.logical_not(flood_mask)
+    false_positive = tf.nn.relu(y_pred - y_true)
+    false_positive_loss = tf.reduce_sum(
+        tf.square(false_positive) * tf.cast(nonflood_mask, tf.float32)
+    ) / (tf.reduce_sum(tf.cast(nonflood_mask, tf.float32)) + 1e-6)
+
+    true_peak = tf.reduce_max(y_true, axis=[1, 2, 3])
+    pred_peak = tf.reduce_max(y_pred, axis=[1, 2, 3])
+    peak_depth_loss = tf.reduce_mean(tf.square(true_peak - pred_peak))
+
+    return weighted_mse + 0.2 * peak_depth_loss + 0.3 * false_positive_loss
