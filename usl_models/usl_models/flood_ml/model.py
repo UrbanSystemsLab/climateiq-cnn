@@ -300,7 +300,7 @@ class FloodConvLSTM(keras.Model):
     The architecture is an autoregressive ConvLSTM. Spatiotemporal and
     geospatial features are passed through initial CNN blocks for feature
     extraction, then concatenated with temporal inputs. The combined inputs are
-    then passed into ConvLSTM and TransposeConv layers to output a map of flood
+    then passed into ConvLSTM and upsampling Conv layers to output a map of flood
     predictions.
 
     The spatiotemporal inputs are "initial condition" flood maps, with previous
@@ -334,7 +334,7 @@ class FloodConvLSTM(keras.Model):
         activation = "relu"
 
         # === Spatiotemporal CNN ===
-        self.st_cnn = keras.Sequential(
+        self.st_cnn_stage1 = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer((None, self._spatial_height, self._spatial_width, 1)),
@@ -347,6 +347,20 @@ class FloodConvLSTM(keras.Model):
                 layers.TimeDistributed(
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
+            ],
+            name="spatiotemporal_cnn_stage1",
+        )
+
+        self.st_cnn_stage2 = keras.Sequential(
+            [
+                layers.InputLayer(
+                    (
+                        None,
+                        self._spatial_height // 2,
+                        self._spatial_width // 2,
+                        8,
+                    )
+                ),
                 layers.TimeDistributed(pad_layers.Pad2D(cnn_pad, mode="REFLECT")),
                 layers.TimeDistributed(
                     layers.Conv2D(
@@ -357,7 +371,7 @@ class FloodConvLSTM(keras.Model):
                     layers.MaxPool2D(pool_size=2, strides=1, padding="same")
                 ),
             ],
-            name="spatiotemporal_cnn",
+            name="spatiotemporal_cnn_stage2",
         )
 
         # === Geospatial CNN ===
@@ -401,6 +415,17 @@ class FloodConvLSTM(keras.Model):
                     activation="tanh",
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
+                    return_sequences=True,
+                ),
+                layers.BatchNormalization(),
+                layers.ConvLSTM2D(
+                    self._params.lstm_units,
+                    self._params.lstm_kernel_size,
+                    strides=1,
+                    padding="same",
+                    activation="tanh",
+                    dropout=self._params.lstm_dropout,
+                    recurrent_dropout=self._params.lstm_recurrent_dropout,
                 ),
             ],
             name="conv_lstm",
@@ -408,20 +433,20 @@ class FloodConvLSTM(keras.Model):
 
         self.attention = SpatialAttention()  # attention after ConvLSTM
 
-        self.output_cnn = keras.Sequential(
-            [
-                # Input shape: (height, width, channels)
-                layers.InputLayer(
-                    (conv_lstm_height, conv_lstm_width, self._params.lstm_units)
-                ),
-                layers.Conv2DTranspose(
-                    8, 4, strides=4, padding="same", activation="relu"
-                ),
-                layers.Conv2DTranspose(
-                    1, 1, strides=1, padding="same", activation="relu"
-                ),
-            ]
+        self.decoder_up1 = layers.UpSampling2D(size=2, interpolation="bilinear")
+        self.decoder_conv1 = layers.Conv2D(16, 3, padding="same", use_bias=False)
+        self.decoder_bn1 = layers.BatchNormalization()
+        self.decoder_act1 = layers.Activation("relu")
+        self.decoder_skip_conv = layers.Conv2D(
+            16, 3, padding="same", use_bias=False
         )
+        self.decoder_skip_bn = layers.BatchNormalization()
+        self.decoder_skip_act = layers.Activation("relu")
+        self.decoder_up2 = layers.UpSampling2D(size=2, interpolation="bilinear")
+        self.decoder_conv2 = layers.Conv2D(8, 3, padding="same", use_bias=False)
+        self.decoder_bn2 = layers.BatchNormalization()
+        self.decoder_act2 = layers.Activation("relu")
+        self.decoder_out = layers.Conv2D(1, 1, padding="same", activation="relu")
 
     def call(self, input: FloodModel.Input) -> tf.Tensor:
         """Makes a single forward pass on a batch of data.
@@ -447,7 +472,9 @@ class FloodConvLSTM(keras.Model):
 
         # Spatiotemporal CNN
         # [B, n, H, W, 1] -> [B, n, H', W', k1]
-        st_cnn_output = self.st_cnn(spatiotemporal)
+        st_cnn_stage1_output = self.st_cnn_stage1(spatiotemporal)
+        st_cnn_output = self.st_cnn_stage2(st_cnn_stage1_output)
+        st_cnn_skip = st_cnn_stage1_output[:, -1]
 
         # Geospatial CNN
         # [B, H, W, f ]-> [B, H', W', k2]
@@ -467,7 +494,19 @@ class FloodConvLSTM(keras.Model):
         lstm_input = self.pre_attention(lstm_input)
         lstm_output = self.conv_lstm(lstm_input)
         lstm_output = self.attention(lstm_output)
-        output = self.output_cnn(lstm_output)
+        x = self.decoder_up1(lstm_output)
+        x = self.decoder_conv1(x)
+        x = self.decoder_bn1(x)
+        x = self.decoder_act1(x)
+        x = tf.concat([x, st_cnn_skip], axis=-1)
+        x = self.decoder_skip_conv(x)
+        x = self.decoder_skip_bn(x)
+        x = self.decoder_skip_act(x)
+        x = self.decoder_up2(x)
+        x = self.decoder_conv2(x)
+        x = self.decoder_bn2(x)
+        x = self.decoder_act2(x)
+        output = self.decoder_out(x)
 
         return output
 

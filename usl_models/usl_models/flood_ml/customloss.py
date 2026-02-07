@@ -47,7 +47,22 @@ def log_cosh_loss(y_true, y_pred):
 # return loss_fn
 @register_keras_serializable(package="Custom", name="make_hybrid_loss")
 def make_hybrid_loss(y_true, y_pred):
-    logcosh = log_cosh_loss(y_true, y_pred)
-    # mse = tf.keras.losses.MeanSquaredError()(y_true, y_pred)
-    # small_weighted = weighted_mse_small_targets(y_true, y_pred)
-    return logcosh
+    mask = tf.math.logical_not(tf.math.is_nan(y_true))
+    y_true = tf.where(mask, y_true, tf.zeros_like(y_true))
+    y_pred = tf.where(mask, y_pred, tf.zeros_like(y_pred))
+
+    flood_mask = y_true > 0
+    has_activity = tf.reduce_any(flood_mask, axis=[1, 2, 3], keepdims=True)
+    activity_mask = tf.where(has_activity, flood_mask, mask)
+    activity_mask = tf.cast(activity_mask, tf.float32)
+
+    squared_error = tf.square(y_true - y_pred)
+    weighted_mse = tf.reduce_sum(squared_error * activity_mask) / (
+        tf.reduce_sum(activity_mask) + 1e-6
+    )
+
+    true_peak = tf.reduce_max(y_true, axis=[1, 2, 3])
+    pred_peak = tf.reduce_max(y_pred, axis=[1, 2, 3])
+    peak_depth_loss = tf.reduce_mean(tf.square(true_peak - pred_peak))
+
+    return weighted_mse + 0.5 * peak_depth_loss

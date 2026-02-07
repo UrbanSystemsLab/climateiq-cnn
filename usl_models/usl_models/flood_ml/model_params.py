@@ -30,7 +30,7 @@ def default_params() -> FloodModelParams:
         "m_rainfall": constants.M_RAINFALL,
         "n_flood_maps": constants.N_FLOOD_MAPS,
         "lstm_units": 128,
-        "lstm_kernel_size": 3,
+        "lstm_kernel_size": 5,
         "lstm_dropout": 0.2,
         "lstm_recurrent_dropout": 0.2,
         "optimizer_config": {
