@@ -75,8 +75,4 @@ def make_hybrid_loss(y_true, y_pred):
     pred_peak = tf.reduce_max(y_pred, axis=[1, 2, 3])
     peak_depth_loss = tf.reduce_mean(tf.square(true_peak - pred_peak))
 
-    true_edges = tf.image.sobel_edges(y_true)
-    pred_edges = tf.image.sobel_edges(y_pred)
-    gradient_loss = tf.reduce_mean(tf.abs(true_edges - pred_edges))
-
-    return weighted_mse + 0.5 * peak_depth_loss + 0.1 * gradient_loss
+    return weighted_mse + 0.2 * peak_depth_loss
