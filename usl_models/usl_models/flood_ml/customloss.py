@@ -47,6 +47,11 @@ def log_cosh_loss(y_true, y_pred):
 # return loss_fn
 @register_keras_serializable(package="Custom", name="make_hybrid_loss")
 def make_hybrid_loss(y_true, y_pred):
+    if tf.rank(y_true) == 3:
+        y_true = y_true[..., tf.newaxis]
+    if tf.rank(y_pred) == 3:
+        y_pred = y_pred[..., tf.newaxis]
+
     mask = tf.math.logical_not(tf.math.is_nan(y_true))
     y_true = tf.where(mask, y_true, tf.zeros_like(y_true))
     y_pred = tf.where(mask, y_pred, tf.zeros_like(y_pred))
