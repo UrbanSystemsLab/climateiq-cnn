@@ -389,10 +389,6 @@ class FloodConvLSTM(keras.Model):
 
         self.conv_lstm = keras.Sequential(
             [
-                # Input shape: (time_steps, height, width, channels)
-                layers.InputLayer(
-                    (None, conv_lstm_height, conv_lstm_width, conv_lstm_channels)
-                ),
                 layers.ConvLSTM2D(
                     self._params.lstm_units,
                     self._params.lstm_kernel_size,
