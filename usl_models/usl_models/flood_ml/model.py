@@ -367,10 +367,6 @@ class FloodConvLSTM(keras.Model):
         # === Geospatial CNN ===
         self.geo_cnn = keras.Sequential(
             [
-                # Input shape: (height, width, channels)
-                layers.InputLayer(
-                    (self._spatial_height, self._spatial_width, constants.GEO_FEATURES)
-                ),
                 pad_layers.Pad2D(cnn_pad, mode="REFLECT"),
                 layers.Conv2D(16, 5, strides=2, padding="valid", activation=activation),
                 layers.MaxPool2D(pool_size=2, strides=1, padding="same"),
