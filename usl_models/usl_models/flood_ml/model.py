@@ -446,7 +446,7 @@ class FloodConvLSTM(keras.Model):
         self.decoder_conv2 = layers.Conv2D(8, 3, padding="same", use_bias=False)
         self.decoder_bn2 = layers.BatchNormalization()
         self.decoder_act2 = layers.Activation("relu")
-        self.decoder_out = layers.Conv2D(1, 1, padding="same", activation="relu")
+        self.decoder_out = layers.Conv2D(1, 1, padding="same")
 
     def call(self, input: FloodModel.Input) -> tf.Tensor:
         """Makes a single forward pass on a batch of data.

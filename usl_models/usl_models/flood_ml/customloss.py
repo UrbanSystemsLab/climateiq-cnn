@@ -55,7 +55,7 @@ def make_hybrid_loss(y_true, y_pred):
     has_activity = tf.reduce_any(flood_mask, axis=[1, 2, 3], keepdims=True)
     valid_mask = tf.cast(mask, tf.float32)
 
-    flood_weight = 5.0
+    flood_weight = 2.0
     background_weight = 1.0
     weights = tf.where(flood_mask, flood_weight, background_weight)
     weights = tf.where(has_activity, weights, tf.ones_like(weights))
@@ -70,4 +70,8 @@ def make_hybrid_loss(y_true, y_pred):
     pred_peak = tf.reduce_max(y_pred, axis=[1, 2, 3])
     peak_depth_loss = tf.reduce_mean(tf.square(true_peak - pred_peak))
 
-    return weighted_mse + 0.5 * peak_depth_loss
+    true_edges = tf.image.sobel_edges(y_true)
+    pred_edges = tf.image.sobel_edges(y_pred)
+    gradient_loss = tf.reduce_mean(tf.abs(true_edges - pred_edges))
+
+    return weighted_mse + 0.5 * peak_depth_loss + 0.1 * gradient_loss
