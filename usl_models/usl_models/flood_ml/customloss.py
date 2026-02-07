@@ -71,8 +71,14 @@ def make_hybrid_loss(y_true, y_pred):
         tf.reduce_sum(weights) + 1e-6
     )
 
+    nonflood_mask = tf.logical_not(flood_mask)
+    false_positive = tf.nn.relu(y_pred - y_true)
+    false_positive_loss = tf.reduce_sum(
+        tf.square(false_positive) * tf.cast(nonflood_mask, tf.float32)
+    ) / (tf.reduce_sum(tf.cast(nonflood_mask, tf.float32)) + 1e-6)
+
     true_peak = tf.reduce_max(y_true, axis=[1, 2, 3])
     pred_peak = tf.reduce_max(y_pred, axis=[1, 2, 3])
     peak_depth_loss = tf.reduce_mean(tf.square(true_peak - pred_peak))
 
-    return weighted_mse + 0.2 * peak_depth_loss
+    return weighted_mse + 0.2 * peak_depth_loss + 0.3 * false_positive_loss
