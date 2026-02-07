@@ -336,8 +336,6 @@ class FloodConvLSTM(keras.Model):
         # === Spatiotemporal CNN ===
         self.st_cnn_stage1 = keras.Sequential(
             [
-                # Input shape: (time_steps, height, width, channels)
-                layers.InputLayer((None, self._spatial_height, self._spatial_width, 1)),
                 layers.TimeDistributed(pad_layers.Pad2D(cnn_pad, mode="REFLECT")),
                 layers.TimeDistributed(
                     layers.Conv2D(
@@ -353,14 +351,6 @@ class FloodConvLSTM(keras.Model):
 
         self.st_cnn_stage2 = keras.Sequential(
             [
-                layers.InputLayer(
-                    (
-                        None,
-                        self._spatial_height // 2,
-                        self._spatial_width // 2,
-                        8,
-                    )
-                ),
                 layers.TimeDistributed(pad_layers.Pad2D(cnn_pad, mode="REFLECT")),
                 layers.TimeDistributed(
                     layers.Conv2D(
