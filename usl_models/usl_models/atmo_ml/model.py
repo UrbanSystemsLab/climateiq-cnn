@@ -1,12 +1,30 @@
 """AtmoML model definition."""
+import tensorflow as tf
 
+# Enable memory growth for all GPUs
+for gpu in tf.config.list_physical_devices('GPU'):
+    tf.config.experimental.set_memory_growth(gpu, True)
+    
 import logging
 import dataclasses
-from typing import TypedDict, TypeAlias, List, Callable, Literal, Tuple, Iterable
+from typing import TypedDict, TypeAlias, List, Callable, Literal, Tuple, Iterable, Any, TYPE_CHECKING
 
 import keras
 from keras import layers
-import keras_tuner
+try:
+    import keras_tuner
+    HAS_KERAS_TUNER = True
+except ImportError:
+    HAS_KERAS_TUNER = False
+    keras_tuner = None
+
+if TYPE_CHECKING:
+    # Only import for type checking, not at runtime
+    try:
+        from keras_tuner import HyperModel
+    except ImportError:
+        HyperModel = Any
+
 import tensorflow as tf
 import numpy as np
 
@@ -17,7 +35,6 @@ from usl_models.atmo_ml import vars
 
 from usl_models.shared import keras_dataclasses
 from usl_models.shared import pad_layers
-
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
 
@@ -50,12 +67,18 @@ class AtmoModel:
         lstm_kernel_size: int = 5
         lstm_dropout: float = 0.2
         lstm_recurrent_dropout: float = 0.2
+        uncertainty_reg: float = 0.5  # Regularization strength (0 to disable)
 
         # New activation parameters for each block.
         spatial_activation: Activation = "relu"
         st_activation: Activation = "relu"
         lstm_activation: Activation = "tanh"
         output_activation: Activation = "relu"
+        # Loss weighting parameters.
+        task_loss_weights: Tuple[float, ...] = (1.0, 1.0, 1.5)
+        adaptive_weighting: bool = True
+        learning_rate: float = 1e-3
+        clipnorm: float | None = None
 
         # The optimizer configuration.
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
@@ -165,17 +188,36 @@ class AtmoModel:
         Returns:
             The loaded AtmoModel.
         """
-        loaded_model = keras.models.load_model(artifact_uri)
+        # First, try to load to get the config
+        try:
+            # Always load with compile=False to avoid custom loss issues
+            loaded_model = keras.models.load_model(artifact_uri, compile=False)
+        except:
+            # If that fails, try with custom_objects
+            # Note: We can't access balanced_loss here since it's defined inside _build_model
+            # So we provide a dummy function just for loading
+            custom_objects = {"balanced_loss": lambda y_true, y_pred: y_pred}
+            loaded_model = keras.models.load_model(
+                artifact_uri, compile=False, custom_objects=custom_objects
+            )
+
         params = AtmoModel.Params.from_config(loaded_model.get_config())
         model = cls(params=params, **kwargs)
         assert loaded_model is not None, f"Failed to load model from: {artifact_uri}"
+
+        # Load weights - this should work if architectures match
         model._model.set_weights(loaded_model.get_weights())
+
         return model
 
     @classmethod
-    def get_hypermodel(cls, **kwargs) -> keras_tuner.HyperModel:
+    def get_hypermodel(cls, **kwargs) -> "HyperModel":
         """Returns a hypermodel with the given param overrides."""
-
+        if not HAS_KERAS_TUNER:
+            raise ImportError(
+                "keras_tuner is required for hyperparameter tuning. "
+                "Try: conda install -c conda-forge libstdcxx-ng"
+            )
         def hypermodel(hp: keras_tuner.HyperParameters):
             hp_kwargs = {k: hp.Choice(k, v) for k, v in kwargs.items()}
             return cls(cls.Params(**hp_kwargs))._model
@@ -183,7 +225,9 @@ class AtmoModel:
         return hypermodel
 
     def _build_model(self) -> keras.Model:
-        """Creates the correct internal (Keras) model architecture."""
+        """Creates model with working uncertainty weighting."""
+        
+        # Standard metrics
         eval_metrics = [
             keras.metrics.MeanAbsoluteError(),
             keras.metrics.RootMeanSquaredError(),
@@ -194,14 +238,54 @@ class AtmoModel:
         ]
         for sto_var in self._params.sto_vars:
             eval_metrics.append(metrics.OutputVarMeanSquaredError(sto_var))
-
+        
+        # Build model
         model = AtmoConvLSTM(self._params)
+        
+        # CRITICAL: Create log_vars as tf.Variable, not model weight
+        num_tasks = len(self._params.sto_vars)
+        
+        if self._params.adaptive_weighting:
+            log_vars = tf.Variable(
+                initial_value=[0.0, 0.0, 0.5],  # Initialize wind higher
+                trainable=True,
+                dtype=tf.float32,
+                name='log_vars'
+            )
+        else:
+            log_vars = tf.Variable(
+                initial_value=[0.0, 0.0, 0.0],
+                trainable=False,
+                dtype=tf.float32,
+                name='log_vars'
+            )
+        
+        # Store for later access
+        model.log_vars = log_vars
+        
+        # Import loss function
+        from usl_models.atmo_ml.losses import create_balanced_loss
+        
+        # Create loss
+        loss_fn = create_balanced_loss(
+            num_tasks=num_tasks,
+            task_weights=self._params.task_loss_weights,
+            log_vars=log_vars,
+        )
+        
+        # Compile
         model.compile(
             optimizer=self._params.optimizer,
-            loss=keras.losses.MeanSquaredError(),
-            metrics=eval_metrics,
+            loss=loss_fn,
+            metrics=eval_metrics
         )
+        
         model.build(self.get_input_shape_batched(self._params))
+        
+        # Add log_vars to trainable variables if adaptive
+        if self._params.adaptive_weighting:
+            model.trainable_variables.append(log_vars)
+        
         return model
 
     def summary(self, expand_nested: bool = False):
@@ -397,6 +481,12 @@ class AtmoConvLSTM(keras.Model):
             name="spatiotemporal_cnn",
         )
 
+        if self._params.lstm_activation == "tanh":
+            kernel_init = "glorot_uniform"  # better for tanh
+        elif self._params.lstm_activation == "relu":
+            kernel_init = "he_normal"  # better for relu
+        else:
+            kernel_init = "glorot_uniform"  # default
         # ConvLSTM
         # The spatial dimensions have been reduced (C1_S x C2_S) by the CNNs.
         # The "channel" dimension is double the sum of the channels from the CNNs,
@@ -422,6 +512,8 @@ class AtmoConvLSTM(keras.Model):
                     activation=self._params.lstm_activation,
                     dropout=self._params.lstm_dropout,
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
+                    recurrent_initializer="orthogonal",
+                    kernel_initializer=kernel_init,
                 ),
             ],
             name="conv_lstm",
@@ -460,7 +552,12 @@ class AtmoConvLSTM(keras.Model):
                                     OUTPUT_K_SIZE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(1, OUTPUT_K_SIZE, **output_cnn_params),
+                                layers.Conv2D(
+                                    1,
+                                    OUTPUT_K_SIZE,
+                                    activation="linear",
+                                    padding=output_cnn_params["padding"],
+                                ),
                             ]
                         )
                     ),
@@ -496,7 +593,12 @@ class AtmoConvLSTM(keras.Model):
                                     OUTPUT_K_SIZE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(1, OUTPUT_K_SIZE, **output_cnn_params),
+                                layers.Conv2D(
+                                    1,
+                                    OUTPUT_K_SIZE,
+                                    activation="linear",
+                                    padding=output_cnn_params["padding"],
+                                ),
                             ]
                         )
                     ),
@@ -532,7 +634,12 @@ class AtmoConvLSTM(keras.Model):
                                     OUTPUT_K_SIZE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(1, OUTPUT_K_SIZE, **output_cnn_params),
+                                layers.Conv2D(
+                                    1,
+                                    OUTPUT_K_SIZE,
+                                    activation="sigmoid",
+                                    padding=output_cnn_params["padding"],
+                                ),
                             ]
                         )
                     ),
@@ -574,7 +681,12 @@ class AtmoConvLSTM(keras.Model):
                                     OUTPUT_K_SIZE,
                                     **output_cnn_params,
                                 ),
-                                layers.Conv2D(2, OUTPUT_K_SIZE, **output_cnn_params),
+                                layers.Conv2D(
+                                    2,
+                                    OUTPUT_K_SIZE,
+                                    activation="linear",
+                                    padding=output_cnn_params["padding"],
+                                ),
                             ]
                         )
                     ),
@@ -626,19 +738,36 @@ class AtmoConvLSTM(keras.Model):
         lstm_output = self.conv_lstm(lstm_input)
 
         # Split up paired tensors into individual time steps.
+        # Split up paired tensors into individual time steps.
         trconv_input = data_utils.split_time_step_pairs(lstm_output)[:, -T_O:]
 
-        outputs = []
-        if self._t2_output_cnn is not None:
-            outputs.append(self._t2_output_cnn(trconv_input))
-        if self._rh2_output_cnn is not None:
-            outputs.append(self._rh2_output_cnn(trconv_input))
-        if self._wspd10_output_cnn is not None:
-            outputs.append(self._wspd10_output_cnn(trconv_input))
-        if self._wdir10_output_cnn is not None:
-            outputs.append(self._wdir10_output_cnn(trconv_input))
+        # ---- collect heads by variable ----
+        outputs_by_var = {}
 
-        output = tf.concat(outputs, axis=-1)
+        if self._t2_output_cnn is not None:
+            outputs_by_var[vars.SpatiotemporalOutput.T2] = self._t2_output_cnn(
+                trconv_input
+            )
+        if self._rh2_output_cnn is not None:
+            outputs_by_var[vars.SpatiotemporalOutput.RH2] = self._rh2_output_cnn(
+                trconv_input
+            )
+        if self._wspd10_output_cnn is not None:
+            outputs_by_var[vars.SpatiotemporalOutput.WSPD_WDIR10] = (
+                self._wspd10_output_cnn(trconv_input)
+            )
+        if self._wdir10_output_cnn is not None:
+            wdir = self._wdir10_output_cnn(trconv_input)
+            outputs_by_var[vars.SpatiotemporalOutput.WSPD_WDIR10_COS] = wdir[..., :1]
+            outputs_by_var[vars.SpatiotemporalOutput.WSPD_WDIR10_SIN] = wdir[..., 1:]
+
+        # ---- concatenate strictly in params.sto_vars order ----
+        ordered = []
+        for v in self._params.sto_vars:
+            if v in outputs_by_var:
+                ordered.append(outputs_by_var[v])
+
+        output = tf.concat(ordered, axis=-1)
         tf.ensure_shape(output, (B, T_O, H, W, None))
         return output
 
