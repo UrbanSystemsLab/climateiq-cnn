@@ -123,6 +123,7 @@ class FloodModel:
     ):
         """Initialize the FloodModel instance."""
         self._params = params or self.Params()
+        self._p_gt = 0.0   # default: fully free-running
         self._spatial_dims = spatial_dims or (constants.MAP_HEIGHT, constants.MAP_WIDTH)
         self._model = self._build_model()
 
@@ -346,7 +347,7 @@ class FloodConvLSTM(keras.Model):
         self.st_cnn = keras.Sequential(
             [
                 # Input shape: (time_steps, height, width, channels)
-                layers.InputLayer((None, self._spatial_height, self._spatial_width, 1)),
+                layers.InputLayer((None, None, None, 1)),
                 layers.TimeDistributed(pad_layers.Pad2D(cnn_pad, mode="REFLECT")),
                 layers.TimeDistributed(
                     layers.Conv2D(
@@ -374,7 +375,7 @@ class FloodConvLSTM(keras.Model):
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
-                    (self._spatial_height, self._spatial_width, constants.GEO_FEATURES)
+                    (None, None, constants.GEO_FEATURES)
                 ),
                 pad_layers.Pad2D(cnn_pad, mode="REFLECT"),
                 layers.Conv2D(16, 5, strides=2, padding="valid", activation=activation),
@@ -400,7 +401,7 @@ class FloodConvLSTM(keras.Model):
             [
                 # Input shape: (time_steps, height, width, channels)
                 layers.InputLayer(
-                    (None, conv_lstm_height, conv_lstm_width, conv_lstm_channels)
+                    (None, None, None, conv_lstm_channels)
                 ),
                 layers.ConvLSTM2D(
                     self._params.lstm_units,
@@ -421,7 +422,7 @@ class FloodConvLSTM(keras.Model):
             [
                 # Input shape: (height, width, channels)
                 layers.InputLayer(
-                    (conv_lstm_height, conv_lstm_width, self._params.lstm_units)
+                    (None, None, self._params.lstm_units)
                 ),
                 layers.Conv2DTranspose(
                     8, 4, strides=4, padding="same", activation="relu"
@@ -537,19 +538,29 @@ class FloodConvLSTM(keras.Model):
                     },
                     training=True,
                 )
+                pred = tf.clip_by_value(pred, 0.0, 1.0)
 
                 yk = y_steps[:, k]
-                loss = self.compiled_loss(
-                    yk, pred, regularization_losses=self.losses
-                )
 
-                total_loss += loss
-                gt_fb = y_steps[:, k]   # Ground truth at this step (B,H,W,1)
+                # ---- FIX 1: no regularization inside the loop ----
+                weight = 1.0 + 5.0 * yk
+                step_loss = tf.reduce_mean(weight * tf.square(yk - pred))
+
+                # ---- NEW: mass / intensity preservation loss ----
+                pred_mass = tf.reduce_mean(pred, axis=[1, 2, 3])
+                gt_mass   = tf.reduce_mean(yk,   axis=[1, 2, 3])
+                mass_loss = tf.reduce_mean(tf.square(pred_mass - gt_mass))
+
+                # ---- NEW: time-step weighting (later steps matter more) ----
+                time_weight = 1.0 + 0.3 * tf.cast(k, tf.float32)
+
+                total_loss += time_weight * (step_loss + 1.0 * mass_loss)
+
+                fb = tf.stop_gradient(pred)
 
                 spatiotemporal = tf.concat(
-                    [spatiotemporal, tf.expand_dims(gt_fb, axis=1)], axis=1
+                    [spatiotemporal, tf.expand_dims(fb, axis=1)], axis=1
                 )[:, 1:]
-
 
                 return k + 1, spatiotemporal, total_loss, pred
 
@@ -561,15 +572,21 @@ class FloodConvLSTM(keras.Model):
 
             total_loss = total_loss / tf.cast(K, tf.float32)
 
+            # ---- FIX 2: add regularization ONCE ----
+            if self.losses:
+                total_loss += tf.add_n(self.losses)
+
         grads = tape.gradient(total_loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
-        # metrics on first-step prediction
-        self.compiled_metrics.update_state(y_steps[:, 0], last_pred)
+        # metrics on last-step prediction (matches implementation)
+        self.compiled_metrics.update_state(y_steps[:, -1], last_pred)
 
         logs = {m.name: m.result() for m in self.metrics}
         logs["loss"] = total_loss
         return logs
+
+
     def test_step(self, data):
         x, y = data
 
@@ -615,13 +632,22 @@ class FloodConvLSTM(keras.Model):
                 },
                 training=False,
             )
+            pred = tf.clip_by_value(pred, 0.0, 1.0)
 
             yk = y_steps[:, k]
-            loss = self.compiled_loss(
-                yk, pred, regularization_losses=self.losses
-            )
 
-            total_loss += loss
+            # ---- FIX 1: no regularization inside the loop ----
+            weight = 1.0 + 5.0 * yk
+            step_loss = tf.reduce_mean(weight * tf.square(yk - pred))
+
+            # ---- NEW: mass / intensity preservation loss ----
+            pred_mass = tf.reduce_mean(pred, axis=[1, 2, 3])
+            gt_mass   = tf.reduce_mean(yk,   axis=[1, 2, 3])
+            mass_loss = tf.reduce_mean(tf.square(pred_mass - gt_mass))
+
+            time_weight = 1.0 + 0.3 * tf.cast(k, tf.float32)
+
+            total_loss += time_weight * (step_loss + 1.0 * mass_loss)
 
             spatiotemporal = tf.concat(
                 [spatiotemporal, tf.expand_dims(pred, axis=1)], axis=1
@@ -637,8 +663,12 @@ class FloodConvLSTM(keras.Model):
 
         total_loss = total_loss / tf.cast(K, tf.float32)
 
-        # metrics on first step (or change if you want)
-        self.compiled_metrics.update_state(y_steps[:, 0], last_pred)
+        # ---- FIX 2: add regularization ONCE ----
+        if self.losses:
+            total_loss += tf.add_n(self.losses)
+
+        # metrics on last-step prediction (matches implementation)
+        self.compiled_metrics.update_state(y_steps[:, -1], last_pred)
 
         logs = {m.name: m.result() for m in self.metrics}
         logs["loss"] = total_loss
@@ -662,22 +692,17 @@ class FloodConvLSTM(keras.Model):
         temporal = full_input["temporal"]
 
         B = spatiotemporal.shape[0]
-        C = 1  # Channel dimension for spatiotemporal tensor
+        C = 1
         F = constants.GEO_FEATURES
         N, M = self._params.n_flood_maps, self._params.m_rainfall
         T_MAX = constants.MAX_RAINFALL_DURATION
-        H, W = self._spatial_height, self._spatial_width
 
-        tf.ensure_shape(spatiotemporal, (B, N, H, W, C))
-        tf.ensure_shape(geospatial, (B, H, W, F))
-        tf.ensure_shape(temporal, (B, T_MAX, M))
+        tf.ensure_shape(spatiotemporal, (None, N, None, None, C))
+        tf.ensure_shape(geospatial, (None, None, None, F))
+        tf.ensure_shape(temporal, (None, T_MAX, M))
 
-        # This array stores the n predictions.
         predictions = tf.TensorArray(tf.float32, size=n)
 
-        # We use 1-indexing for simplicity. Time step t represents the t-th flood
-        # prediction.
-        # TODO: consider using tf.while_loop to support serializing this function.
         for t in range(1, n + 1):
             input = FloodModel.Input(
                 geospatial=geospatial,
@@ -685,16 +710,15 @@ class FloodConvLSTM(keras.Model):
                 spatiotemporal=spatiotemporal,
             )
             prediction = self.call(input)
+            prediction = tf.clip_by_value(prediction, 0.0, 1.0)
+
             predictions = predictions.write(t - 1, prediction)
 
-            # Append new predictions along time axis, drop the first.
             spatiotemporal = tf.concat(
                 [spatiotemporal, tf.expand_dims(prediction, axis=1)], axis=1
             )[:, 1:]
 
-        # Gather dense tensor out of TensorArray along the time axis.
         predictions = tf.stack(tf.unstack(predictions.stack()), axis=1)
-        # Drop channels dimension.
         return tf.squeeze(predictions, axis=-1)
 
     @staticmethod

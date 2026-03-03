@@ -53,13 +53,63 @@ def make_hybrid_loss(y_true, y_pred):
     return logcosh
 
 
+# @register_keras_serializable(package="Custom", name="flood_weighted_mse")
+# def flood_weighted_mse(
+#     y_true, y_pred,
+#     flood_thresh=0.05,
+#     flood_weight=10.0,   # reduce from 30
+#     alpha=5.0            # reduce from 10
+# ):
+#     err2 = tf.square(y_pred - y_true)
+
+#     w = 1.0 + flood_weight * tf.sigmoid(alpha * (y_true - flood_thresh))
+
+#     return tf.reduce_sum(w * err2) / tf.reduce_sum(w)
+
+
+
+# @register_keras_serializable(package="Custom", name="flood_weighted_mse")
+# def flood_weighted_mse(
+#     y_true, y_pred,
+#     flood_thresh=0.05,
+#     flood_weight=30.0,
+#     alpha=10.0,
+#     delta=0.5,
+# ):
+#     err = y_pred - y_true
+#     abs_err = tf.abs(err)
+
+#     huber = tf.where(
+#         abs_err < delta,
+#         0.5 * tf.square(err),
+#         delta * (abs_err - 0.5 * delta),
+#     )
+
+#     w = 1.0 + flood_weight * tf.sigmoid(alpha * (y_true - flood_thresh))
+#     return tf.reduce_mean(w * huber)
+
+
 @register_keras_serializable(package="Custom", name="flood_weighted_mse")
 def flood_weighted_mse(
-    y_true, y_pred, flood_thresh=0.05, flood_weight=30.0, alpha=10.0  # start moderate
+    y_true, y_pred,
+    flood_thresh=0.05,
+    flood_weight=30.0,
+    alpha=10.0,
+    delta=0.5,
 ):
-    err2 = tf.square(y_pred - y_true)
+    err = y_pred - y_true
+    abs_err = tf.abs(err)
 
-    # smooth weight in [1, 1+flood_weight]
+    huber = tf.where(
+        abs_err < delta,
+        0.5 * tf.square(err),
+        delta * (abs_err - 0.5 * delta),
+    )
+
     w = 1.0 + flood_weight * tf.sigmoid(alpha * (y_true - flood_thresh))
 
-    return tf.reduce_mean(w * err2)
+    # penalize underprediction slightly
+    under_pred = tf.nn.relu(y_true - y_pred)
+    under_penalty = 0.3 * w * tf.square(under_pred)
+
+    return tf.reduce_mean(w * huber + under_penalty)
