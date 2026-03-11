@@ -776,6 +776,7 @@ def load_dataset_windowed_cached(
     max_chunks: int | None = None,
     include_labels: bool = True,
     shuffle: bool = True,
+    num_splits: int = 1,
 ) -> tf.data.Dataset:
     """Memory-efficient streaming dataset loader.
 
@@ -785,6 +786,9 @@ def load_dataset_windowed_cached(
     Shuffle happens at the (sim_name, chunk) key level before data loading.
     include_labels respected for training / prediction use cases.
     """
+
+    tile_h = constants.MAP_HEIGHT // num_splits
+    tile_w = constants.MAP_WIDTH // num_splits
 
     def sample_generator():
         # Step 1. Gather all chunk keys (sim_dir, stem)
@@ -850,17 +854,41 @@ def load_dataset_windowed_cached(
                     tf.convert_to_tensor(label_arr, dtype=tf.float32),
                     perm=[2, 0, 1],
                 )
+
+                if num_splits > 1:
+                    best_score = -1.0
+                    best_y0, best_x0 = 0, 0
+
+                    for i in range(num_splits):
+                        for j in range(num_splits):
+                            y0 = i * tile_h
+                            x0 = j * tile_w
+                            tile = labels[:, y0:y0 + tile_h, x0:x0 + tile_w]
+                            score = tf.reduce_sum(tile)
+
+                            if score > best_score:
+                                best_score = score
+                                best_y0, best_x0 = y0, x0
+
+                    geospatial = geospatial[
+                        best_y0:best_y0 + tile_h,
+                        best_x0:best_x0 + tile_w,
+                        :
+                    ]
+                    labels = labels[
+                        :,
+                        best_y0:best_y0 + tile_h,
+                        best_x0:best_x0 + tile_w
+                    ]
+
             else:
-                labels = tf.zeros(
-                    (constants.MAP_HEIGHT, constants.MAP_WIDTH),
-                    dtype=tf.float32,
-                )
+                labels = tf.zeros((tile_h, tile_w), dtype=tf.float32)
 
             model_input = model.FloodModel.Input(
                 temporal=temporal_tensor,
                 geospatial=geospatial,
                 spatiotemporal=tf.zeros(
-                    shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
+                    shape=(n_flood_maps, tile_h, tile_w, 1),
                     dtype=tf.float32,
                 ),
             )
@@ -875,17 +903,20 @@ def load_dataset_windowed_cached(
         generator=sample_generator,
         output_signature=(
             dict(
-                geospatial=_geospatial_dataset_signature(),
+                geospatial=tf.TensorSpec(
+                    shape=(tile_h, tile_w, constants.GEO_FEATURES),
+                    dtype=tf.float32,
+                ),
                 temporal=tf.TensorSpec(
                     shape=(n_flood_maps, m_rainfall), dtype=tf.float32
                 ),
                 spatiotemporal=tf.TensorSpec(
-                    shape=(n_flood_maps, constants.MAP_HEIGHT, constants.MAP_WIDTH, 1),
+                    shape=(n_flood_maps, tile_h, tile_w, 1),
                     dtype=tf.float32,
                 ),
             ),
             tf.TensorSpec(
-                shape=(constants.MAP_HEIGHT, constants.MAP_WIDTH),
+                shape=(tile_h, tile_w),
                 dtype=tf.float32,
             ),
         ),
