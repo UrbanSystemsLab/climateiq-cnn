@@ -6,6 +6,7 @@ from google.cloud import storage  # type:ignore[attr-defined]
 import numpy
 
 from usl_models.flood_ml import dataset
+from usl_models.flood_ml.dataset import compute_dem_sink_channel
 
 
 @mock.patch.object(dataset, "metastore")
@@ -84,8 +85,10 @@ def test_load_dataset_full(mock_metastore) -> None:
 
     # geospatial will have the same spatial features..
     numpy.testing.assert_array_almost_equal(
-        element["geospatial"].numpy(), numpy.array([mock_spatial_features] * batch_size)
+        element["geospatial"].numpy()[:, :, :, :9],
+        numpy.array([mock_spatial_features] * batch_size)
     )
+    assert element["geospatial"].shape[-1] == 10, "Expected 10 geo channels (9 raw + DEM sink)"
 
     # spatiotemporal will have the labels creeping into a sequence of zeros.
     numpy.testing.assert_array_almost_equal(
@@ -199,8 +202,10 @@ def test_load_dataset_windowed(mock_metastore) -> None:
 
     # geospatial will have the same spatial features stacked batch_size times.
     numpy.testing.assert_array_almost_equal(
-        element["geospatial"].numpy(), numpy.array([mock_spatial_features] * batch_size)
+        element["geospatial"].numpy()[:, :, :, :9],
+        numpy.array([mock_spatial_features] * batch_size)
     )
+    assert element["geospatial"].shape[-1] == 10, "Expected 10 geo channels (9 raw + DEM sink)"
 
     # spatiotemporal will have the labels creeping into a sequence of zeros.
     numpy.testing.assert_array_almost_equal(

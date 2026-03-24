@@ -4,6 +4,7 @@ import logging
 import random
 import pathlib
 import numpy as np
+from scipy.ndimage import uniform_filter
 from typing import Any, Iterator, Tuple
 
 from google.cloud import firestore  # type:ignore[attr-defined]
@@ -18,6 +19,54 @@ from usl_models.shared import downloader
 TEMPORAL_FILENAME = "temporal.npy"
 FEATURE_DIRNAME = "geospatial"
 LABEL_DIRNAME = "labels"
+
+
+def compute_dem_sink_channel(geo_np: np.ndarray) -> np.ndarray:
+    """Compute DEM sink depth as a 10th geospatial channel (on-the-fly, no pipeline change).
+
+    Identifies pixels locally lower than their neighbourhood (DEM depressions)
+    weighted by surrounding imperviousness — where water physically accumulates.
+    This gives the model an explicit routing signal that raw elevation (ch0) only
+    encodes implicitly, particularly important for flat cities (Phoenix PV).
+
+    Channel layout (feature_raster_transformers.py):
+        ch0 = elevation (normalised 0-1)   ch1 = valid mask   ch4 = K_s (0=impervious)
+
+    Returns: (H, W, 1) float32, normalised [0, 1].  Append to geo_np to get (H, W, 10).
+    """
+    elev   = geo_np[:, :, 0].astype(np.float64)
+    valid  = geo_np[:, :, 1].astype(np.float64)
+    imperv = ((geo_np[:, :, 4] == 0) & (valid > 0)).astype(np.float64)
+
+    neigh = 80  # ~160 m neighbourhood at 2 m/px resolution
+    local_mean = uniform_filter(elev * valid, size=neigh) / np.maximum(
+        uniform_filter(valid, size=neigh), 1e-9
+    )
+    sink = np.maximum(0.0, local_mean - elev) * valid
+    local_imperv = uniform_filter(imperv, size=neigh) / np.maximum(
+        uniform_filter(valid, size=neigh), 1e-9
+    )
+    potential = sink * (0.2 + 0.8 * local_imperv)
+
+    max_pot = float(potential.max())
+    ch = (potential / max_pot).astype(np.float32) if max_pot > 1e-9 else np.zeros(
+        geo_np.shape[:2], dtype=np.float32
+    )
+    return ch[:, :, np.newaxis]  # (H, W, 1)
+
+
+def _load_geo_with_sink(path) -> np.ndarray:
+    """Load geospatial .npy and append DEM sink as channel 9 → (H, W, 10)."""
+    geo = np.load(path).astype(np.float32)
+    return np.concatenate([geo, compute_dem_sink_channel(geo)], axis=-1)
+
+
+def _append_dem_sink(geo_tensor: tf.Tensor) -> tf.Tensor:
+    """Append DEM sink channel to a (H, W, 9) geospatial tf.Tensor → (H, W, 10)."""
+    geo_np = geo_tensor.numpy().astype(np.float32)
+    geo10  = np.concatenate([geo_np, compute_dem_sink_channel(geo_np)], axis=-1)
+    return tf.constant(geo10, dtype=tf.float32)
+
 
 
 def load_dataset(
@@ -358,7 +407,9 @@ def _iter_geo_feature_label_tensors(
         logging.info(
             "Retrieving features from %s and labels from %s", feature_url, label_url
         )
-        feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
+        feature_tensor = _append_dem_sink(
+            downloader.download_as_tensor(storage_client, feature_url)
+        )
         label_tensor = downloader.download_as_tensor(storage_client, label_url)
 
         reshaped_label_tensor = tf.transpose(label_tensor, perm=[2, 0, 1])
@@ -421,7 +472,9 @@ def _iter_study_area_tensors(
         chunk_name = feature_url.split("/")[-1]
 
         logging.info("Retrieving features from %s ", feature_url)
-        feature_tensor = downloader.download_as_tensor(storage_client, feature_url)
+        feature_tensor = _append_dem_sink(
+            downloader.download_as_tensor(storage_client, feature_url)
+        )
         yield feature_tensor, chunk_name
 
 
@@ -608,7 +661,7 @@ def _iter_model_inputs_cached(
             return
 
         geospatial = tf.convert_to_tensor(
-            np.load(feature_files[stem]), dtype=tf.float32
+            _load_geo_with_sink(feature_files[stem]), dtype=tf.float32
         )
         model_input = model.FloodModel.Input(
             temporal=temporal_tensor,
@@ -705,7 +758,7 @@ def load_dataset_cached(
                     if max_chunks is not None and i >= max_chunks:
                         return
 
-                    geospatial = tf.convert_to_tensor(np.load(f), dtype=tf.float32)
+                    geospatial = tf.convert_to_tensor(_load_geo_with_sink(f), dtype=tf.float32)
                     model_input = model.FloodModel.Input(
                         temporal=temporal_tensor,
                         geospatial=geospatial,
@@ -839,7 +892,7 @@ def load_dataset_windowed_cached(
             if not feature_path.exists():
                 continue
 
-            geospatial = tf.convert_to_tensor(np.load(feature_path), dtype=tf.float32)
+            geospatial = tf.convert_to_tensor(_load_geo_with_sink(feature_path), dtype=tf.float32)
 
             if include_labels:
                 label_path = sim_dir / dataset_split / LABEL_DIRNAME / f"{stem}.npy"
@@ -899,6 +952,38 @@ def load_dataset_windowed_cached(
     return dataset
 
 
+def _build_temporal_tensor_v2(temporal_vec: np.ndarray) -> tf.Tensor:
+    """Build 6-channel temporal tensor from raw rainfall vector.
+
+    Channels (all normalised to [0,1] where applicable):
+      0: instantaneous rainfall rate
+      1: cumulative rainfall (normalised by total) — key: tells model how much
+         water has fallen so far, even when rate=0 at peak
+      2: delta rate (rate change between timesteps — storm onset/recession signal)
+      3: log1p(cumulative)      (log-scale memory)
+      4: running maximum rate   (peak intensity seen so far)
+      5: fractional time        (t / T_max)
+
+    BACKTRACK: set temporal_feature_version=1 in load_dataset_windowed_patches
+    to revert to the original identical-channel behaviour.
+    """
+    v = temporal_vec.astype(np.float32)
+    T = len(v)
+    cumsum = np.cumsum(v)
+    total = cumsum[-1] if cumsum[-1] > 0 else 1.0
+    running_max = np.maximum.accumulate(v)
+    delta_rate = np.concatenate([[0.0], np.diff(v)])  # storm phase transitions
+    feat = np.stack([
+        v,                                    # ch0: rate
+        cumsum / total,                       # ch1: normalised cumulative
+        delta_rate,                           # ch2: delta rate (replaces rate^2)
+        np.log1p(cumsum),                     # ch3: log cumulative
+        running_max,                          # ch4: running max
+        np.arange(T, dtype=np.float32) / max(T - 1, 1),  # ch5: frac time
+    ], axis=1)  # (T, 6)
+    return tf.constant(feat, dtype=tf.float32)
+
+
 def load_dataset_windowed_patches(
     filecache_dir: pathlib.Path,
     sim_names: list[str],
@@ -912,8 +997,12 @@ def load_dataset_windowed_patches(
     max_patches_per_chunk: int | None = None,
     min_flood_fraction: float = 0.01,
     min_max_depth: float = 0.1,
+    min_label_max_depth: float = 0.01,
+    n_future_steps: int = 1,
     include_labels: bool = True,
     shuffle: bool = True,
+    dry_timestep_fraction: float = 0.0,
+    temporal_feature_version: int = 1,
 ) -> tf.data.Dataset:
     """Patch-based dataset loader with sliding window and flood filtering.
 
@@ -937,11 +1026,34 @@ def load_dataset_windowed_patches(
         min_flood_fraction: Minimum fraction of pixels that must be flooded
                            (across all timesteps) to include the patch.
         min_max_depth: Minimum max depth (m) in the patch to include it.
+        min_label_max_depth: Minimum max depth (m) in the target label at
+                            a specific timestep. Timesteps where no pixel
+                            exceeds this are skipped (sparsity filtering).
+        n_future_steps: Number of consecutive future timesteps to include as
+                       labels. When > 1, labels have shape (K, H, W) enabling
+                       autoregressive unrolling during training. Default 1
+                       yields single-step labels of shape (H, W).
         include_labels: Whether to load labels (True for training).
         shuffle: Whether to shuffle patches.
+        dry_timestep_fraction: Fraction of dry timesteps (label_max <
+                               min_label_max_depth) to randomly include per
+                               valid patch. 0.0 = skip all dry timesteps.
+                               0.12 = include ~12% of dry timesteps, teaching
+                               the model to predict zero where no flooding
+                               has occurred yet.
+        temporal_feature_version: Controls temporal channel encoding.
+            1 (default, backward-compatible): all M channels = same rainfall
+              scalar (original behaviour).
+            2: 6 distinct channels per timestep giving the model richer
+              temporal signal — [rate, cumulative_norm, rate_sq,
+              log_cumulative, running_max, fractional_time].
+              Directly fixes the "rain=0 at peak" blind-spot.
 
     Returns:
         tf.data.Dataset yielding (inputs, labels) tuples with patch-sized tensors.
+        When n_future_steps=1, labels are (H, W) and temporal is (N, M).
+        When n_future_steps>1, labels are (K, H, W) and temporal is (K, N, M),
+        i.e. one temporal window per future prediction step.
     """
     if stride is None:
         stride = patch_size
@@ -1009,21 +1121,26 @@ def load_dataset_windowed_patches(
                 continue
 
             temporal_vec = np.load(temporal_path)
-            temporal_tensor = tf.transpose(
-                tf.tile(
-                    tf.reshape(
-                        tf.convert_to_tensor(temporal_vec, dtype=tf.float32),
-                        (1, -1),
-                    ),
-                    [m_rainfall, 1],
+            # BACKTRACK: set temporal_feature_version=1 to revert to original.
+            if temporal_feature_version == 2:
+                temporal_tensor = _build_temporal_tensor_v2(temporal_vec)
+            else:
+                # v1 (original): all M channels identical — backward compatible.
+                temporal_tensor = tf.transpose(
+                    tf.tile(
+                        tf.reshape(
+                            tf.convert_to_tensor(temporal_vec, dtype=tf.float32),
+                            (1, -1),
+                        ),
+                        [m_rainfall, 1],
+                    )
                 )
-            )
 
             feature_path = sim_dir / dataset_split / FEATURE_DIRNAME / f"{stem}.npy"
             if not feature_path.exists():
                 continue
 
-            geospatial_full = np.load(feature_path)  # (H, W, C)
+            geospatial_full = _load_geo_with_sink(feature_path)  # (H, W, 10)
 
             if include_labels:
                 label_path = sim_dir / dataset_split / LABEL_DIRNAME / f"{stem}.npy"
@@ -1071,10 +1188,30 @@ def load_dataset_windowed_patches(
 
                 # Generate temporal windows (same as _generate_windows but for patches)
                 num_timesteps = labels_tensor.shape[0] if include_labels else 1
-                for t in range(num_timesteps):
-                    window_temporal = _extract_temporal(
-                        t, n_flood_maps, temporal_tensor
-                    )
+                # Need n_future_steps labels ahead, so last valid t is reduced
+                last_t = num_timesteps - n_future_steps if include_labels else 1
+                for t in range(last_t):
+                    if include_labels:
+                        label_step = labels_tensor[t]  # (H, W) — current timestep
+                        is_dry = float(label_step.numpy().max()) < min_label_max_depth
+                        if is_dry:
+                            if dry_timestep_fraction <= 0.0:
+                                continue
+                            if random.random() >= dry_timestep_fraction:
+                                continue
+
+                    if n_future_steps == 1:
+                        window_temporal = _extract_temporal(
+                            t, n_flood_maps, temporal_tensor
+                        )
+                    else:
+                        temporal_windows = [
+                            _extract_temporal(
+                                t + k, n_flood_maps, temporal_tensor
+                            )
+                            for k in range(n_future_steps)
+                        ]
+                        window_temporal = tf.stack(temporal_windows, axis=0)
                     window_spatiotemporal = _extract_spatiotemporal_patch(
                         t, n_flood_maps, labels_tensor, patch_size
                     )
@@ -1086,7 +1223,10 @@ def load_dataset_windowed_patches(
                     )
 
                     if include_labels:
-                        yield window_input, labels_tensor[t]
+                        if n_future_steps == 1:
+                            yield window_input, labels_tensor[t]
+                        else:
+                            yield window_input, labels_tensor[t : t + n_future_steps]
                     else:
                         empty_label = tf.zeros(
                             (patch_size, patch_size), dtype=tf.float32
@@ -1103,7 +1243,12 @@ def load_dataset_windowed_patches(
                     dtype=tf.float32,
                 ),
                 temporal=tf.TensorSpec(
-                    shape=(n_flood_maps, m_rainfall), dtype=tf.float32
+                    shape=(
+                        (n_future_steps, n_flood_maps, m_rainfall)
+                        if n_future_steps > 1
+                        else (n_flood_maps, m_rainfall)
+                    ),
+                    dtype=tf.float32,
                 ),
                 spatiotemporal=tf.TensorSpec(
                     shape=(n_flood_maps, patch_size, patch_size, 1),
@@ -1111,7 +1256,11 @@ def load_dataset_windowed_patches(
                 ),
             ),
             tf.TensorSpec(
-                shape=(patch_size, patch_size),
+                shape=(
+                    (n_future_steps, patch_size, patch_size)
+                    if n_future_steps > 1
+                    else (patch_size, patch_size)
+                ),
                 dtype=tf.float32,
             ),
         ),
