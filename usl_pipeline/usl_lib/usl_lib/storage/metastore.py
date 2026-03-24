@@ -106,12 +106,12 @@ class StudyArea:
         if not ref.exists:
             raise ValueError(f'No such study area "{name}"')
 
-        return cls(name=name, **ref.to_dict())
+        return cls(name=name, **(ref.to_dict() or {}))
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
         """Retrieve a Firestore reference to the study area with the given name."""
-        return db.collection(STUDY_AREAS).document(name)
+        return db.collection(STUDY_AREAS).document(name)  # type: ignore[return-value]
 
     @staticmethod
     def update_min_max_elevation(
@@ -285,12 +285,12 @@ class StudyAreaChunk:
         if not ref.exists:
             raise ValueError(f'No such chunk {chunk_name} within {study_area_name}"')
 
-        return cls(id_=chunk_name, **ref.to_dict())
+        return cls(id_=chunk_name, **(ref.to_dict() or {}))
 
     @classmethod
     def from_ref(cls, ref: firestore.DocumentReference) -> "StudyAreaChunk":
         """Creates an instance of the chunk class based on retrieved reference."""
-        return cls(id_=ref.id, **ref.get().to_dict())
+        return cls(id_=ref.id, **(ref.get().to_dict() or {}))
 
     @staticmethod
     def get_ref(
@@ -320,7 +320,7 @@ class StudyAreaChunk:
           None otherwise.
         """
         ref = cls.get_ref(db, study_area_name, chunk_name).get()
-        return None if not ref.exists else cls(id_=chunk_name, **ref.to_dict())
+        return None if not ref.exists else cls(id_=chunk_name, **(ref.to_dict() or {}))
 
     @classmethod
     def update_scaling_done(
@@ -452,13 +452,13 @@ class FloodScenarioConfig:
         if not ref.exists:
             raise ValueError(f'No such flood config "{name}"')
 
-        return cls(name=name, **ref.to_dict())
+        return cls(name=name, **(ref.to_dict() or {}))
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
         """Retrieve a Firestore reference to the flood config with the given name."""
         # Escape the name to avoid characters not allowed in IDs such as slashes.
-        return db.collection(CITY_CAT_RAINFALL_CONFIG).document(
+        return db.collection(CITY_CAT_RAINFALL_CONFIG).document(  # type: ignore[return-value]
             urllib.parse.quote(name, safe=())
         )
 
@@ -511,13 +511,13 @@ class HeatScenarioConfig:
         if not ref.exists:
             raise ValueError(f'No such heat config "{name}"')
 
-        return cls(name=name, **ref.to_dict())
+        return cls(name=name, **(ref.to_dict() or {}))
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
         """Retrieve a Firestore reference to the heat config with the given name."""
         # Escape the name to avoid characters not allowed in IDs such as slashes.
-        return db.collection(WRF_HEAT_CONFIG).document(
+        return db.collection(WRF_HEAT_CONFIG).document(  # type: ignore[return-value]
             urllib.parse.quote(name, safe=())
         )
 
@@ -571,14 +571,14 @@ class Simulation:
         ref = cls.get_ref(db, study_area_name, config_path).get()
         if not ref.exists:
             raise ValueError(f"No such simulation for {study_area_name} {config_path}")
-        return Simulation(**ref.to_dict())
+        return Simulation(**(ref.to_dict() or {}))
 
     @staticmethod
     def get_ref(
         db: firestore.Client, study_area_name: str, config_path: str
     ) -> firestore.DocumentReference:
         """Retrieves a reference for the simulation for the given study are & config."""
-        return db.collection(SIMULATIONS).document(
+        return db.collection(SIMULATIONS).document(  # type: ignore[return-value]
             urllib.parse.quote(f"{study_area_name}-{config_path}", safe=())
         )
 
