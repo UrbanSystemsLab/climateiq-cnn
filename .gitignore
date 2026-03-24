@@ -18,3 +18,13 @@ usl_models/data/*
 
 *.mypy_cache
 *.pytest_cache
+
+# FloodML noise files
+*.png
+*.log
+*.swp
+*.json
+predict_city_output/
+train_output/
+FLOODML_CHANGES_SUMMARY.md
+.ipynb_checkpoints/

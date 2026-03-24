@@ -75,9 +75,10 @@ def test_load_prediction_dataset(mock_metastore):
 
     # geospatial will have the same spatial features.
     numpy.testing.assert_array_almost_equal(
-        tensors["geospatial"].numpy(),
+        tensors["geospatial"].numpy()[:, :, :, :9],
         numpy.array([mock_spatial_features] * batch_size),
     )
+    assert tensors["geospatial"].shape[-1] == 10
 
     # spatiotemporal will have the labels creeping into a sequence of zeros.
     numpy.testing.assert_array_almost_equal(
