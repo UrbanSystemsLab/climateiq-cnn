@@ -458,9 +458,9 @@ class FloodScenarioConfig:
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
         """Retrieve a Firestore reference to the flood config with the given name."""
         # Escape the name to avoid characters not allowed in IDs such as slashes.
-        return db.collection(CITY_CAT_RAINFALL_CONFIG).document(  # type: ignore[return-value]
-            urllib.parse.quote(name, safe=())
-        )
+        return db.collection(  # type: ignore[return-value]
+            CITY_CAT_RAINFALL_CONFIG
+        ).document(urllib.parse.quote(name, safe=()))
 
 
 @dataclasses.dataclass(slots=True)
