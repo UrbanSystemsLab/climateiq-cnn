@@ -407,9 +407,7 @@ class FloodConvLSTM(keras.Model):
         super().__init__()
         self._params = params
         self._spatial_height, self._spatial_width = spatial_dims
-        self._sampling_prob = tf.Variable(
-            0.0, trainable=False, name="sampling_prob"
-        )
+        self._sampling_prob = tf.Variable(0.0, trainable=False, name="sampling_prob")
 
         # CNN padding config
         K_PAD = 2  # 5x5 kernel means 2-pixel padding
@@ -798,8 +796,11 @@ class FloodConvLSTM(keras.Model):
             for k, yk in enumerate(y_step_list):
                 temporal_k = temporal[:, k] if has_temporal_per_step else temporal
                 pred = self(
-                    {"geospatial": geospatial, "temporal": temporal_k,
-                     "spatiotemporal": st},
+                    {
+                        "geospatial": geospatial,
+                        "temporal": temporal_k,
+                        "spatiotemporal": st,
+                    },
                     training=True,
                 )
                 pred = tf.nn.relu(pred)
@@ -883,8 +884,11 @@ class FloodConvLSTM(keras.Model):
         for k, yk in enumerate(y_step_list):
             temporal_k = temporal[:, k] if has_temporal_per_step else temporal
             pred = self(
-                {"geospatial": geospatial, "temporal": temporal_k,
-                 "spatiotemporal": st},
+                {
+                    "geospatial": geospatial,
+                    "temporal": temporal_k,
+                    "spatiotemporal": st,
+                },
                 training=False,
             )
             pred = tf.nn.relu(pred)
@@ -925,9 +929,9 @@ class FloodConvLSTM(keras.Model):
         # real flood prediction errors. This metric isolates the flood signal.
         gt_last = y_steps[:, -1]
         flooded_mask = tf.cast(gt_last > 0.01, tf.float32)
-        flooded_mae = tf.reduce_sum(
-            tf.abs(last_pred - gt_last) * flooded_mask
-        ) / (tf.reduce_sum(flooded_mask) + 1e-6)
+        flooded_mae = tf.reduce_sum(tf.abs(last_pred - gt_last) * flooded_mask) / (
+            tf.reduce_sum(flooded_mask) + 1e-6
+        )
 
         result = {m.name: m.result() for m in self.metrics}
         result["flooded_mae"] = flooded_mae

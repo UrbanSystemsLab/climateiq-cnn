@@ -49,8 +49,10 @@ def compute_dem_sink_channel(geo_np: np.ndarray) -> np.ndarray:
     potential = sink * (0.2 + 0.8 * local_imperv)
 
     max_pot = float(potential.max())
-    ch = (potential / max_pot).astype(np.float32) if max_pot > 1e-9 else np.zeros(
-        geo_np.shape[:2], dtype=np.float32
+    ch = (
+        (potential / max_pot).astype(np.float32)
+        if max_pot > 1e-9
+        else np.zeros(geo_np.shape[:2], dtype=np.float32)
     )
     return ch[:, :, np.newaxis]  # (H, W, 1)
 
@@ -64,9 +66,7 @@ def _load_geo_with_sink(path) -> np.ndarray:
 def _append_dem_sink(geo_tensor: tf.Tensor) -> tf.Tensor:
     """Append DEM sink channel to a (H, W, 9) geospatial tf.Tensor → (H, W, 10)."""
     geo_np = geo_tensor.numpy().astype(np.float32)
-    geo10 = np.concatenate(
-        [geo_np, compute_dem_sink_channel(geo_np)], axis=-1
-    )
+    geo10 = np.concatenate([geo_np, compute_dem_sink_channel(geo_np)], axis=-1)
     return tf.constant(geo10, dtype=tf.float32)
 
 
@@ -760,9 +760,7 @@ def load_dataset_cached(
                         return
 
                     geo = _load_geo_with_sink(f)
-                    geospatial = tf.convert_to_tensor(
-                        geo, dtype=tf.float32
-                    )
+                    geospatial = tf.convert_to_tensor(geo, dtype=tf.float32)
                     model_input = model.FloodModel.Input(
                         temporal=temporal_tensor,
                         geospatial=geospatial,
@@ -897,9 +895,7 @@ def load_dataset_windowed_cached(
                 continue
 
             geo = _load_geo_with_sink(feature_path)
-            geospatial = tf.convert_to_tensor(
-                geo, dtype=tf.float32
-            )
+            geospatial = tf.convert_to_tensor(geo, dtype=tf.float32)
 
             if include_labels:
                 label_path = sim_dir / dataset_split / LABEL_DIRNAME / f"{stem}.npy"
@@ -980,14 +976,17 @@ def _build_temporal_tensor_v2(temporal_vec: np.ndarray) -> tf.Tensor:
     total = cumsum[-1] if cumsum[-1] > 0 else 1.0
     running_max = np.maximum.accumulate(v)
     delta_rate = np.concatenate([[0.0], np.diff(v)])  # storm phase transitions
-    feat = np.stack([
-        v,                                    # ch0: rate
-        cumsum / total,                       # ch1: normalised cumulative
-        delta_rate,                           # ch2: delta rate (replaces rate^2)
-        np.log1p(cumsum),                     # ch3: log cumulative
-        running_max,                          # ch4: running max
-        np.arange(T, dtype=np.float32) / max(T - 1, 1),  # ch5: frac time
-    ], axis=1)  # (T, 6)
+    feat = np.stack(
+        [
+            v,  # ch0: rate
+            cumsum / total,  # ch1: normalised cumulative
+            delta_rate,  # ch2: delta rate (replaces rate^2)
+            np.log1p(cumsum),  # ch3: log cumulative
+            running_max,  # ch4: running max
+            np.arange(T, dtype=np.float32) / max(T - 1, 1),  # ch5: frac time
+        ],
+        axis=1,
+    )  # (T, 6)
     return tf.constant(feat, dtype=tf.float32)
 
 
@@ -1213,9 +1212,7 @@ def load_dataset_windowed_patches(
                         )
                     else:
                         temporal_windows = [
-                            _extract_temporal(
-                                t + k, n_flood_maps, temporal_tensor
-                            )
+                            _extract_temporal(t + k, n_flood_maps, temporal_tensor)
                             for k in range(n_future_steps)
                         ]
                         window_temporal = tf.stack(temporal_windows, axis=0)

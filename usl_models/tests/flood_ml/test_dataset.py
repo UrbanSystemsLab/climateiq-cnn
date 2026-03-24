@@ -85,7 +85,7 @@ def test_load_dataset_full(mock_metastore) -> None:
     # geospatial will have the same spatial features..
     numpy.testing.assert_array_almost_equal(
         element["geospatial"].numpy()[:, :, :, :9],
-        numpy.array([mock_spatial_features] * batch_size)
+        numpy.array([mock_spatial_features] * batch_size),
     )
     assert element["geospatial"].shape[-1] == 10
 
@@ -202,7 +202,7 @@ def test_load_dataset_windowed(mock_metastore) -> None:
     # geospatial will have the same spatial features stacked batch_size times.
     numpy.testing.assert_array_almost_equal(
         element["geospatial"].numpy()[:, :, :, :9],
-        numpy.array([mock_spatial_features] * batch_size)
+        numpy.array([mock_spatial_features] * batch_size),
     )
     assert element["geospatial"].shape[-1] == 10
 
