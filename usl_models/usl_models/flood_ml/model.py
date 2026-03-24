@@ -369,7 +369,7 @@ class GreenAmptGate(keras.layers.Layer):
         corrected = tf.nn.relu(pred - actual_infil)
         return corrected, new_cumul_F
 
-    def get_config(self):
+    def get_config(self):  # noqa: D102
         return super().get_config()
 
 
@@ -835,7 +835,7 @@ class FloodConvLSTM(keras.Model):
 
             # arrival_time_loss disabled: log1p gradient explosion when depth > 0.5m
             # (sigmoid saturates → grad = -1/1e-8 = -1e8 per step, NaN over K=7 steps)
-            # Fix: need to rework with hard soft-arrival using clip, not log-space survival
+            # Fix: rework with clip, not log-space survival
 
             # Add regularization losses once (not inside loop)
             if self.losses:
@@ -958,12 +958,12 @@ class ScheduledSamplingCallback(keras.callbacks.Callback):
     over warmup_epochs, then holds it constant.
     """
 
-    def __init__(self, max_prob=0.5, warmup_epochs=15):
+    def __init__(self, max_prob=0.5, warmup_epochs=15):  # noqa: D107
         super().__init__()
         self.max_prob = max_prob
         self.warmup_epochs = warmup_epochs
 
-    def on_epoch_begin(self, epoch, logs=None):
+    def on_epoch_begin(self, epoch, logs=None):  # noqa: D102
         prob = min(epoch / max(self.warmup_epochs, 1), 1.0) * self.max_prob
         self.model._sampling_prob.assign(prob)
         print(f"  Scheduled sampling prob: {prob:.3f}")

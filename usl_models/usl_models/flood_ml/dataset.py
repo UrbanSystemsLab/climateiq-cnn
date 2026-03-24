@@ -22,7 +22,7 @@ LABEL_DIRNAME = "labels"
 
 
 def compute_dem_sink_channel(geo_np: np.ndarray) -> np.ndarray:
-    """Compute DEM sink depth as a 10th geospatial channel (on-the-fly, no pipeline change).
+    """Compute DEM sink depth as a 10th geospatial channel.
 
     Identifies pixels locally lower than their neighbourhood (DEM depressions)
     weighted by surrounding imperviousness — where water physically accumulates.
@@ -34,8 +34,8 @@ def compute_dem_sink_channel(geo_np: np.ndarray) -> np.ndarray:
 
     Returns: (H, W, 1) float32, normalised [0, 1].  Append to geo_np to get (H, W, 10).
     """
-    elev   = geo_np[:, :, 0].astype(np.float64)
-    valid  = geo_np[:, :, 1].astype(np.float64)
+    elev = geo_np[:, :, 0].astype(np.float64)
+    valid = geo_np[:, :, 1].astype(np.float64)
     imperv = ((geo_np[:, :, 4] == 0) & (valid > 0)).astype(np.float64)
 
     neigh = 80  # ~160 m neighbourhood at 2 m/px resolution
@@ -64,9 +64,10 @@ def _load_geo_with_sink(path) -> np.ndarray:
 def _append_dem_sink(geo_tensor: tf.Tensor) -> tf.Tensor:
     """Append DEM sink channel to a (H, W, 9) geospatial tf.Tensor → (H, W, 10)."""
     geo_np = geo_tensor.numpy().astype(np.float32)
-    geo10  = np.concatenate([geo_np, compute_dem_sink_channel(geo_np)], axis=-1)
+    geo10 = np.concatenate(
+        [geo_np, compute_dem_sink_channel(geo_np)], axis=-1
+    )
     return tf.constant(geo10, dtype=tf.float32)
-
 
 
 def load_dataset(
@@ -758,7 +759,10 @@ def load_dataset_cached(
                     if max_chunks is not None and i >= max_chunks:
                         return
 
-                    geospatial = tf.convert_to_tensor(_load_geo_with_sink(f), dtype=tf.float32)
+                    geo = _load_geo_with_sink(f)
+                    geospatial = tf.convert_to_tensor(
+                        geo, dtype=tf.float32
+                    )
                     model_input = model.FloodModel.Input(
                         temporal=temporal_tensor,
                         geospatial=geospatial,
@@ -892,7 +896,10 @@ def load_dataset_windowed_cached(
             if not feature_path.exists():
                 continue
 
-            geospatial = tf.convert_to_tensor(_load_geo_with_sink(feature_path), dtype=tf.float32)
+            geo = _load_geo_with_sink(feature_path)
+            geospatial = tf.convert_to_tensor(
+                geo, dtype=tf.float32
+            )
 
             if include_labels:
                 label_path = sim_dir / dataset_split / LABEL_DIRNAME / f"{stem}.npy"

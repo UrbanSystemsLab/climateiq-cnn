@@ -6,7 +6,6 @@ from google.cloud import storage  # type:ignore[attr-defined]
 import numpy
 
 from usl_models.flood_ml import dataset
-from usl_models.flood_ml.dataset import compute_dem_sink_channel
 from usl_models.flood_ml import prediction_dataset
 
 
@@ -79,7 +78,7 @@ def test_load_prediction_dataset(mock_metastore):
         tensors["geospatial"].numpy()[:, :, :, :9],
         numpy.array([mock_spatial_features] * batch_size),
     )
-    assert tensors["geospatial"].shape[-1] == 10, "Expected 10 geo channels (9 raw + DEM sink)"
+    assert tensors["geospatial"].shape[-1] == 10
 
     # spatiotemporal will have the labels creeping into a sequence of zeros.
     numpy.testing.assert_array_almost_equal(
