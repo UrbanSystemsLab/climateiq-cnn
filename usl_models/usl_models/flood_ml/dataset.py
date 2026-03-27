@@ -532,24 +532,49 @@ def download_dataset(
 
         else:
             # PREDICTION MODE
+            # =======================================
             if not rainfall_sim_name:
                 raise ValueError("rainfall_sim_name must be provided for prediction")
 
-            # Preserve `.txt` extension for rainfall sim
-            rainfall_stem = pathlib.Path(rainfall_sim_name).name
-            sim_path = output_path / sim_name / rainfall_stem
+            # rainfall_sim_name format:
+            #   "<Area>-<RainConfig>-<RainfallFile>"
+            # Example:
+            #   "Atlanta_Prediction-Atlanta_config-Rainfall_Data_22.npy"
+            parts = rainfall_sim_name.split("-")
+            if len(parts) < 3:
+                raise ValueError(
+                    "rainfall_sim_name must be '<Area>-<RainConfig>-<RainfallFile>', "
+                    "e.g. 'Atlanta_Prediction-Atlanta_config-Rainfall_Data_22.npy'"
+                )
+
+            _, rainfall_cfg, rainfall_filename = parts[0], parts[1], "-".join(parts[2:])
+
+            # Full GCS rainfall path
+            rainfall_gcs_path = (
+                f"gs://test-climateiq-study-area-feature-chunks/"
+                f"rainfall/{rainfall_cfg}/{rainfall_filename}"
+            )
+
+            # Validate rainfall file exists
+            bucket = "test-climateiq-study-area-feature-chunks"
+            prefix = f"rainfall/{rainfall_cfg}/{rainfall_filename}"
+
+            blobs = list(storage_client.list_blobs(bucket, prefix=prefix))
+            if not blobs:
+                raise ValueError(f"Rainfall file not found: {rainfall_gcs_path}")
+
+            # Local cache directory
+            rainfall_folder = pathlib.Path(rainfall_filename).stem
+            sim_path = output_path / sim_name / rainfall_folder
             sim_path.mkdir(parents=True, exist_ok=True)
 
-            # Download temporal vector from rainfall sim
-            temporal_meta = metastore.get_temporal_feature_metadata(
-                firestore_client, rainfall_sim_name
-            )
+            # Download temporal vector file
             temporal_array = downloader.download_as_array(
-                storage_client, temporal_meta["as_vector_gcs_uri"]
+                storage_client, rainfall_gcs_path
             )
             np.save(sim_path / TEMPORAL_FILENAME, temporal_array)
 
-            # Download features from study area
+            # Download spatial feature chunks from study area
             features_dir = sim_path / FEATURE_DIRNAME
             features_dir.mkdir(parents=True, exist_ok=True)
 
@@ -678,9 +703,15 @@ def load_dataset_cached(
                 if rainfall_sim_name is None:
                     raise ValueError("Missing rainfall_sim_name for prediction")
 
-                sim_dir = (
-                    filecache_dir / sim_name / pathlib.Path(rainfall_sim_name).name
-                )
+                # extract the rainfall folder name actually created by download_dataset
+                rainfall_filename = pathlib.Path(
+                    rainfall_sim_name
+                ).name  # "Atlanta_Prediction-Atlanta_config-Rainfall_Data_22.npy"
+                rainfall_folder = rainfall_filename.split("-")[-1].split(".")[
+                    0
+                ]  # "Rainfall_Data_22"
+
+                sim_dir = filecache_dir / sim_name / rainfall_folder
 
                 temporal_path = sim_dir / TEMPORAL_FILENAME
                 temporal_vec = np.load(temporal_path)
