@@ -18,11 +18,16 @@ class OutputVarMeanSquaredError(keras.metrics.MeanMetricWrapper):
         """Create a mean squared error metric function for an sto_var."""
 
         def mse(y_true: tf.Tensor, y_pred: tf.Tensor):
-            """Computes MSE on RH output tensor only."""
-            return keras.metrics.mean_squared_error(
-                y_true[:, :, :, :, sto_var.value],
-                y_pred[:, :, :, :, sto_var.value],
-            )
+            """Computes MSE on the correct output tensor."""
+            if y_true.shape[-1] == 1:
+                # Only one variable → no need to slice
+                y_true_var = tf.squeeze(y_true, axis=-1)  # remove last dimension
+                y_pred_var = tf.squeeze(y_pred, axis=-1)
+            else:
+                y_true_var = y_true[..., sto_var.value]
+                y_pred_var = y_pred[..., sto_var.value]
+
+            return keras.metrics.mean_squared_error(y_true_var, y_pred_var)
 
         self.sto_var = sto_var
         name = name or "mse_" + sto_var.name
@@ -31,6 +36,8 @@ class OutputVarMeanSquaredError(keras.metrics.MeanMetricWrapper):
     def get_config(self):
         """Returns the serializable config of the metric."""
         return {"name": self.name, "dtype": self.dtype, "sto_var": self.sto_var}
+
+
 
 
 @keras.saving.register_keras_serializable(package="CustomMetrics")
