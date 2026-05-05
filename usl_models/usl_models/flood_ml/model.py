@@ -61,6 +61,13 @@ class FloodModel:
         n_flood_maps: int = 5
         num_features: int = 22
         pad_mode: PadMode = "REFLECT"
+        # V3 architecture flags (all default False = original behaviour preserved)
+        use_rain_broadcast: bool = False       # v3.1: tile rain rate/cumul to spatiotemporal input
+        use_dilated_geo: bool = False          # v3.2: dilated conv refinement before geo_cnn
+        use_storm_embed: bool = False          # v3.3: global storm-intensity FC → spatial bias
+        use_deep_decoder: bool = False         # v3.4: 2x convs per upsample stage + skip from geo
+        use_group_norm: bool = False           # v6: replace decoder BN with GroupNorm — no train/eval gap
+        loss_version: str = "v1"               # "v1" = log-depth (default) | "v3" = depth-weighted linear
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
             default_factory=lambda: keras.optimizers.Adam(learning_rate=1e-3)
         )
@@ -75,6 +82,11 @@ class FloodModel:
                 "m_rainfall": self.m_rainfall,
                 "n_flood_maps": self.n_flood_maps,
                 "num_features": self.num_features,
+                "use_rain_broadcast": self.use_rain_broadcast,
+                "use_dilated_geo": self.use_dilated_geo,
+                "use_storm_embed": self.use_storm_embed,
+                "use_deep_decoder": self.use_deep_decoder,
+                "use_group_norm": self.use_group_norm,
                 "optimizer": {
                     "class_name": type(self.optimizer).__name__,
                     "config": {
@@ -165,9 +177,14 @@ class FloodModel:
 
     def _build_model(self) -> keras.Model:
         model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
+        loss_fn = (
+            customloss.make_hybrid_loss_v3
+            if getattr(self._params, "loss_version", "v1") == "v3"
+            else customloss.make_hybrid_loss
+        )
         model.compile(
             optimizer=self._params.optimizer,
-            loss=customloss.make_hybrid_loss,
+            loss=loss_fn,
             metrics=[
                 keras.metrics.MeanAbsoluteError(),
                 keras.metrics.RootMeanSquaredError(),
@@ -369,7 +386,7 @@ class GreenAmptGate(keras.layers.Layer):
         corrected = tf.nn.relu(pred - actual_infil)
         return corrected, new_cumul_F
 
-    def get_config(self):  # noqa: D102
+    def get_config(self):
         return super().get_config()
 
 
@@ -407,7 +424,9 @@ class FloodConvLSTM(keras.Model):
         super().__init__()
         self._params = params
         self._spatial_height, self._spatial_width = spatial_dims
-        self._sampling_prob = tf.Variable(0.0, trainable=False, name="sampling_prob")
+        self._sampling_prob = tf.Variable(
+            0.0, trainable=False, name="sampling_prob"
+        )
 
         # CNN padding config
         K_PAD = 2  # 5x5 kernel means 2-pixel padding
@@ -415,10 +434,13 @@ class FloodConvLSTM(keras.Model):
         activation = "relu"
 
         # === Spatiotemporal CNN (split into 2 stages for skip connections) ===
+        # V3: if rain_broadcast, ST input becomes 3-channel (depth + rain_rate + rain_cum)
+        st_in_channels = 3 if self._params.use_rain_broadcast else 1
+        self._st_in_channels = st_in_channels
         # Stage 1: 2x downsample -> [B, N, H/2, W/2, 8]
         self.st_cnn_stage1 = keras.Sequential(
             [
-                layers.InputLayer((None, self._spatial_height, self._spatial_width, 1)),
+                layers.InputLayer((None, self._spatial_height, self._spatial_width, st_in_channels)),
                 layers.TimeDistributed(pad_layers.Pad2D(cnn_pad, mode="REFLECT")),
                 layers.TimeDistributed(
                     layers.Conv2D(
@@ -450,6 +472,41 @@ class FloodConvLSTM(keras.Model):
             name="st_cnn_stage2",
         )
 
+        # === V3.2: Dilated conv refinement (optional, residual) ===
+        # Expands effective receptive field to ~200m before standard geo_cnn,
+        # giving model long-range context for flow routing.
+        if self._params.use_dilated_geo:
+            self.geo_dilated = keras.Sequential(
+                [
+                    layers.InputLayer(
+                        (self._spatial_height, self._spatial_width, constants.GEO_FEATURES)
+                    ),
+                    layers.Conv2D(32, 3, padding="same", dilation_rate=2, activation="relu"),
+                    layers.Conv2D(32, 3, padding="same", dilation_rate=4, activation="relu"),
+                    # Project back to GEO_FEATURES so we can add residually
+                    layers.Conv2D(constants.GEO_FEATURES, 3, padding="same", activation=None),
+                ],
+                name="geo_dilated",
+            )
+        else:
+            self.geo_dilated = None
+
+        # === V3.3: Global storm-intensity embedding (optional) ===
+        # Scalar storm intensity (peak rain) → 32-dim embedding tiled spatially
+        if self._params.use_storm_embed:
+            self.storm_embed_dim = 32
+            self.storm_embed = keras.Sequential(
+                [
+                    layers.InputLayer((self._params.m_rainfall,)),
+                    layers.Dense(64, activation="relu"),
+                    layers.Dense(self.storm_embed_dim, activation=None),
+                ],
+                name="storm_embed",
+            )
+        else:
+            self.storm_embed = None
+            self.storm_embed_dim = 0
+
         # === Geospatial CNN ===
         self.geo_cnn = keras.Sequential(
             [
@@ -473,7 +530,7 @@ class FloodConvLSTM(keras.Model):
         # and the rainfall window size.
         conv_lstm_height = self._spatial_height // 4
         conv_lstm_width = self._spatial_width // 4
-        conv_lstm_channels = 16 + 64 + self._params.m_rainfall
+        conv_lstm_channels = 16 + 64 + self._params.m_rainfall + self.storm_embed_dim
 
         self.conv_lstm = keras.Sequential(
             [
@@ -515,10 +572,38 @@ class FloodConvLSTM(keras.Model):
         self.decoder_up1 = layers.UpSampling2D(size=2, interpolation="bilinear")
         # After concat with skip1 (8ch), input channels = lstm_units + 8
         self.decoder_conv1 = layers.Conv2D(32, 3, padding="same", activation="relu")
-        self.decoder_bn1 = layers.BatchNormalization()
+        # v6: GroupNorm has no train/eval gap; BN running stats caused 2.5m ceiling
+        if self._params.use_group_norm:
+            self.decoder_bn1 = layers.GroupNormalization(groups=8)  # 32ch / 8 = 4ch/group
+        else:
+            self.decoder_bn1 = layers.BatchNormalization()
         self.decoder_up2 = layers.UpSampling2D(size=2, interpolation="bilinear")
         self.decoder_conv2 = layers.Conv2D(16, 3, padding="same", activation="relu")
-        self.decoder_bn2 = layers.BatchNormalization()
+        if self._params.use_group_norm:
+            self.decoder_bn2 = layers.GroupNormalization(groups=4)  # 16ch / 4 = 4ch/group
+        else:
+            self.decoder_bn2 = layers.BatchNormalization()
+
+        # === V3.4: Deep decoder — extra refinement convs per stage ===
+        # Gives the model explicit capacity to reconstruct fine-grained depth
+        # detail at full resolution. Only built when flag is on so V1/round-3
+        # weights still load cleanly when the flag is off.
+        if self._params.use_deep_decoder:
+            self.decoder_conv1b = layers.Conv2D(32, 3, padding="same", activation="relu")
+            self.decoder_bn1b = layers.BatchNormalization()
+            self.decoder_conv2b = layers.Conv2D(16, 3, padding="same", activation="relu")
+            self.decoder_bn2b = layers.BatchNormalization()
+            # Extra final-resolution refinement before output
+            self.decoder_refine = layers.Conv2D(16, 3, padding="same", activation="relu")
+            self.decoder_refine_bn = layers.BatchNormalization()
+        else:
+            self.decoder_conv1b = None
+            self.decoder_bn1b = None
+            self.decoder_conv2b = None
+            self.decoder_bn2b = None
+            self.decoder_refine = None
+            self.decoder_refine_bn = None
+
         # Final 3×3 to single output channel. Linear activation lets
         # the loss gradient flow unconstrained; clip to ≥0 at inference.
         self.output_conv = layers.Conv2D(1, 3, padding="same", activation="linear")
@@ -548,11 +633,29 @@ class FloodConvLSTM(keras.Model):
 
         N = self._params.n_flood_maps
 
+        # === V3.1: Rain broadcast — tile rain_rate + rain_cum per-timestep
+        # into spatiotemporal, so the spatial encoder sees rainfall context. ===
+        if self._params.use_rain_broadcast:
+            # temporal[:, :, 0] = rate (v2), temporal[:, :, 1] = cumul/tot (v2)
+            H = self._spatial_height
+            W = self._spatial_width
+            rain_rate = temporal[:, :, tf.newaxis, tf.newaxis, 0:1]  # [B, N, 1, 1, 1]
+            rain_cum = temporal[:, :, tf.newaxis, tf.newaxis, 1:2]
+            rain_rate = tf.tile(rain_rate, [1, 1, H, W, 1])           # [B, N, H, W, 1]
+            rain_cum = tf.tile(rain_cum, [1, 1, H, W, 1])
+            spatiotemporal = tf.concat(
+                [spatiotemporal, rain_rate, rain_cum], axis=-1        # [B, N, H, W, 3]
+            )
+
         # Spatiotemporal CNN (two stages for skip connection)
-        # Stage 1: [B, n, H, W, 1] -> [B, n, H/2, W/2, 8]
+        # Stage 1: [B, n, H, W, st_in] -> [B, n, H/2, W/2, 8]
         skip1 = self.st_cnn_stage1(spatiotemporal)
         # Stage 2: [B, n, H/2, W/2, 8] -> [B, n, H/4, W/4, 16]
         st_cnn_output = self.st_cnn_stage2(skip1)
+
+        # === V3.2: Dilated geo refinement (residual) ===
+        if self.geo_dilated is not None:
+            geospatial = geospatial + self.geo_dilated(geospatial)
 
         # Geospatial CNN
         # [B, H, W, f ]-> [B, H', W', k2]
@@ -568,7 +671,19 @@ class FloodConvLSTM(keras.Model):
         temp_input = temporal[:, :, tf.newaxis, tf.newaxis, :]
         temp_input = tf.tile(temp_input, [1, 1, H_out, W_out, 1])
 
-        lstm_input = tf.concat([st_cnn_output, geo_cnn_output, temp_input], axis=-1)
+        tensors_to_concat = [st_cnn_output, geo_cnn_output, temp_input]
+
+        # === V3.3: Storm-intensity embedding broadcast ===
+        if self.storm_embed is not None:
+            # peak rain feature vector per sample across N timesteps [B, m]
+            peak_temporal = tf.reduce_max(temporal, axis=1)               # [B, m]
+            storm_vec = self.storm_embed(peak_temporal)                   # [B, 32]
+            # Broadcast to [B, N, H', W', 32]
+            storm_map = storm_vec[:, tf.newaxis, tf.newaxis, tf.newaxis, :]
+            storm_map = tf.tile(storm_map, [1, N, H_out, W_out, 1])
+            tensors_to_concat.append(storm_map)
+
+        lstm_input = tf.concat(tensors_to_concat, axis=-1)
         lstm_output = self.conv_lstm(lstm_input)
         lstm_output = self.attention(lstm_output)
 
@@ -578,9 +693,19 @@ class FloodConvLSTM(keras.Model):
         x = tf.concat([x, skip], axis=-1)  # [B, H/2, W/2, units+8]
         x = self.decoder_conv1(x)  # [B, H/2, W/2, 32]
         x = self.decoder_bn1(x)
+        # V3.4: extra refinement at half resolution
+        if self.decoder_conv1b is not None:
+            x = self.decoder_conv1b(x)
+            x = self.decoder_bn1b(x)
         x = self.decoder_up2(x)  # [B, H, W, 32]
         x = self.decoder_conv2(x)  # [B, H, W, 16]
         x = self.decoder_bn2(x)
+        # V3.4: extra refinement at full resolution
+        if self.decoder_conv2b is not None:
+            x = self.decoder_conv2b(x)
+            x = self.decoder_bn2b(x)
+            x = self.decoder_refine(x)
+            x = self.decoder_refine_bn(x)
         output = self.output_conv(x)  # [B, H, W, 1]
 
         return output
@@ -796,11 +921,8 @@ class FloodConvLSTM(keras.Model):
             for k, yk in enumerate(y_step_list):
                 temporal_k = temporal[:, k] if has_temporal_per_step else temporal
                 pred = self(
-                    {
-                        "geospatial": geospatial,
-                        "temporal": temporal_k,
-                        "spatiotemporal": st,
-                    },
+                    {"geospatial": geospatial, "temporal": temporal_k,
+                     "spatiotemporal": st},
                     training=True,
                 )
                 pred = tf.nn.relu(pred)
@@ -820,9 +942,9 @@ class FloodConvLSTM(keras.Model):
 
                 total_loss += time_weight * (step_loss + 0.2 * mass_loss)
 
-                # Feed corrected prediction back: clip at 2.5m consistently
-                # (matches test_step — prevents train/val distribution shift)
-                fb = tf.minimum(tf.stop_gradient(pred), 2.5)
+                # Feed corrected prediction back: clip at 4.0m to match GT depth cap
+                # (was 2.5m which caused hard ceiling — pred never learned >2.5m)
+                fb = tf.minimum(tf.stop_gradient(pred), 4.0)
                 # Feedback noise: teaches robustness to imperfect context
                 fb = fb + tf.random.normal(tf.shape(fb), stddev=0.02)
                 fb = tf.nn.relu(fb)  # keep non-negative after noise
@@ -836,7 +958,7 @@ class FloodConvLSTM(keras.Model):
 
             # arrival_time_loss disabled: log1p gradient explosion when depth > 0.5m
             # (sigmoid saturates → grad = -1/1e-8 = -1e8 per step, NaN over K=7 steps)
-            # Fix: rework with clip, not log-space survival
+            # Fix: need to rework with hard soft-arrival using clip, not log-space survival
 
             # Add regularization losses once (not inside loop)
             if self.losses:
@@ -884,11 +1006,8 @@ class FloodConvLSTM(keras.Model):
         for k, yk in enumerate(y_step_list):
             temporal_k = temporal[:, k] if has_temporal_per_step else temporal
             pred = self(
-                {
-                    "geospatial": geospatial,
-                    "temporal": temporal_k,
-                    "spatiotemporal": st,
-                },
+                {"geospatial": geospatial, "temporal": temporal_k,
+                 "spatiotemporal": st},
                 training=False,
             )
             pred = tf.nn.relu(pred)
@@ -905,8 +1024,8 @@ class FloodConvLSTM(keras.Model):
             time_weight = 1.0 + 0.3 * k
             total_loss += time_weight * (step_loss + 0.2 * mass_loss)
 
-            # Feed corrected prediction back: clip at 2.5m (matches train_step)
-            pred_fb = tf.minimum(pred, 2.5)
+            # Feed corrected prediction back: clip at 4.0m (matches train_step)
+            pred_fb = tf.minimum(pred, 4.0)
             st = tf.concat(
                 [st[:, 1:, :, :, :], pred_fb[:, tf.newaxis, :, :, :]],
                 axis=1,
@@ -929,9 +1048,9 @@ class FloodConvLSTM(keras.Model):
         # real flood prediction errors. This metric isolates the flood signal.
         gt_last = y_steps[:, -1]
         flooded_mask = tf.cast(gt_last > 0.01, tf.float32)
-        flooded_mae = tf.reduce_sum(tf.abs(last_pred - gt_last) * flooded_mask) / (
-            tf.reduce_sum(flooded_mask) + 1e-6
-        )
+        flooded_mae = tf.reduce_sum(
+            tf.abs(last_pred - gt_last) * flooded_mask
+        ) / (tf.reduce_sum(flooded_mask) + 1e-6)
 
         result = {m.name: m.result() for m in self.metrics}
         result["flooded_mae"] = flooded_mae
@@ -962,12 +1081,12 @@ class ScheduledSamplingCallback(keras.callbacks.Callback):
     over warmup_epochs, then holds it constant.
     """
 
-    def __init__(self, max_prob=0.5, warmup_epochs=15):  # noqa: D107
+    def __init__(self, max_prob=0.5, warmup_epochs=15):
         super().__init__()
         self.max_prob = max_prob
         self.warmup_epochs = warmup_epochs
 
-    def on_epoch_begin(self, epoch, logs=None):  # noqa: D102
+    def on_epoch_begin(self, epoch, logs=None):
         prob = min(epoch / max(self.warmup_epochs, 1), 1.0) * self.max_prob
         self.model._sampling_prob.assign(prob)
         print(f"  Scheduled sampling prob: {prob:.3f}")

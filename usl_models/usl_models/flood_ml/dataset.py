@@ -4,7 +4,7 @@ import logging
 import random
 import pathlib
 import numpy as np
-from scipy.ndimage import uniform_filter
+from scipy.ndimage import uniform_filter, laplace, sobel, gaussian_filter
 from typing import Any, Iterator, Tuple
 
 from google.cloud import firestore  # type:ignore[attr-defined]
@@ -57,17 +57,93 @@ def compute_dem_sink_channel(geo_np: np.ndarray) -> np.ndarray:
     return ch[:, :, np.newaxis]  # (H, W, 1)
 
 
-def _load_geo_with_sink(path) -> np.ndarray:
-    """Load geospatial .npy and append DEM sink as channel 9 → (H, W, 10)."""
+def compute_flow_features(
+    geo_np: np.ndarray, cell_size: float = 2.0
+) -> np.ndarray:
+    """D8 flow direction + flow accumulation via whitebox on the chunk DEM.
+
+    Per-chunk D8 hydrology (not stitched across chunks — water is routed within
+    the chunk only). Pass ``cell_size`` in metres/pixel so flow accumulation
+    scales correctly at 2 m / 5 m / 10 m resolution.
+
+    Channel layout (appended after compute_dem_sink_channel):
+        ch10: D8 flow direction — whitebox pointer codes (1,2,4,...,128)
+              normalised to [0, 1] by dividing by 255.
+        ch11: D8 flow accumulation — log1p-transformed upstream cell count,
+              normalised to [0, 1].
+
+    Returns: (H, W, 2) float32. Append to (H, W, 10) to get (H, W, 12).
+    """
+    import tempfile
+    import rasterio
+    import whitebox
+    from rasterio.transform import Affine
+
+    valid = geo_np[:, :, 1].astype(np.float32)
+    elev = (geo_np[:, :, 0].astype(np.float32) * valid)  # zero-fill nodata
+    H, W = elev.shape
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = pathlib.Path(tmp)
+        dem_tif = tmp_path / "dem.tif"
+        tr = Affine(cell_size, 0, 0, 0, -cell_size, H * cell_size)
+        with rasterio.open(
+            dem_tif, "w",
+            driver="GTiff", height=H, width=W,
+            count=1, dtype="float32", transform=tr, crs="EPSG:3857",
+        ) as f:
+            f.write(elev[np.newaxis])
+
+        wbt = whitebox.WhiteboxTools()
+        wbt.set_working_dir(str(tmp_path))
+        wbt.set_verbose_mode(False)
+
+        fdir_tif = tmp_path / "fdir.tif"
+        facc_tif = tmp_path / "facc.tif"
+        wbt.d8_pointer(
+            dem=str(dem_tif), output=str(fdir_tif), esri_pntr=False
+        )
+        wbt.d8_flow_accumulation(
+            i=str(fdir_tif), output=str(facc_tif),
+            out_type="cells", log=False, clip=False,
+            pntr=True, esri_pntr=False,
+        )
+
+        with rasterio.open(fdir_tif) as f:
+            fdir = f.read(1).astype(np.float32) / 255.0
+        with rasterio.open(facc_tif) as f:
+            facc_raw = f.read(1).astype(np.float32)
+            facc_log = np.log1p(np.maximum(facc_raw, 0.0))
+            facc = facc_log / max(float(facc_log.max()), 1e-9)
+
+    return np.stack([fdir * valid, facc * valid], axis=-1).astype(np.float32)
+
+
+def _compute_all_geo_features(
+    geo_np: np.ndarray, cell_size: float = 2.0
+) -> np.ndarray:
+    """Append DEM sink (ch9) and flow features (ch10-11) to raw geo (H,W,9).
+
+    Returns (H, W, 12).
+    """
+    sink = compute_dem_sink_channel(geo_np)          # (H, W, 1)
+    flow = compute_flow_features(geo_np, cell_size)  # (H, W, 2)
+    return np.concatenate([geo_np, sink, flow], axis=-1)
+
+
+def _load_geo_with_sink(path, cell_size: float = 2.0) -> np.ndarray:
+    """Load geospatial .npy and append physics channels → (H, W, 12)."""
     geo = np.load(path).astype(np.float32)
-    return np.concatenate([geo, compute_dem_sink_channel(geo)], axis=-1)
+    return _compute_all_geo_features(geo, cell_size)
 
 
-def _append_dem_sink(geo_tensor: tf.Tensor) -> tf.Tensor:
-    """Append DEM sink channel to a (H, W, 9) geospatial tf.Tensor → (H, W, 10)."""
+def _append_dem_sink(
+    geo_tensor: tf.Tensor, cell_size: float = 2.0
+) -> tf.Tensor:
+    """Append physics channels to a (H, W, 9) geospatial tf.Tensor → (H, W, 12)."""
     geo_np = geo_tensor.numpy().astype(np.float32)
-    geo10 = np.concatenate([geo_np, compute_dem_sink_channel(geo_np)], axis=-1)
-    return tf.constant(geo10, dtype=tf.float32)
+    geo12 = _compute_all_geo_features(geo_np, cell_size)
+    return tf.constant(geo12, dtype=tf.float32)
 
 
 def load_dataset(
@@ -190,6 +266,7 @@ def load_dataset_windowed(
                     model_input, labels, n_flood_maps
                 ):
                     yield (window_input, window_label)
+            
 
     dataset = tf.data.Dataset.from_generator(
         generator=generator,
@@ -254,6 +331,7 @@ def load_prediction_dataset(
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
     """
+    
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 

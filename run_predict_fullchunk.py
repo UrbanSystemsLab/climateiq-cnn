@@ -31,7 +31,7 @@ print(f"GPUs: {tf.config.list_physical_devices('GPU')}")
 
 from scipy.stats import pearsonr
 
-from usl_models.flood_ml.dataset import compute_dem_sink_channel
+from usl_models.flood_ml.dataset import compute_dem_sink_channel, compute_flow_features
 from usl_models.flood_ml.model import FloodModel, SpatialAttention, FloodConvLSTM, GreenAmptGate
 from usl_models.flood_ml import customloss
 
@@ -39,7 +39,7 @@ from usl_models.flood_ml import customloss
 # CONFIGURATION
 # =====================================================================
 FILECACHE_DIR = pathlib.Path("/home/shared/climateiq/filecache")
-OUTPUT_DIR = pathlib.Path("/home/jainr/climateiq-cnn-6/train_output/run_20260324-044011")
+OUTPUT_DIR = pathlib.Path("/home/rmj7591/climateiq-cnn/train_output/run_20260417-164506")
 MODEL_PATH = OUTPUT_DIR / "best_model.keras"
 
 PATCH_SIZE = 256
@@ -104,16 +104,98 @@ params = FloodModel.Params(
 loaded_model = FloodConvLSTM(params=params, spatial_dims=(CHUNK_SIZE, CHUNK_SIZE))
 
 dummy_input = {
-    "geospatial":     tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 10)),
+    "geospatial":     tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 12)),
     "temporal":       tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
     "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, CHUNK_SIZE, CHUNK_SIZE, 1)),
 }
 _ = loaded_model(dummy_input, training=False)
 
-data = np.load(str(WEIGHTS_PATH))
-w_list = [data[f"w{i:02d}"] for i in range(len(data.files))]
-loaded_model.set_weights(w_list)
-print(f"  Loaded {len(w_list)} weights. Model at {CHUNK_SIZE}x{CHUNK_SIZE}.")
+if WEIGHTS_PATH.exists():
+    data = np.load(str(WEIGHTS_PATH))
+    w_list = [data[f"w{i:02d}"] for i in range(len(data.files))]
+    # Expand geo_cnn first Conv2D kernel (5,5,10,16) → (5,5,12,16) if needed.
+    try:
+        GEO_IDX = next(i for i, w in enumerate(w_list) if w.shape == (5, 5, 10, 16))
+        w_list[GEO_IDX] = np.pad(w_list[GEO_IDX], [(0, 0), (0, 0), (0, 2), (0, 0)])
+        print(f"  Expanded geo kernel 10→12 channels at index {GEO_IDX}")
+    except StopIteration:
+        pass  # Already 12-channel weights (trained with flow features)
+    loaded_model.set_weights(w_list)
+    print(f"  Loaded {len(w_list)} weights from npz. Model at {CHUNK_SIZE}x{CHUNK_SIZE}.")
+else:
+    # Fall back: load weights directly from .keras archive via h5py.
+    # keras.models.load_model fails due to global layer-counter naming
+    # collisions.  We bypass it by reading model.weights.h5 directly and
+    # mapping each saved array to the model's get_weights() slot by explicit
+    # path.  The mapping was derived by comparing model.get_weights() shapes
+    # against the h5 leaf structure of a saved checkpoint.
+    import zipfile, h5py, io
+    print(f"  weights_ordered.npz not found — loading from h5 inside {MODEL_PATH}")
+
+    # Explicit ordered path list matching model.get_weights() index 0..34
+    _H5_PATHS = [
+        # st_cnn_stage1 Conv2D
+        "st_cnn_stage1/layers/time_distributed_1/layer/vars/0",   # (5,5,1,8)
+        "st_cnn_stage1/layers/time_distributed_1/layer/vars/1",   # (8,)
+        # st_cnn_stage2 Conv2D
+        "st_cnn_stage2/layers/time_distributed_1/layer/vars/0",   # (5,5,8,16)
+        "st_cnn_stage2/layers/time_distributed_1/layer/vars/1",   # (16,)
+        # geo_cnn conv1
+        "layers/sequential/layers/conv2d/vars/0",                 # (5,5,10,16)
+        "layers/sequential/layers/conv2d/vars/1",                 # (16,)
+        # geo_cnn conv2
+        "layers/sequential/layers/conv2d_1/vars/0",               # (5,5,16,64)
+        "layers/sequential/layers/conv2d_1/vars/1",               # (64,)
+        # ConvLSTM1
+        "layers/sequential_1/layers/conv_lstm2d/cell/vars/0",     # (5,5,86,512)
+        "layers/sequential_1/layers/conv_lstm2d/cell/vars/1",     # (5,5,128,512)
+        "layers/sequential_1/layers/conv_lstm2d/cell/vars/2",     # (512,)
+        # BN inside conv_lstm
+        "layers/sequential_1/layers/batch_normalization/vars/0",  # (128,) gamma
+        "layers/sequential_1/layers/batch_normalization/vars/1",  # (128,) beta
+        "layers/sequential_1/layers/batch_normalization/vars/2",  # (128,) moving_mean
+        "layers/sequential_1/layers/batch_normalization/vars/3",  # (128,) moving_var
+        # ConvLSTM2
+        "layers/sequential_1/layers/conv_lstm2d_1/cell/vars/0",   # (5,5,128,512)
+        "layers/sequential_1/layers/conv_lstm2d_1/cell/vars/1",   # (5,5,128,512)
+        "layers/sequential_1/layers/conv_lstm2d_1/cell/vars/2",   # (512,)
+        # spatial attention
+        "layers/spatial_attention/conv/vars/0",                   # (7,7,2,1)
+        "layers/spatial_attention/conv/vars/1",                   # (1,)
+        # decoder_conv1
+        "layers/conv2d/vars/0",                                   # (3,3,136,32)
+        "layers/conv2d/vars/1",                                   # (32,)
+        # decoder_bn1
+        "layers/batch_normalization/vars/0",                      # (32,) gamma
+        "layers/batch_normalization/vars/1",                      # (32,) beta
+        "layers/batch_normalization/vars/2",                      # (32,) moving_mean
+        "layers/batch_normalization/vars/3",                      # (32,) moving_var
+        # decoder_conv2
+        "layers/conv2d_1/vars/0",                                 # (3,3,32,16)
+        "layers/conv2d_1/vars/1",                                 # (16,)
+        # decoder_bn2
+        "layers/batch_normalization_1/vars/0",                    # (16,) gamma
+        "layers/batch_normalization_1/vars/1",                    # (16,) beta
+        "layers/batch_normalization_1/vars/2",                    # (16,) moving_mean
+        "layers/batch_normalization_1/vars/3",                    # (16,) moving_var
+        # output_conv
+        "output_conv/vars/0",                                     # (3,3,16,1)
+        "output_conv/vars/1",                                     # (1,)
+        # sampling_prob (non-trainable scalar)
+        "vars/0",                                                  # ()
+    ]
+
+    with zipfile.ZipFile(str(MODEL_PATH), "r") as zf:
+        h5_bytes = zf.read("model.weights.h5")
+    with h5py.File(io.BytesIO(h5_bytes), "r") as hf:
+        w_list = [np.array(hf[p]) for p in _H5_PATHS]
+
+    loaded_model.set_weights(w_list)
+    print(f"  Loaded {len(w_list)} weights from h5 (direct). Model at {CHUNK_SIZE}x{CHUNK_SIZE}.")
+    # Also save as npz so future runs use the fast path
+    npz_path = WEIGHTS_PATH
+    np.savez(str(npz_path), **{f"w{i:02d}": w for i, w in enumerate(w_list)})
+    print(f"  Saved weights_ordered.npz for future use.")
 
 
 def predict_full_chunk(geo_tf, temporal_window, spatiotemporal, cumul_F):
@@ -124,7 +206,7 @@ def predict_full_chunk(geo_tf, temporal_window, spatiotemporal, cumul_F):
     without it would be a training/inference mismatch.
 
     Args:
-        geo_tf:          (1, H, W, 9) tf.Tensor (pre-converted, reused across steps)
+        geo_tf:          (1, H, W, 12) tf.Tensor (pre-converted, reused across steps)
         temporal_window: (N_FLOOD_MAPS, M_RAINFALL)
         spatiotemporal:  (N_FLOOD_MAPS, H, W, 1)
         cumul_F:         (1, H, W, 1) tf.Tensor, cumulative infiltration depth (m)
@@ -299,7 +381,7 @@ def save_2row_strip_figure(city_label, stem, sim_label, ar_preds, labels, T_stri
 
     fname = f"{fname_tag}_strip2row_{city_label}_{stem}"
     plt.savefig(str(OUTPUT_DIR / f"{fname}.png"), dpi=150, bbox_inches="tight")
-    plt.savefig(f"/home/jainr/climateiq-cnn-6/{fname}.png", dpi=150, bbox_inches="tight")
+    plt.savefig(f"/home/rmj7591/climateiq-cnn/predictions/{fname}.png", dpi=150, bbox_inches="tight")
     print(f"  Saved 2-row: {fname}.png")
     plt.close()
 
@@ -454,7 +536,7 @@ def save_strip_figure(city_label, stem, sim_label, ar_preds, labels, T_strip,
 
     fname = f"strip_{fname_tag}_{city_label}_{stem}"
     plt.savefig(str(OUTPUT_DIR / f"{fname}.png"), dpi=150, bbox_inches="tight")
-    plt.savefig(f"/home/jainr/climateiq-cnn-6/{fname}.png", dpi=150, bbox_inches="tight")
+    plt.savefig(f"/home/rmj7591/climateiq-cnn/predictions/{fname}.png", dpi=150, bbox_inches="tight")
     print(f"  Saved strip: {fname}.png  crop=({r0}:{r1},{c0}:{c1})  vmaxes={[f'{v:.2f}' for v in vmaxes]}")
     plt.close()
     return vmaxes, dmax
@@ -497,7 +579,9 @@ for city_label, sim_name, split in EVAL_CHUNKS:
         print(f"\n  Chunk: {stem}")
 
         geo_raw    = np.load(feat_file).astype(np.float32)     # (1000, 1000, 9)
-        geospatial = np.concatenate([geo_raw, compute_dem_sink_channel(geo_raw)], axis=-1)  # (1000, 1000, 10)
+        dem_sink   = compute_dem_sink_channel(geo_raw)          # (1000, 1000, 1)
+        flow_feats = compute_flow_features(geo_raw, cell_size=2.0)  # (1000, 1000, 2)
+        geospatial = np.concatenate([geo_raw, dem_sink, flow_feats], axis=-1)  # (1000, 1000, 12)
         label_arr  = np.load(label_files[stem])  # (1000, 1000, T)
         labels     = np.transpose(label_arr, (2, 0, 1))  # (T, H, W)
         T_max      = labels.shape[0]
@@ -553,7 +637,7 @@ for city_label, sim_name, split in EVAL_CHUNKS:
             plt.tight_layout()
             pk_fname = f"gtctx_peak_{city_label}_{stem}_t{peak_t}"
             plt.savefig(str(OUTPUT_DIR / f"{pk_fname}.png"), dpi=150)
-            plt.savefig(f"/home/jainr/climateiq-cnn-6/{pk_fname}.png", dpi=150)
+            plt.savefig(f"/home/rmj7591/climateiq-cnn/predictions/{pk_fname}.png", dpi=150)
             print(f"  Saved GT-context peak: {pk_fname}.png")
             plt.close()
 

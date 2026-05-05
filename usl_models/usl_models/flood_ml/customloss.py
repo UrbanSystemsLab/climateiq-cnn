@@ -208,6 +208,66 @@ def make_hybrid_loss(y_true, y_pred):
     return weighted_log_mse + 0.5 * peak_penalty + 0.5 * focal
 
 
+@register_keras_serializable(package="Custom", name="make_hybrid_loss_v3")
+def make_hybrid_loss_v3(y_true, y_pred):
+    """V3 loss — LINEAR MSE weighted by sqrt(depth), NOT log-depth.
+
+    The v1/v2 losses used log(1+depth)² which *penalises shallow errors more
+    than deep errors* — e.g. 5cm error on 10cm depth scores worse than 1m error
+    on 3m depth. This causes the model to systematically underpredict deep floods.
+
+    V3 design:
+    - Linear MSE in metres (not log-space) — error of 1m on 3m depth now dominates.
+    - Weight = √(y_true + 1) + 10·(y_true > 0.5) — deeper pixels get stronger
+      gradients, so the model is forced to learn full depth range.
+    - Peak penalty in linear space — penalises pred_max < GT_max directly.
+    - Focal at 0.3 weight — still reduces false positives but lets MSE dominate.
+
+    Expected impact: pred_max should track GT_max (instead of capping at ~2.4m),
+    closing the 26-pt gap on Metric A by matching deep-water predictions.
+    """
+    DEPTH_CAP_M_V3 = 4.0
+    if y_true.shape.ndims == 4 and y_true.shape[-1] == 1:
+        y_true = y_true[..., 0]
+    if y_pred.shape.ndims == 4 and y_pred.shape[-1] == 1:
+        y_pred = y_pred[..., 0]
+
+    valid = tf.math.logical_not(tf.math.is_nan(y_true))
+    y_true = tf.where(valid, y_true, tf.zeros_like(y_true))
+    y_pred = tf.where(valid, y_pred, tf.zeros_like(y_pred))
+    valid_float = tf.cast(valid, tf.float32)
+
+    y_true = tf.minimum(y_true, DEPTH_CAP_M_V3)
+    y_pred_relu = tf.nn.relu(y_pred)
+
+    # 5×5 spatial-activity mask around flooded pixels (keep dry context ring)
+    flood_bin = tf.cast(y_true > 0.0, tf.float32)[..., tf.newaxis]
+    active = tf.squeeze(
+        tf.nn.max_pool2d(flood_bin, ksize=5, strides=1, padding="SAME"), axis=-1
+    )
+    any_active = tf.reduce_any(active > 0.5, axis=[1, 2], keepdims=True)
+    active = tf.where(any_active, active, tf.ones_like(active))
+    effective_mask = valid_float * active
+
+    # Depth-weighted linear MSE: deep pixels contribute MORE, not less
+    depth_weight = tf.sqrt(y_true + 1.0) + 10.0 * tf.cast(y_true > 0.5, tf.float32)
+    squared_error = tf.square(y_pred_relu - y_true)
+    weighted_mse = tf.reduce_sum(
+        depth_weight * squared_error * effective_mask
+    ) / (tf.reduce_sum(effective_mask) + 1e-8)
+
+    # Peak penalty in LINEAR space (not log) — forces pred_max → GT_max
+    valid_f = tf.cast(valid, tf.float32)
+    pred_max = tf.reduce_max(y_pred_relu * valid_f, axis=[1, 2])
+    true_max = tf.reduce_max(y_true * valid_f, axis=[1, 2])
+    peak_penalty = tf.reduce_mean(tf.square(pred_max - true_max))
+
+    # Focal loss for flood/dry classification (lower weight vs v1: 0.3 instead of 0.5)
+    focal = _flood_focal_loss(y_true, y_pred_relu)
+
+    return weighted_mse + 1.0 * peak_penalty + 0.3 * focal
+
+
 # ---------------------------------------------------------------------------
 # Soft arrival-time head
 # ---------------------------------------------------------------------------

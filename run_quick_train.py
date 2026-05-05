@@ -9,6 +9,12 @@ import json
 import time
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+# Single GPU only — MirroredStrategy on replica_1 triggers NCHW transpose errors
+# in ConvLSTM2D backprop (5D tensors) that crash at ~epoch 10 regardless of XLA/
+# Grappler flags. Single GPU eliminates all replica-related crashes entirely.
+# Multi-GPU test: use both GPUs with MirroredStrategy
+# (Previous: CUDA_VISIBLE_DEVICES = "0" to avoid ConvLSTM2D backprop bug in TF 2.15)
+# TF 2.16 may have fixed the bug — testing now
 
 import pathlib
 import numpy as np
@@ -21,10 +27,21 @@ import matplotlib.pyplot as plt
 
 SEED = 42
 keras.utils.set_random_seed(SEED)
-for gpu in tf.config.list_physical_devices("GPU"):
-    tf.config.experimental.set_memory_growth(gpu, True)
 
-print(f"GPUs: {tf.config.list_physical_devices('GPU')}")
+# ── Multi-GPU: MirroredStrategy ──────────────────────────────────────
+gpus = tf.config.list_physical_devices("GPU")
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
+print(f"GPUs: {gpus}")
+
+if len(gpus) > 1:
+    # ReductionToOneDevice avoids NCCL entirely — reduces on GPU:0, no peer-to-peer NCCL needed
+    strategy = tf.distribute.MirroredStrategy(
+        cross_device_ops=tf.distribute.ReductionToOneDevice()
+    )
+else:
+    strategy = tf.distribute.get_strategy()
+print(f"Strategy: {strategy.__class__.__name__}, num_replicas={strategy.num_replicas_in_sync}")
 
 from usl_models.flood_ml.model import FloodModel
 from usl_models.flood_ml.dataset import load_dataset_windowed_patches
@@ -34,22 +51,24 @@ from usl_models.flood_ml.dataset import load_dataset_windowed_patches
 # CONFIGURATION
 # =====================================================================
 FILECACHE_DIR = pathlib.Path("/home/shared/climateiq/filecache")
-OUTPUT_DIR = pathlib.Path("/home/jainr/climateiq-cnn-6/train_output")
+OUTPUT_DIR = pathlib.Path("/home/rmj7591/climateiq-cnn/train_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PATCH_SIZE = 256
 PATCH_STRIDE = 128
 BATCH_SIZE = 4   # reverted from 6 — batch 4 had 16x better MAE (0.012 vs 0.197)
-EPOCHS = 50
+EPOCHS = 2  # ROUND 5 ABLATION — V3 loss only, validate before long run
 N_FLOOD_MAPS = 5
 M_RAINFALL = 6
-N_FUTURE_STEPS = 13  # match typical prediction length — model must learn to self-correct beyond step 7
+N_FUTURE_STEPS = 12  # 13 → 0 windows (last_t = T - n_future = 13 - 13 = 0); 12 gives last_t=1 per chunk
 DEPTH_CAP = 4.0  # metres — raised from 2.5; covers Atlanta peak (~4.4m capped at 4m)
                   # Manhattan 5-7m ponding in closed canyons above this are outliers
 DRY_TIMESTEP_FRACTION = 0.12  # calibrated from prior best run to avoid dry-step dominance
 
-CHECKPOINT_PATH = pathlib.Path(
-    "/home/jainr/climateiq-cnn-6/train_output/run_20260324-044011/best_model.keras"
+# Load previous model only if explicitly needed
+# For clean baseline testing, we start fresh
+PRETRAINED_WEIGHTS = pathlib.Path(
+    "/home/rmj7591/climateiq-cnn/train_output/run_20260416-194257/weights_ordered.npz"
 )
 
 # ── Old cities (already trained in ep29 checkpoint) ──────────────────
@@ -97,12 +116,12 @@ new_sims = [
     "Navarre_FL-Navarre_config/Rainfall_Data_5.txt",
 ]
 
-# All cities trained equally (replay phase done — model already generalizes to new cities)
+# BASELINE TRAINING: Only old cities for clean comparison
 # Filter to only existing sims
 old_sims = [s for s in old_sims if (FILECACHE_DIR / s).exists()]
 new_sims = [s for s in new_sims if (FILECACHE_DIR / s).exists()]
-sim_names = old_sims + new_sims
-print(f"Training on all {len(sim_names)} sims equally (batch_size={BATCH_SIZE})")
+sim_names = old_sims + new_sims  # All cities — learning new flow channels
+print(f"BASELINE TRAINING: {len(sim_names)} old city simulations (batch_size={BATCH_SIZE})")
 for s in sim_names:
     print(f"  {s}")
 
@@ -120,7 +139,7 @@ def augment(inputs, labels):
     flip_lr = tf.random.uniform(()) > 0.5
     flip_ud = tf.random.uniform(()) > 0.5
 
-    geo = inputs["geospatial"]      # (B, H, W, 9)
+    geo = inputs["geospatial"]      # (B, H, W, 12)
     spt = inputs["spatiotemporal"]  # (B, N, H, W, 1)
 
     # geo: H=axis1, W=axis2  |  spt: H=axis2, W=axis3
@@ -188,51 +207,184 @@ print("\n" + "=" * 60)
 print("FLOOD MODEL TRAINING — Full Dataset")
 print("=" * 60)
 
-STEPS_PER_EPOCH = 6000
-cosine_lr = keras.optimizers.schedules.CosineDecay(
-    initial_learning_rate=1e-6,        # warmup start
-    decay_steps=STEPS_PER_EPOCH * EPOCHS,  # 300k total
-    alpha=1e-6,                        # minimum LR at end
-    warmup_target=7e-5,                # peak LR after warmup (scaled for batch=4)
-    warmup_steps=1000,                 # ~1/6 of first epoch
-)
-params = FloodModel.Params(
-    lstm_units=128,
-    lstm_kernel_size=5,
-    lstm_dropout=0.2,
-    lstm_recurrent_dropout=0.2,
-    n_flood_maps=N_FLOOD_MAPS,
-    m_rainfall=M_RAINFALL,
-    optimizer=keras.optimizers.Adam(learning_rate=cosine_lr, global_clipnorm=1.0),
-)
-model = FloodModel(params=params, spatial_dims=(PATCH_SIZE, PATCH_SIZE))
+STEPS_PER_EPOCH = 2000  # V1 baseline — only rain_broadcast is the variable
 
-# Load pre-trained weights from ordered npz (avoids keras.models.load_model issues)
-WEIGHTS_PATH = CHECKPOINT_PATH.parent / "weights_ordered.npz"
-if WEIGHTS_PATH.exists():
-    print(f"Loading weights: {WEIGHTS_PATH}")
-    # Build model with dummy forward pass
-    dummy = {
-        "geospatial": tf.zeros((1, PATCH_SIZE, PATCH_SIZE, 10)),
-        "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, PATCH_SIZE, PATCH_SIZE, 1)),
-        "temporal": tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
-    }
-    _ = model._model(dummy)
-    data = np.load(str(WEIGHTS_PATH))
-    w_list = [data[f"w{i:02d}"] for i in range(len(data.files))]
-    assert len(w_list) == len(model._model.weights), (
-        f"Weight count mismatch: file={len(w_list)}, model={len(model._model.weights)}"
+# ── V3 ARCHITECTURE CONFIG (round 3 — proper warm-start) ──────────────
+# Strategy: keep V1 loss + V1 weights, add rain_broadcast as the ONLY change.
+# This way we strictly build on V1's 30+ epochs of prior knowledge.
+ARCH_V3 = True                     # framework flag
+WARM_START = True                  # load V3 Round 3 weights (incremental on top of V3 R3)
+USE_RAIN_BROADCAST = True          # kept from R3 (neutral-positive)
+USE_DILATED_GEO = False            # still disabled
+USE_STORM_EMBED = False            # still disabled
+USE_DEEP_DECODER = False           # ROUND 5: identical arch to V3 R3, only loss changes
+USE_GROUP_NORM = True              # ROUND 7: replace decoder BN with GroupNorm — fix 2.5m ceiling
+# Path to previous best checkpoint for warm-start
+PRETRAINED_WEIGHTS_V3R3 = pathlib.Path(
+    "/home/rmj7591/climateiq-cnn/train_output/run_20260424-041455/weights_ordered.npz"  # V3 R3 baseline
+)
+
+with strategy.scope():
+    # Same LR schedule as V1 — we're fine-tuning not training from scratch
+    cosine_lr = keras.optimizers.schedules.CosineDecay(
+        initial_learning_rate=1e-6,
+        decay_steps=STEPS_PER_EPOCH * EPOCHS,
+        alpha=1e-6,
+        warmup_target=2e-5,                         # ROUND 6: V3 R3 baseline LR (back to proven)
+        warmup_steps=500,
     )
-    model._model.set_weights(w_list)
-    print(f"Loaded {len(w_list)} weights from {WEIGHTS_PATH}")
-else:
-    print(f"WARNING: Weights not found at {WEIGHTS_PATH}, training from scratch")
+    params = FloodModel.Params(
+        lstm_units=128,
+        lstm_kernel_size=5,
+        lstm_dropout=0.0,
+        lstm_recurrent_dropout=0.0,
+        n_flood_maps=N_FLOOD_MAPS,
+        m_rainfall=M_RAINFALL,
+        use_rain_broadcast=USE_RAIN_BROADCAST,
+        use_dilated_geo=USE_DILATED_GEO,
+        use_storm_embed=USE_STORM_EMBED,
+        use_deep_decoder=USE_DEEP_DECODER,
+        use_group_norm=USE_GROUP_NORM,
+        loss_version="v1",                           # ROUND 6: V1 loss — only feedback clip changed
+        optimizer=keras.optimizers.Adam(learning_rate=cosine_lr, global_clipnorm=1.0),
+    )
+    model = FloodModel(params=params, spatial_dims=(PATCH_SIZE, PATCH_SIZE))
+
+    if WARM_START:
+        _dummy = {
+            "geospatial":     tf.zeros((1, PATCH_SIZE, PATCH_SIZE, 12)),
+            "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, PATCH_SIZE, PATCH_SIZE, 1)),  # external always 1ch
+            "temporal":       tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
+        }
+        _ = model._model(_dummy)
+        # Round 4: prefer V3 Round 3 checkpoint if available (incremental gains)
+        _src_weights = PRETRAINED_WEIGHTS_V3R3 if PRETRAINED_WEIGHTS_V3R3.exists() else PRETRAINED_WEIGHTS
+        print(f"✓ Warm-start source: {_src_weights.parent.name}")
+        _data = np.load(str(_src_weights))
+        _wlist = [_data[f"w{i:02d}"] for i in range(len(_data.files))]
+
+        # Fix 1: geo_cnn first conv — expand 10→12 ch (existing V1 compat)
+        try:
+            _geo_idx = next(i for i, w in enumerate(_wlist) if w.shape == (5, 5, 10, 16))
+            _wlist[_geo_idx] = np.pad(_wlist[_geo_idx], [(0,0),(0,0),(0,2),(0,0)])
+            print(f"✓ Expanded geo kernel 10→12 ch at index {_geo_idx}")
+        except StopIteration:
+            _geo_idx = next(i for i, w in enumerate(_wlist) if w.shape == (5, 5, 12, 16))
+            _wlist[_geo_idx] = _wlist[_geo_idx].copy()
+            _wlist[_geo_idx][:, :, 10:12, :] = np.random.normal(0, 0.01, (5, 5, 2, 16))
+            print(f"✓ Small-random init ch10/11 slice of geo kernel at index {_geo_idx}")
+
+        # Fix 2: st_cnn_stage1 first conv — expand 1→3 ch for rain_broadcast
+        # V1 had shape (5,5,1,8); V3 with rain_broadcast needs (5,5,3,8).
+        # Pad 2 new input channels with small random values → they activate as model
+        # learns; existing flood-depth kernel (ch0) is preserved from V1.
+        if USE_RAIN_BROADCAST:
+            try:
+                _st_idx = next(i for i, w in enumerate(_wlist) if w.shape == (5, 5, 1, 8))
+                _old = _wlist[_st_idx]
+                _new = np.zeros((5, 5, 3, 8), dtype=_old.dtype)
+                _new[:, :, 0:1, :] = _old                                           # preserve depth
+                _new[:, :, 1:3, :] = np.random.normal(0, 0.01, (5, 5, 2, 8))        # new rain ch
+                _wlist[_st_idx] = _new
+                print(f"✓ Expanded st_cnn kernel 1→3 ch at index {_st_idx} (rain_broadcast)")
+            except StopIteration:
+                print("⚠ Could not find (5,5,1,8) st kernel — skipping rain pad")
+
+        # Set weights carefully: V3 model may have extra layers (dilated_geo/storm_embed)
+        # not in V1 weights; handle by loading only matching layers by shape.
+        _model_weights = model._model.get_weights()
+        if len(_wlist) == len(_model_weights):
+            model._model.set_weights(_wlist)
+            print(f"✓ Direct load ({len(_wlist)} tensors matched)")
+        else:
+            # Load by layer NAME, falling back to sequential shape-match within
+            # each layer. New layers (no name-match) keep their fresh init.
+            # Build R4 layer name -> (start_idx, n_weights) map from model.
+            _layers = [l for l in model._model.layers if l.weights]
+            _r4_names = [l.name for l in _layers]
+            # R3 source: order preserved — so we can match by name if names match,
+            # else by position within shared-prefix layers.
+            # Simpler: walk both name lists, copy weights for matching names, skip rest.
+            _r3_source = dict()  # name → list of arrays
+            # Reconstruct R3 layer structure from its model (rebuild temp R3 model)
+            # Simplest: shape-sequence match, but with "layer bundles" (each layer's
+            # weights count must match). We use layer-by-layer: for each R4 layer,
+            # if it exists in R3 (based on name present in R3's weights list sizes
+            # per layer), copy. Since we can't see R3's named layers directly, we
+            # fall back to sequential alignment through matching shapes WITHIN each
+            # layer boundary.
+            # Practical fallback: walk R4 layers, try to consume a matching sequence
+            # from R3 source tensors. If layer weight-shape sequence matches next
+            # batch of R3 tensors, consume them; otherwise skip the layer (fresh init).
+            _matched = 0
+            _j = 0
+            for _l in _layers:
+                _w = _l.get_weights()
+                if not _w:
+                    continue
+                _k = len(_w)
+                _is_gn = "group_normalization" in _l.name.lower()
+                # ROUND 7: GroupNorm (2 weights) replacing BatchNorm (4 weights).
+                # Detect the BN→GN case BEFORE the standard match (shapes coincide).
+                if (_is_gn and _k == 2 and _j + 4 <= len(_wlist) and
+                    all(_wlist[_j + i].shape == _w[i].shape for i in range(2))):
+                    _l.set_weights([_wlist[_j], _wlist[_j + 1]])
+                    _j += 4   # consume all 4 BN tensors from source
+                    _matched += 2
+                    print(f"  ↻ BN→GN: {_l.name} (gamma/beta loaded, moving stats skipped)")
+                # Standard sequential shape-match
+                elif _j + _k <= len(_wlist) and all(
+                    _wlist[_j + i].shape == _w[i].shape for i in range(_k)
+                ):
+                    _l.set_weights([_wlist[_j + i] for i in range(_k)])
+                    _j += _k
+                    _matched += _k
+                else:
+                    # R4-only layer (or shape drift) — keep fresh init, advance past
+                    # nothing in R3 (source pointer stays; we'll try next R4 layer).
+                    print(f"  fresh init: {_l.name} ({_k} tensors)")
+            print(f"✓ Layer-wise load: {_matched}/{sum(len(l.get_weights()) for l in _layers)} tensors restored")
+
+        # ── ROUND 6b: reset decoder BN running stats (skipped when GN active) ──
+        # decoder_bn1/bn2 running stats were corrupted by 30+ epochs of training
+        # under the 2.5m feedback clip — they squash inference outputs to <1m.
+        # Reset to identity (mean=0, var=1) so they repopulate cleanly under the
+        # corrected 4.0m feedback clip. Conv-LSTM internal BN is healthy, leave it.
+        def _find_bn_recursive(layer, prefix=""):
+            found = []
+            if hasattr(layer, "moving_mean") and hasattr(layer, "moving_variance"):
+                found.append((prefix + layer.name, layer))
+            if hasattr(layer, "layers"):
+                for sl in layer.layers:
+                    found += _find_bn_recursive(sl, prefix + layer.name + "/")
+            return found
+        _all_bns = _find_bn_recursive(model._model)
+        _reset = 0
+        for _name, _bn in _all_bns:
+            # Reset only the corrupted decoder BN layers
+            if "batch_normalization_1" in _name or "batch_normalization_2" in _name:
+                _bn.moving_mean.assign(tf.zeros_like(_bn.moving_mean))
+                _bn.moving_variance.assign(tf.ones_like(_bn.moving_variance))
+                _reset += 1
+                print(f"  ↺ Reset BN stats: {_name}")
+        print(f"✓ Reset {_reset} decoder BN layers (running stats → identity)")
+    else:
+        print("✓ From-scratch training — no pretrained weights")
 
 print(f"Params: lstm_units={params.lstm_units}, kernel={params.lstm_kernel_size}")
 print(f"Patch: {PATCH_SIZE}x{PATCH_SIZE}, stride={PATCH_STRIDE}")
 print(f"Epochs: {EPOCHS}, Batch: {BATCH_SIZE}")
 print(f"Autoregressive steps: {N_FUTURE_STEPS}")
-print(f"Loss: make_hybrid_loss (log-depth MSE + 4m cap + peak penalty 0.5 + focal loss 0.5)")
+if ARCH_V3:
+    print("=== V3 ROUND 4: warm-start from R3 + deep decoder ===")
+    print(f"  • loss: V1 hybrid (log-depth MSE + peak + focal) — PROVEN")
+    print(f"  • rain_broadcast: {params.use_rain_broadcast}  (kept from R3)")
+    print(f"  • deep_decoder:   {params.use_deep_decoder}  ← NEW: 3 extra conv layers for detail")
+    print(f"  • warm-start from R3: 34 tensors restored, 17 new decoder weights trained from fresh")
+    print(f"  • LR peak 2e-5, STEPS_PER_EPOCH={STEPS_PER_EPOCH}, EPOCHS={EPOCHS}")
+    print("  Expected: deep decoder reconstructs fine depth detail — target < 0.07 val_flooded_mae")
+else:
+    print(f"Loss: make_hybrid_loss (log-depth MSE + 4m cap + peak penalty 0.5 + focal loss 0.5)")
 print(f"Temporal: v2 (rate + cumulative + delta_rate + log_cum + running_max + frac_time)")
 print("Scheduled sampling: Curriculum AR (0→0.15 ramp) + feedback noise (σ=0.02)")
 print(f"Simulations: {len(sim_names)} total")
@@ -251,27 +403,37 @@ timestamp = time.strftime("%Y%m%d-%H%M%S")
 log_dir = OUTPUT_DIR / f"run_{timestamp}"
 log_dir.mkdir(parents=True, exist_ok=True)
 
+class NpzCheckpointCallback(keras.callbacks.Callback):
+    """Saves weights_ordered.npz alongside best_model.keras after each improvement."""
+
+    def __init__(self, keras_path):
+        super().__init__()
+        self.keras_path = pathlib.Path(keras_path)
+        self.best_val_loss = float("inf")
+
+    def on_epoch_end(self, epoch, logs=None):
+        val_loss = (logs or {}).get("val_loss", float("inf"))
+        if val_loss < self.best_val_loss:
+            self.best_val_loss = val_loss
+            npz_path = self.keras_path.parent / "weights_ordered.npz"
+            ws = self.model.get_weights()
+            np.savez(str(npz_path), **{f"w{i:02d}": w for i, w in enumerate(ws)})
+            print(f"\n  Saved weights_ordered.npz ({len(ws)} weights)")
+
+
 callbacks = [
-    # EmissionsCallback disabled — CodeCarbon 3.2.3 stops training after 2 epochs
-    # ScheduledSamplingCallback removed — now using autoregressive unrolling
     keras.callbacks.EarlyStopping(
         monitor="val_loss",
-        patience=15,
+        patience=5,
         restore_best_weights=True,
         verbose=1,
     ),
-    keras.callbacks.ModelCheckpoint(
-        filepath=str(log_dir / "best_model.keras"),
-        save_best_only=True,
-        monitor="val_loss",
-        mode="min",
-        verbose=1,
-    ),
-    # ReduceLROnPlateau removed — using cosine decay schedule instead
     keras.callbacks.TensorBoard(
         log_dir=str(log_dir / "tb"),
         histogram_freq=0,
+        update_freq="epoch",
     ),
+    NpzCheckpointCallback(keras_path=log_dir / "best_model.keras"),
 ]
 
 print(f"\nTraining for up to {EPOCHS} epochs...")

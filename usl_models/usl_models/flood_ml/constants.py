@@ -1,7 +1,7 @@
 """Constant definitions for Flood CNN."""
 
 # Geospatial constants
-GEO_FEATURES = 10  # 9 raw channels + DEM sink (ch9, computed on-the-fly from ch0)
+GEO_FEATURES = 12  # 9 raw + DEM sink (ch9) + flow curvature (ch10) + TWI (ch11)
 MAP_HEIGHT = 1000
 MAP_WIDTH = 1000
 

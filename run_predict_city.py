@@ -33,7 +33,7 @@ for gpu in tf.config.list_physical_devices("GPU"):
 from google.cloud import firestore  # type:ignore[attr-defined]
 from google.cloud import storage  # type:ignore[attr-defined]
 
-from usl_models.flood_ml.dataset import compute_dem_sink_channel
+from usl_models.flood_ml.dataset import compute_dem_sink_channel, compute_flow_features
 from usl_models.flood_ml.model import (
     FloodModel,
     SpatialAttention,
@@ -46,20 +46,20 @@ from usl_models.shared import downloader
 # =====================================================================
 # CONFIGURATION — change these for your city / model
 # =====================================================================
-STUDY_AREA = "NYC_Predictions"  # Firestore study_areas document name
+STUDY_AREA = "Chicago_Predictions"
 RAINFALL_CONFIGS = [
-    f"NYC%2FRainfall_Data_{i}.txt" for i in range(1, 10)
-]  # all 9 scenarios (re-run with updated rainfall data)
+    f"Chicago%2FRainfall_Data_{i}.txt" for i in range(1, 10)
+]  # 9 scenarios
 
-# Model checkpoint — new training run with gradient clipping + delta rate + feedback fix
-MODEL_DIR = pathlib.Path("train_output/run_20260324-044011")
-WEIGHTS_PATH = MODEL_DIR / "weights_ordered.npz"  # won't exist yet, falls back to keras
+# Model checkpoint
+MODEL_DIR = pathlib.Path("/home/rmj7591/climateiq-cnn/train_output/run_20260329-225327")
+WEIGHTS_PATH = MODEL_DIR / "weights_ordered.npz"
 MODEL_PATH = MODEL_DIR / "best_model.keras"
 
 # Output
 OUTPUT_BUCKET = "climateiq-predictions"  # GCS bucket for results
 OUTPUT_PREFIX = "flood_predictions"  # prefix inside bucket
-LOCAL_OUTPUT_DIR = pathlib.Path("predict_city_output")
+LOCAL_OUTPUT_DIR = pathlib.Path("/home/rmj7591/climateiq-cnn/predict_city_output")
 
 # Model params
 CHUNK_SIZE = 1000
@@ -91,13 +91,18 @@ def load_model():
         )
         # Build with N_FLOOD_MAPS temporal window (call uses windowed input)
         dummy = {
-            "geospatial": tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 10)),
+            "geospatial": tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 12)),
             "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, CHUNK_SIZE, CHUNK_SIZE, 1)),
             "temporal": tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
         }
         _ = model._model(dummy)
         data = np.load(str(WEIGHTS_PATH))
         w_list = [data[f"w{i:02d}"] for i in range(len(data.files))]
+        # Expand geo_cnn first Conv2D kernel from (5,5,10,16) → (5,5,12,16).
+        # New channels (10,11) initialised to zero so output is unchanged until
+        # the model is fine-tuned to use them.
+        GEO_IDX = next(i for i, w in enumerate(w_list) if w.shape == (5, 5, 10, 16))
+        w_list[GEO_IDX] = np.pad(w_list[GEO_IDX], [(0,0),(0,0),(0,2),(0,0)])
         model._model.set_weights(w_list)
         print(f"  Loaded {len(w_list)} weights from {WEIGHTS_PATH}")
         return model
@@ -119,7 +124,7 @@ def load_model():
 
         loaded = FloodConvLSTM(params=params, spatial_dims=(CHUNK_SIZE, CHUNK_SIZE))
         dummy = {
-            "geospatial": tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 10)),
+            "geospatial": tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 12)),
             "temporal": tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
             "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, CHUNK_SIZE, CHUNK_SIZE, 1)),
         }
@@ -169,7 +174,7 @@ def pad_temporal_to_max(temporal_2d):
 # =====================================================================
 # PREDICTION — use call_n then take max across timesteps
 # =====================================================================
-FLOOD_PERCENTILE = 75  # Use 75th percentile to filter AR accumulation spikes
+FLOOD_PERCENTILE = 100  # Use max across timesteps to capture true flood peak extent
 
 
 def predict_chunk_peak(model, geo_tf, temporal_full, rainfall_duration, buildings_mask=None):
@@ -390,7 +395,7 @@ def mosaic_and_reproject(chunk_tifs, output_path, dst_crs=OUTPUT_CRS):
 # MAIN
 # =====================================================================
 def main():
-    db = firestore.Client()
+    db = firestore.Client(project='climateiq-test')
     gcs_client = storage.Client()
 
     # ── 1. Get study area metadata (CRS, cell_size, chunk layout) ────
@@ -438,7 +443,8 @@ def main():
             np.float32
         )
         dem_sink = compute_dem_sink_channel(geo_raw)
-        geospatial = np.concatenate([geo_raw, dem_sink], axis=-1)  # (H, W, 10)
+        flow_feats = compute_flow_features(geo_raw, cell_size=cell_size)
+        geospatial = np.concatenate([geo_raw, dem_sink, flow_feats], axis=-1)  # (H, W, 12)
         H, W = geospatial.shape[:2]
 
         # Extract valid_mask: pixels outside study area have elevation == -1.0
@@ -464,15 +470,17 @@ def main():
         if (ci + 1) % 20 == 0 or ci == total_chunks - 1:
             print(f"    Downloaded {ci+1}/{total_chunks}")
 
-    # ── 3. Load model ONCE ───────────────────────────────────────────
-    model = load_model()
     LOCAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # ── 4. Loop over all rainfall scenarios ──────────────────────────
+    # ── 3+4. Loop over all rainfall scenarios (reload model each time to free GPU memory) ──
     for scenario_idx, rainfall_config in enumerate(RAINFALL_CONFIGS):
         print(f"\n{'='*60}")
         print(f"  SCENARIO {scenario_idx+1}/{len(RAINFALL_CONFIGS)}: {rainfall_config}")
         print(f"{'='*60}")
+
+        # Clear GPU memory from previous scenario before loading model
+        tf.keras.backend.clear_session()
+        model = load_model()
 
         # Get rainfall metadata
         try:
@@ -581,6 +589,12 @@ def main():
     print(f"  Local:       {LOCAL_OUTPUT_DIR}/")
     print(f"  GCS:         gs://{OUTPUT_BUCKET}/{OUTPUT_PREFIX}/{STUDY_AREA}/")
     print(f"{'='*60}")
+
+    # Remove local output directory now that everything is on GCS
+    import shutil
+    if LOCAL_OUTPUT_DIR.exists():
+        shutil.rmtree(LOCAL_OUTPUT_DIR)
+        print(f"  Removed local output dir: {LOCAL_OUTPUT_DIR}")
 
 
 if __name__ == "__main__":
