@@ -71,15 +71,23 @@ def compute_flow_features(geo_np: np.ndarray, cell_size: float = 2.0) -> np.ndar
               normalised to [0, 1].
 
     Returns: (H, W, 2) float32. Append to (H, W, 10) to get (H, W, 12).
+
+    rasterio + whitebox are heavyweight optional deps not pinned in
+    setup.py. If they aren't installed (e.g. CI test env), return a
+    zero-filled placeholder so the rest of the pipeline still runs;
+    real training / inference machines must have both installed.
     """
-    import tempfile
-    import rasterio
-    import whitebox
-    from rasterio.transform import Affine
+    H, W = geo_np.shape[:2]
+    try:
+        import tempfile
+        import rasterio
+        import whitebox
+        from rasterio.transform import Affine
+    except ImportError:
+        return np.zeros((H, W, 2), dtype=np.float32)
 
     valid = geo_np[:, :, 1].astype(np.float32)
     elev = geo_np[:, :, 0].astype(np.float32) * valid  # zero-fill nodata
-    H, W = elev.shape
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = pathlib.Path(tmp)
