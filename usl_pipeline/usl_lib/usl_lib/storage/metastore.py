@@ -533,9 +533,7 @@ class HeatScenarioConfig:
         # Escape the name to avoid characters not allowed in IDs such as slashes.
         return cast(
             firestore.DocumentReference,
-            db.collection(WRF_HEAT_CONFIG).document(
-                urllib.parse.quote(name, safe=())
-            ),
+            db.collection(WRF_HEAT_CONFIG).document(urllib.parse.quote(name, safe=())),
         )
 
 
