@@ -4,7 +4,7 @@ import logging
 import random
 import pathlib
 import numpy as np
-from scipy.ndimage import uniform_filter, laplace, sobel, gaussian_filter
+from scipy.ndimage import uniform_filter
 from typing import Any, Iterator, Tuple
 
 from google.cloud import firestore  # type:ignore[attr-defined]
@@ -57,9 +57,7 @@ def compute_dem_sink_channel(geo_np: np.ndarray) -> np.ndarray:
     return ch[:, :, np.newaxis]  # (H, W, 1)
 
 
-def compute_flow_features(
-    geo_np: np.ndarray, cell_size: float = 2.0
-) -> np.ndarray:
+def compute_flow_features(geo_np: np.ndarray, cell_size: float = 2.0) -> np.ndarray:
     """D8 flow direction + flow accumulation via whitebox on the chunk DEM.
 
     Per-chunk D8 hydrology (not stitched across chunks — water is routed within
@@ -80,7 +78,7 @@ def compute_flow_features(
     from rasterio.transform import Affine
 
     valid = geo_np[:, :, 1].astype(np.float32)
-    elev = (geo_np[:, :, 0].astype(np.float32) * valid)  # zero-fill nodata
+    elev = geo_np[:, :, 0].astype(np.float32) * valid  # zero-fill nodata
     H, W = elev.shape
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -88,9 +86,15 @@ def compute_flow_features(
         dem_tif = tmp_path / "dem.tif"
         tr = Affine(cell_size, 0, 0, 0, -cell_size, H * cell_size)
         with rasterio.open(
-            dem_tif, "w",
-            driver="GTiff", height=H, width=W,
-            count=1, dtype="float32", transform=tr, crs="EPSG:3857",
+            dem_tif,
+            "w",
+            driver="GTiff",
+            height=H,
+            width=W,
+            count=1,
+            dtype="float32",
+            transform=tr,
+            crs="EPSG:3857",
         ) as f:
             f.write(elev[np.newaxis])
 
@@ -100,13 +104,15 @@ def compute_flow_features(
 
         fdir_tif = tmp_path / "fdir.tif"
         facc_tif = tmp_path / "facc.tif"
-        wbt.d8_pointer(
-            dem=str(dem_tif), output=str(fdir_tif), esri_pntr=False
-        )
+        wbt.d8_pointer(dem=str(dem_tif), output=str(fdir_tif), esri_pntr=False)
         wbt.d8_flow_accumulation(
-            i=str(fdir_tif), output=str(facc_tif),
-            out_type="cells", log=False, clip=False,
-            pntr=True, esri_pntr=False,
+            i=str(fdir_tif),
+            output=str(facc_tif),
+            out_type="cells",
+            log=False,
+            clip=False,
+            pntr=True,
+            esri_pntr=False,
         )
 
         with rasterio.open(fdir_tif) as f:
@@ -119,14 +125,12 @@ def compute_flow_features(
     return np.stack([fdir * valid, facc * valid], axis=-1).astype(np.float32)
 
 
-def _compute_all_geo_features(
-    geo_np: np.ndarray, cell_size: float = 2.0
-) -> np.ndarray:
+def _compute_all_geo_features(geo_np: np.ndarray, cell_size: float = 2.0) -> np.ndarray:
     """Append DEM sink (ch9) and flow features (ch10-11) to raw geo (H,W,9).
 
     Returns (H, W, 12).
     """
-    sink = compute_dem_sink_channel(geo_np)          # (H, W, 1)
+    sink = compute_dem_sink_channel(geo_np)  # (H, W, 1)
     flow = compute_flow_features(geo_np, cell_size)  # (H, W, 2)
     return np.concatenate([geo_np, sink, flow], axis=-1)
 
@@ -137,9 +141,7 @@ def _load_geo_with_sink(path, cell_size: float = 2.0) -> np.ndarray:
     return _compute_all_geo_features(geo, cell_size)
 
 
-def _append_dem_sink(
-    geo_tensor: tf.Tensor, cell_size: float = 2.0
-) -> tf.Tensor:
+def _append_dem_sink(geo_tensor: tf.Tensor, cell_size: float = 2.0) -> tf.Tensor:
     """Append physics channels to a (H, W, 9) geospatial tf.Tensor → (H, W, 12)."""
     geo_np = geo_tensor.numpy().astype(np.float32)
     geo12 = _compute_all_geo_features(geo_np, cell_size)
@@ -266,7 +268,6 @@ def load_dataset_windowed(
                     model_input, labels, n_flood_maps
                 ):
                     yield (window_input, window_label)
-            
 
     dataset = tf.data.Dataset.from_generator(
         generator=generator,
@@ -331,7 +332,6 @@ def load_prediction_dataset(
       firestore_client: The client to use when interacting with Firestore.
       storage_client: The client to use when interacting with Cloud Storage.
     """
-    
     firestore_client = firestore_client or firestore.Client()
     storage_client = storage_client or storage.Client()
 

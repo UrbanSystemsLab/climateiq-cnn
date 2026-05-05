@@ -252,9 +252,9 @@ def make_hybrid_loss_v3(y_true, y_pred):
     # Depth-weighted linear MSE: deep pixels contribute MORE, not less
     depth_weight = tf.sqrt(y_true + 1.0) + 10.0 * tf.cast(y_true > 0.5, tf.float32)
     squared_error = tf.square(y_pred_relu - y_true)
-    weighted_mse = tf.reduce_sum(
-        depth_weight * squared_error * effective_mask
-    ) / (tf.reduce_sum(effective_mask) + 1e-8)
+    weighted_mse = tf.reduce_sum(depth_weight * squared_error * effective_mask) / (
+        tf.reduce_sum(effective_mask) + 1e-8
+    )
 
     # Peak penalty in LINEAR space (not log) — forces pred_max → GT_max
     valid_f = tf.cast(valid, tf.float32)
