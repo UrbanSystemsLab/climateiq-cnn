@@ -87,7 +87,7 @@ def test_load_dataset_full(mock_metastore) -> None:
         element["geospatial"].numpy()[:, :, :, :9],
         numpy.array([mock_spatial_features] * batch_size),
     )
-    assert element["geospatial"].shape[-1] == 10
+    assert element["geospatial"].shape[-1] == 12  # 9 raw + sink + 2 flow
 
     # spatiotemporal will have the labels creeping into a sequence of zeros.
     numpy.testing.assert_array_almost_equal(
@@ -204,7 +204,7 @@ def test_load_dataset_windowed(mock_metastore) -> None:
         element["geospatial"].numpy()[:, :, :, :9],
         numpy.array([mock_spatial_features] * batch_size),
     )
-    assert element["geospatial"].shape[-1] == 10
+    assert element["geospatial"].shape[-1] == 12  # 9 raw + sink + 2 flow
 
     # spatiotemporal will have the labels creeping into a sequence of zeros.
     numpy.testing.assert_array_almost_equal(
