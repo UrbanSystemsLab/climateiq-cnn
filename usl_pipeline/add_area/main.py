@@ -15,6 +15,7 @@ All three stages run in this process and share one local scratch directory.
 
 import argparse
 import logging
+import os
 import pathlib
 import re
 import sys
@@ -22,13 +23,15 @@ import tempfile
 import time
 from typing import Sequence, Tuple
 
-from google.cloud import firestore
-from google.cloud import storage
+os.environ.setdefault("BUCKET_PREFIX", "test-")
 
-from usl_lib.storage import cloud_storage
-from usl_lib.storage import metastore
+from google.cloud import firestore  # noqa: E402
+from google.cloud import storage  # noqa: E402
 
-from scripts import preprocess_h3cells
+from usl_lib.storage import cloud_storage  # noqa: E402
+from usl_lib.storage import metastore  # noqa: E402
+
+from scripts import preprocess_h3cells  # noqa: E402
 
 # How long to wait for the cloud functions to take a study area all the way to
 # RESCALING_DONE before giving up and telling the caller where to look.

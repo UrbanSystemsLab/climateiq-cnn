@@ -9,13 +9,17 @@ pip install -r requirements.txt \
 pip install -e ../usl_lib -e ../study_area_uploader
 ```
 
-Set your project and bucket prefix first. `BUCKET_PREFIX` is read at import
-time, so an unset value silently targets production:
+`add_area` defaults to the test environment: it sets `BUCKET_PREFIX=test-` when
+the variable is unset. Targeting production is deliberate and explicit:
 
 ```bash
-gcloud config set project climateiq-test
-export BUCKET_PREFIX=test-
+gcloud config set project climateiq-test   # test, the default
+
+BUCKET_PREFIX= gcloud config set project climateiq   # production
 ```
+
+The derived bucket paths are printed at startup and by `--dry-run`, so check
+them before a real run.
 
 Reading `gs://` paths needs application default credentials:
 `gcloud auth application-default login`.
@@ -66,8 +70,39 @@ Data flow
 Use `--work-dir` to point that scratch at a specific location; it defaults to a
 temporary directory.
 
-`--wait` polls the metastore until the study area reaches `rescaling-done`,
-reporting any chunk errors it finds along the way.
+Cloud Run Job
+=============
+
+Build and push:
+
+```bash
+gcloud builds submit --config=usl_pipeline/add_area/cloudbuild.yaml .
+```
+
+`BUCKET_PREFIX=test-` is the default and is set here; a production job
+needs `--set-env-vars=BUCKET_PREFIX=` and the `climateiq` image and project:
+
+```bash
+gcloud run jobs create add-area \
+  --image=us-central1-docker.pkg.dev/climateiq-test/usl-pipeline/add-area:dev \
+  --region=us-central1 \
+  --set-env-vars=BUCKET_PREFIX=test- \
+  --service-account=<sa>@climateiq-test.iam.gserviceaccount.com \
+  --memory=8Gi --cpu=4 \
+  --task-timeout=3h --max-retries=0
+```
+
+Then run a city, overriding the args per execution:
+
+```bash
+gcloud run jobs execute add-area --region=us-central1 --wait \
+  --args="--country=United States,--city=Watsonville,--state=CA,\
+--non-green-area-soil-classes,0,--verbose"
+```
+
+The service account needs read on `gs://raw-data-h3index` (project:
+`climateiq-test`), object admin on the study area, chunk, feature, label and
+flood-config buckets, and `roles/datastore.user` for the metastore.
 
 Layout
 ======

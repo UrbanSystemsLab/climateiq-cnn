@@ -129,16 +129,27 @@ def path_exists(path, is_dir=False):
     return client.bucket(bucket).blob(key).exists()
 
 
+def running_on_gcp():
+    """True when the metadata server will supply credentials, as on Cloud Run."""
+    return any(
+        name in os.environ
+        for name in ("CLOUD_RUN_JOB", "K_SERVICE", "GCE_METADATA_HOST")
+    )
+
+
 def configure_gdal_gcs_access():
-    """Point GDAL at gcloud's application default credentials for /vsigs/ reads."""
+    """Point GDAL at credentials for /vsigs/ reads."""
     if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
-        if not ADC_FILE.exists():
+        if ADC_FILE.exists():
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(ADC_FILE)
+        elif not running_on_gcp():
+            # On GCP, GDAL reads credentials from the metadata server, so only
+            # complain when there is genuinely no source of credentials.
             raise RuntimeError(
                 "Reading gs:// inputs needs Google credentials for GDAL. Run "
                 "`gcloud auth application-default login` or set "
                 "GOOGLE_APPLICATION_CREDENTIALS."
             )
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(ADC_FILE)
 
     # Skip the directory listing GDAL would otherwise do on every open. Shapefile
     # sidecars (.shx/.dbf/.prj) are still found because they are probed by name.
