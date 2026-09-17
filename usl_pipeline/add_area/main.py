@@ -229,7 +229,6 @@ def _build_uploader_argv(
         f"--green-areas-file={outputs['green_spaces_polygons']}",
         f"--soil-type-file={outputs['soil']}",
         f"--boundaries-file={outputs['city_boundary']}",
-        f"--soil-type-mask-feature-property={args.soil_type_mask_feature_property}",
         f"--elevation-geotiff-band={args.elevation_geotiff_band}",
     ]
 
@@ -438,11 +437,6 @@ def _get_args_parser() -> argparse.ArgumentParser:
         nargs="*",
         default=[],
         help="Soil classes to treat as impermeable.",
-    )
-    upload.add_argument(
-        "--soil-type-mask-feature-property",
-        default="soil_class",
-        help="Attribute holding the soil class.",
     )
     upload.add_argument(
         "--elevation-geotiff-band", type=int, default=1, help="Elevation band index."
