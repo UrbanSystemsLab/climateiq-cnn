@@ -18,3 +18,9 @@ usl_models/data/*
 
 *.mypy_cache
 *.pytest_cache
+.DS_Store
+
+# Emacs lock files and auto-save files
+.#*
+\#*\#
+*~

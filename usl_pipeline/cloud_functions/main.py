@@ -1292,7 +1292,12 @@ def _write_flood_chunk_metastore_entry(
     """
     db = firestore.Client()
     study_area_name, chunk_name = _parse_chunk_path(chunk_blob.name)
-    x_index, y_index = _parse_spatial_chunk_indices_from_name(chunk_blob.name)
+    # Match against the file name only. The regex is unanchored, so passing the
+    # full path would let a study area name containing "<digits>_<digits>" supply
+    # the indices instead of the chunk itself.
+    x_index, y_index = _parse_spatial_chunk_indices_from_name(
+        pathlib.PurePosixPath(chunk_blob.name).name
+    )
 
     metastore.StudyAreaSpatialChunk(
         id_=chunk_name,
@@ -1547,6 +1552,10 @@ def rescale_feature_matrices(cloud_event: functions_framework.CloudEvent) -> Non
     """
     if re.search(file_names.WPS_DOMAIN3_NC_REGEX, cloud_event.data["name"]):
         logging.info("Skipping WRF file  %s", cloud_event.data["name"])
+        return
+
+    if cloud_event.data["name"].startswith("rainfall/"):
+        logging.info("Skipping rainfall vector %s", cloud_event.data["name"])
         return
 
     _start_feature_rescaling_if_ready(
