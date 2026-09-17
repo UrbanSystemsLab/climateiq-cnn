@@ -4,7 +4,8 @@ Getting Started
 Script to add a new area to ClimateIQ.
 
 ```bash
-pip install -r ../study_area_uploader/requirements.txt
+pip install -r requirements.txt \
+  --extra-index-url https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple
 pip install -e ../usl_lib -e ../study_area_uploader
 ```
 
@@ -19,6 +20,9 @@ export BUCKET_PREFIX=test-
 Reading `gs://` paths needs application default credentials:
 `gcloud auth application-default login`.
 
+`pfdf`, used by the rainfall stage, is served from a USGS package index rather
+than PyPI, so install with the extra index shown above.
+
 Usage
 =====
 
@@ -29,9 +33,9 @@ python usl_pipeline/add_area/main.py \
   --verbose
 ```
 
-Siblings are imported by plain module name, so run `main.py` by path (or from
-this directory) rather than with `python -m`. `preprocess_h3cells.py` is also
-runnable on its own.
+`scripts/` is imported as a sibling package, so run `main.py` by path (or from
+this directory) rather than with `python -m`. The stage scripts are also
+runnable on their own.
 
 Areas are named `<ISO3>_<STATE>_<City>` with the city in PascalCase, for example
 `USA_MO_KansasCity`. The ISO code and state are read from the urban areas
@@ -69,9 +73,9 @@ Layout
 ======
 
 ```
-main.py                CLI, naming, and the three-stage flow
-preprocess_h3cells.py  H3 tiles -> city rasters and vectors
-scripts/
+main.py    CLI, naming, and the three-stage flow
+scripts/   stage scripts, also runnable on their own
+  preprocess_h3cells.py           H3 tiles -> city rasters and vectors
   rainfall_scenario_generator.py  NOAA Atlas 14 -> design storm files
 ```
 

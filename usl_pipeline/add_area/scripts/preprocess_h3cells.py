@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Extracts city-clipped geo datasets from the H3 source tiles.
-"""
+"""Extracts city-clipped geo datasets from the H3 source tiles."""
 
 import argparse
 import inspect
@@ -27,7 +26,8 @@ from shapely.geometry import mapping, shape
 DEFAULT_TARGET_CRS = "EPSG:3395"
 DEFAULT_WORKING_DIR = "gs://raw-data-h3index/Working_files"
 DEFAULT_H3_ROOT = "gs://raw-data-h3index/CONUS_Data_H3Index"
-DEFAULT_OUTPUT_DIR = Path("output")
+# Generated outputs go under data/, which is gitignored.
+DEFAULT_OUTPUT_DIR = Path("data/output")
 
 # Urban areas shapefile.
 DEFAULT_URBAN_AREAS_FILE = "01_urban_areas_simplified_with_state.shp"
@@ -261,6 +261,9 @@ def select_city(
     print("\n" + "=" * 80)
     print("STEP 1 — SELECT CITY")
     print("=" * 80)
+
+    if is_gcs(urban_shp):
+        configure_gdal_gcs_access()
 
     urban = gpd.read_file(gdal_path(urban_shp))
 
@@ -683,6 +686,7 @@ def resolve_area_identity(
     allow_multiple_features=False,
 ):
     """Resolves a city to its ISO code, state abbreviation and selected geometry.
+
     Returns:
       A tuple of (iso, state_abbr, city_name, selected_city). state_abbr is
       "XX" outside the US, where the shapefile carries no state.

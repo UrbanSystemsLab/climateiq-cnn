@@ -122,7 +122,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         study_area_chunkers.build_and_upload_chunks(
             args.name,
             prepared_inputs,
-            pathlib.Path(),
+            work_dir,
             chunk_bucket,
             1000,
             input_elevation_band=args.elevation_geotiff_band,

@@ -118,7 +118,7 @@ jobs:
         flake8 usl_pipeline/add_area --show-source --statistics
     - name: Ensure black auto-formatter has run
       run: |
-        black usl_pipeline/add_area --check --exclude 'add_area/scripts/'
+        black usl_pipeline/add_area --check
     - name: MyPy Type Checking
       run: |
         mypy usl_pipeline/add_area

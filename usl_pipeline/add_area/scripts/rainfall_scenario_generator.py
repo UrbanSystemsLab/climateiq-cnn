@@ -11,20 +11,20 @@
 # [[tool.uv.index]]
 # url = "https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple"
 # ///
-"""
-This script generates design storm rainfall scenarios based on NOAA Atlas 14
-precipitation-frequency data. The workflow includes:
+"""Generates design storm rainfall scenarios from NOAA Atlas 14 data.
 
-1. Downloading NOAA Atlas 14 rainfall depth tables for a specified location.
-2. Fitting Intensity-Duration-Frequency (IDF) curves.
-3. Generating Chicago design storm hyetographs.
-4. Exporting rainfall files for hydrodynamic models.
+The workflow:
 
-Installation: pip install pfdf -i https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple
+1. Download NOAA Atlas 14 rainfall depth tables for a location.
+2. Fit Intensity-Duration-Frequency (IDF) curves.
+3. Generate Chicago design storm hyetographs.
+4. Export rainfall files for hydrodynamic models.
+
+pfdf is served from a USGS package index rather than PyPI; see the inline
+script metadata above, or add_area/requirements.txt.
 
 Author/Created by: Ashish Shrestha
 Date: 2026-03-16
-
 """
 
 import argparse
@@ -36,15 +36,60 @@ from scipy.optimize import curve_fit
 
 
 SCENARIOS = [
-    {"file_no": 1,  "return_period": "1",    "storm_duration_hours": 1.00, "add_tail_min": 0},
-    {"file_no": 2,  "return_period": "5",    "storm_duration_hours": 1.00, "add_tail_min": 0},
-    {"file_no": 3,  "return_period": "10",   "storm_duration_hours": 1.00, "add_tail_min": 0},
-    {"file_no": 4,  "return_period": "25",   "storm_duration_hours": 2.00, "add_tail_min": 0},
-    {"file_no": 5,  "return_period": "50",   "storm_duration_hours": 2.00, "add_tail_min": 0},
-    {"file_no": 6,  "return_period": "100",  "storm_duration_hours": 3.00, "add_tail_min": 0},
-    {"file_no": 7,  "return_period": "200",  "storm_duration_hours": 3.00, "add_tail_min": 0},
-    {"file_no": 8,  "return_period": "500",  "storm_duration_hours": 3.00, "add_tail_min": 0},
-    {"file_no": 9,  "return_period": "1000", "storm_duration_hours": 3.00, "add_tail_min": 0},
+    {
+        "file_no": 1,
+        "return_period": "1",
+        "storm_duration_hours": 1.00,
+        "add_tail_min": 0,
+    },
+    {
+        "file_no": 2,
+        "return_period": "5",
+        "storm_duration_hours": 1.00,
+        "add_tail_min": 0,
+    },
+    {
+        "file_no": 3,
+        "return_period": "10",
+        "storm_duration_hours": 1.00,
+        "add_tail_min": 0,
+    },
+    {
+        "file_no": 4,
+        "return_period": "25",
+        "storm_duration_hours": 2.00,
+        "add_tail_min": 0,
+    },
+    {
+        "file_no": 5,
+        "return_period": "50",
+        "storm_duration_hours": 2.00,
+        "add_tail_min": 0,
+    },
+    {
+        "file_no": 6,
+        "return_period": "100",
+        "storm_duration_hours": 3.00,
+        "add_tail_min": 0,
+    },
+    {
+        "file_no": 7,
+        "return_period": "200",
+        "storm_duration_hours": 3.00,
+        "add_tail_min": 0,
+    },
+    {
+        "file_no": 8,
+        "return_period": "500",
+        "storm_duration_hours": 3.00,
+        "add_tail_min": 0,
+    },
+    {
+        "file_no": 9,
+        "return_period": "1000",
+        "storm_duration_hours": 3.00,
+        "add_tail_min": 0,
+    },
 ]
 
 
@@ -101,7 +146,7 @@ def part2_generate_rainfall_files(
             ta = t - Tp
             x = ta / (1 - r) + b
             return a * (((1 - c) * (ta / (1 - r)) + b) / (x ** (1 + c)))
-        return a / (b ** c)
+        return a / (b**c)
 
     def idf_iavg(dt_min, a, b, c):
         return a / ((dt_min + b) ** c)
@@ -118,7 +163,11 @@ def part2_generate_rainfall_files(
         for k in range(N):
             t0, t1 = t_edges[k], t_edges[k + 1]
             tm = 0.5 * (t0 + t1)
-            i = idf_iavg(dt, a, b, c) if (t0 <= Tp <= t1) else chicago_intensity(tm, D, a, b, c, r)
+            i = (
+                idf_iavg(dt, a, b, c)
+                if (t0 <= Tp <= t1)
+                else chicago_intensity(tm, D, a, b, c, r)
+            )
             depth[k] = i * dt_hr
 
         return pd.DataFrame(
@@ -149,17 +198,25 @@ def part2_generate_rainfall_files(
                 f.write(f"{int(row['time_sec'])}\t{rainfall_mps:.10f}\n")
 
     lines = atlas14_csv.read_text(errors="ignore").splitlines()
-    hdr_idx = next(i for i, line in enumerate(lines) if line.lower().startswith("by duration"))
+    hdr_idx = next(
+        i for i, line in enumerate(lines) if line.lower().startswith("by duration")
+    )
     header = [x.strip() for x in lines[hdr_idx].split(",")]
     return_periods = [x for x in header[1:] if x]
 
     rows = []
-    for line in lines[hdr_idx + 1:]:
+    for line in lines[hdr_idx + 1 :]:
         parts = [x.strip() for x in line.split(",")]
         first = parts[0].lower()
-        if (not line.strip()) or first.startswith("date/time") or first.startswith("pyruntime"):
+        if (
+            (not line.strip())
+            or first.startswith("date/time")
+            or first.startswith("pyruntime")
+        ):
             break
-        rows.append([parts[0].replace(":", "").strip()] + [x for x in parts[1:] if x != ""])
+        rows.append(
+            [parts[0].replace(":", "").strip()] + [x for x in parts[1:] if x != ""]
+        )
 
     noaa = pd.DataFrame(rows, columns=["Duration"] + return_periods)
     noaa["minutes"] = noaa["Duration"].apply(duration_to_minutes)
@@ -220,17 +277,15 @@ def part2_generate_rainfall_files(
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description=(
-            "Generate Chicago design storm rainfall files from NOAA Atlas 14"
-        )
+        description=("Generate Chicago design storm rainfall files from NOAA Atlas 14")
     )
     parser.add_argument(
         "output_dir",
         nargs="?",
         default=None,
         help=(
-            "Directory to write the Atlas 14 CSV, rainfall .txt files, and summary CSV. "
-            "Defaults to a directory named <lat>_<lon> in the current directory."
+            "Directory for the Atlas 14 CSV, rainfall .txt files and summary "
+            "CSV. Defaults to data/<lat>_<lon> in the current directory."
         ),
     )
     parser.add_argument(
@@ -242,7 +297,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     output_dir = args.output_dir
     if output_dir is None:
-        output_dir = f"{args.lat}_{args.lon}"
+        # Generated outputs go under data/, which is gitignored.
+        output_dir = f"data/{args.lat}_{args.lon}"
 
     downloaded_file = part1_download_atlas14(args.lat, args.lon, output_dir)
     summary_df = part2_generate_rainfall_files(downloaded_file, output_dir)

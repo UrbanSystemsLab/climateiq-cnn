@@ -1,0 +1,8 @@
+# The uploader's stack, which add_area drives in-process.
+-r ../study_area_uploader/requirements.txt
+
+# Rainfall scenario generation. pfdf is served from a USGS package index:
+#   pip install -r requirements.txt \
+#     --extra-index-url https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple
+pfdf==3.0.4
+scipy==1.17.1

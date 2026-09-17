@@ -3,12 +3,14 @@
 Runs the three stages that add an area to the flood pipeline
 
 1. Extract city-clipped DEM, buildings, soil and green areas from the H3 source
-   tiles (``preprocess_h3cells.py``).
+   tiles (``scripts/preprocess_h3cells.py``).
 2. Upload those to the study areas bucket and chunk them into the study area
    chunks bucket (``study_area_uploader``). This is what drives the cloud
    functions that build the ML feature matrices.
 3. Generate NOAA Atlas 14 design storm rainfall scenarios for the city centroid
    and upload them to the flood simulation config bucket.
+
+All three stages run in this process and share one local scratch directory.
 """
 
 import argparse
@@ -26,7 +28,7 @@ from google.cloud import storage
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import metastore
 
-import preprocess_h3cells
+from scripts import preprocess_h3cells
 
 # How long to wait for the cloud functions to take a study area all the way to
 # RESCALING_DONE before giving up and telling the caller where to look.
