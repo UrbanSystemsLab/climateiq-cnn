@@ -65,14 +65,19 @@ Data flow
 1. **Preprocess.** Clips the city out of the H3 source tiles in
    `gs://raw-data-h3index`, producing a DEM, buildings, soil, green areas and a
    city boundary.
-2. **Upload and chunk.** Runs `study_area_uploader`, which writes the study area
+2. **Generate rainfall locally.** Downloads NOAA Atlas 14 data for the city
+   centroid and generates the design storms. A download or generation failure
+   stops the run before any spatial data is uploaded.
+3. **Upload and chunk.** Runs `study_area_uploader`, which writes the study area
    files to `climateiq-study-areas/<area>/` and chunk archives to
    `climateiq-study-area-chunks/<area>/`. The chunk archives are what trigger
-   the feature matrix cloud functions.
-3. **Rainfall.** Generates NOAA Atlas 14 design storms for the city centroid and
-   uploads them to `climateiq-flood-simulation-config/<area>_config/`.
+   the feature matrix cloud functions. Then uploads the generated rainfall
+   files to `climateiq-flood-simulation-config/<area>_config/`.
 
-Use `--work-dir` to point that scratch at a specific location; it defaults to a
+`--skip-rainfall` omits rainfall generation and upload.
+
+Use `--work-dir` to place preprocessing and rainfall scratch at a specific
+location; it defaults to a temporary directory. The uploader uses a separate
 temporary directory.
 
 Cloud Run Job

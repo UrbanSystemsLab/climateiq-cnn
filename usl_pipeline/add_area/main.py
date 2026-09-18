@@ -4,13 +4,14 @@ Runs the three stages that add an area to the flood pipeline
 
 1. Extract city-clipped DEM, buildings, soil and green areas from the H3 source
    tiles (``scripts/preprocess_h3cells.py``).
-2. Upload those to the study areas bucket and chunk them into the study area
-   chunks bucket (``study_area_uploader``). This is what drives the cloud
-   functions that build the ML feature matrices.
-3. Generate NOAA Atlas 14 design storm rainfall scenarios for the city centroid
-   and upload them to the flood simulation config bucket.
+2. Generate NOAA Atlas 14 design storm rainfall scenarios for the city centroid
+   locally, before publishing any study area data.
+3. Upload the spatial inputs to the study areas bucket and chunk them into the
+   study area chunks bucket (``study_area_uploader``). This is what drives the cloud
+   functions that build the ML feature matrices. Then upload the generated
+   rainfall scenarios to the flood simulation config bucket.
 
-All three stages run in this process and share one local scratch directory.
+All three stages run in this process using local scratch directories.
 """
 
 import argparse
@@ -335,14 +336,9 @@ def add_area(args: argparse.Namespace) -> str:
             preselected_city=selected_city,
         )
 
-        # Stage 2: upload and chunk. This triggers the feature matrix cloud
-        # functions; the uploader itself waits for the study area metadata to be
-        # registered before it chunks.
-        import study_area_uploader.main as uploader_main
-
-        uploader_main.main(_build_uploader_argv(area_name, outputs, args))
-
-        # Stage 3: rainfall scenarios for the city centroid.
+        # Stage 2: generate rainfall locally so NOAA or generation failures happen
+        # before the uploader publishes spatial data and triggers cloud functions.
+        rainfall_dir = None
         if args.skip_rainfall:
             logger.info("Skipping rainfall scenario generation.")
         else:
@@ -356,6 +352,14 @@ def add_area(args: argparse.Namespace) -> str:
                 latitude, longitude, rainfall_dir
             )
             rainfall.part2_generate_rainfall_files(atlas14_csv, rainfall_dir)
+
+        # Stage 3: upload and chunk, then publish the generated rainfall scenarios.
+        # The uploader waits for study area metadata to be registered before chunking.
+        import study_area_uploader.main as uploader_main
+
+        uploader_main.main(_build_uploader_argv(area_name, outputs, args))
+
+        if rainfall_dir is not None:
             upload_rainfall_scenarios(rainfall_dir, config_group, storage.Client())
 
     if args.wait:
