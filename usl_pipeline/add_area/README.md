@@ -38,7 +38,6 @@ Usage
 ```bash
 python usl_pipeline/add_area/main.py \
   --country "United States" --city "Kansas City" \
-  --non-green-area-soil-classes 1 2 \
   --verbose
 ```
 
@@ -107,8 +106,7 @@ Then run a city, overriding the args per execution:
 
 ```bash
 gcloud run jobs execute add-area --region=us-central1 --wait \
-  --args="--country=United States,--city=Watsonville,--state=CA,\
---non-green-area-soil-classes,0,--verbose"
+  --args="--country=United States,--city=Watsonville,--state=CA,--verbose"
 ```
 
 The service account needs read on `gs://raw-data-h3index` (project:

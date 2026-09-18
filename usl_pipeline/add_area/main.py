@@ -236,9 +236,6 @@ def _build_uploader_argv(
         f"--elevation-geotiff-band={args.elevation_geotiff_band}",
     ]
 
-    if args.non_green_area_soil_classes:
-        argv.append("--non-green-area-soil-classes")
-        argv.extend(str(value) for value in args.non_green_area_soil_classes)
     if args.overwrite:
         argv.append("--overwrite")
     if args.export_to_citycat:
@@ -438,13 +435,6 @@ def _get_args_parser() -> argparse.ArgumentParser:
     )
 
     upload = parser.add_argument_group("upload")
-    upload.add_argument(
-        "--non-green-area-soil-classes",
-        type=int,
-        nargs="*",
-        default=[],
-        help="Soil classes to treat as impermeable.",
-    )
     upload.add_argument(
         "--elevation-geotiff-band", type=int, default=1, help="Elevation band index."
     )

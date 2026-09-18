@@ -260,15 +260,7 @@ def _get_args_parser() -> argparse.ArgumentParser:
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parses command-line arguments."""
     parser = _get_args_parser()
-    args = parser.parse_args(argv)
-
-    # Validation of CLI arguments
-    if args.soil_type_file and not args.non_green_area_soil_classes:
-        parser.error(
-            "--non_green_area_soil_classes required if --soil_type_file present"
-        )
-
-    return args
+    return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
