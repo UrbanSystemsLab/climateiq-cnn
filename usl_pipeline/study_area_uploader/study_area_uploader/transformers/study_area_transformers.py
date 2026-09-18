@@ -4,6 +4,7 @@ import pathlib
 from typing import Iterable, Tuple
 
 from google.cloud import storage
+from google.cloud.storage.retry import DEFAULT_RETRY
 from shapely import geometry
 
 from study_area_uploader.readers import polygon_readers as shape_readers
@@ -20,6 +21,11 @@ from usl_lib.writers import elevation_writers, polygon_writers
 
 
 # Default soil class value that is recognized a non-green area.
+# Rasters can take well over the client's default 60s to upload, and the default
+# upload retry only applies when a generation is specified. Re-uploading an
+# object we are writing in full is safe to repeat, so retry explicitly.
+UPLOAD_TIMEOUT_SECONDS = 600
+
 DEFAULT_NON_GREEN_AREA_SOIL_CLASS: int = (
     feature_raster_transformers.DEFAULT_NON_GREEN_AREA_SOIL_CLASS
 )
@@ -183,7 +189,11 @@ def prepare_and_upload_study_area_files(
     # Write elevation data to study area bucket
     study_area_bucket.blob(
         f"{study_area_name}/{file_names.ELEVATION_TIF}"
-    ).upload_from_filename(str(output_elevation_file_path))
+    ).upload_from_filename(
+        str(output_elevation_file_path),
+        timeout=UPLOAD_TIMEOUT_SECONDS,
+        retry=DEFAULT_RETRY,
+    )
     logging.info(
         "File [%s/%s] was written to study area bucket",
         study_area_name,

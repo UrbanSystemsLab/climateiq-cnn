@@ -9,13 +9,18 @@ pip install -r requirements.txt \
 pip install -e ../usl_lib -e ../study_area_uploader
 ```
 
-`add_area` defaults to the test environment: it sets `BUCKET_PREFIX=test-` when
-the variable is unset. Targeting production is deliberate and explicit:
+* **`BUCKET_PREFIX`** chooses the buckets. `add_area` sets it to `test-` when
+  unset, so the test environment is the default.
+* **Project** selects the Firestore metastore. It comes from
+  `GOOGLE_CLOUD_PROJECT`, or from `gcloud config` when that is unset.
 
 ```bash
-gcloud config set project climateiq-test   # test, the default
+# Test, the default
+gcloud config set project climateiq-test
+python usl_pipeline/add_area/main.py ...
 
-BUCKET_PREFIX= gcloud config set project climateiq   # production
+# Production, both explicit
+GOOGLE_CLOUD_PROJECT=climateiq BUCKET_PREFIX= python usl_pipeline/add_area/main.py ...
 ```
 
 The derived bucket paths are printed at startup and by `--dry-run`, so check
@@ -87,6 +92,7 @@ gcloud run jobs create add-area \
   --image=us-central1-docker.pkg.dev/climateiq-test/usl-pipeline/add-area:dev \
   --region=us-central1 \
   --set-env-vars=BUCKET_PREFIX=test- \
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=climateiq-test \
   --service-account=<sa>@climateiq-test.iam.gserviceaccount.com \
   --memory=8Gi --cpu=4 \
   --task-timeout=3h --max-retries=0

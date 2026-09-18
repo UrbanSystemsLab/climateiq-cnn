@@ -186,7 +186,11 @@ def test_prepare_and_upload_study_area_files_no_boundaries_buildings_only():
         ]
         assert header_blob.mock_calls == [mock.call.open("w")]
         assert elevation_blob.mock_calls == [
-            mock.call.upload_from_filename(str(prepared_inputs.elevation_file_path))
+            mock.call.upload_from_filename(
+                str(prepared_inputs.elevation_file_path),
+                timeout=study_area_transformers.UPLOAD_TIMEOUT_SECONDS,
+                retry=mock.ANY,
+            )
         ]
         assert buildings_blob.mock_calls == [mock.call.open("w")]
         assert (
@@ -328,7 +332,11 @@ def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_cl
         assert boundaries_blob.mock_calls == [mock.call.open("w")]
         assert header_blob.mock_calls == [mock.call.open("w")]
         assert elevation_blob.mock_calls == [
-            mock.call.upload_from_filename(str(prepared_inputs.elevation_file_path))
+            mock.call.upload_from_filename(
+                str(prepared_inputs.elevation_file_path),
+                timeout=study_area_transformers.UPLOAD_TIMEOUT_SECONDS,
+                retry=mock.ANY,
+            )
         ]
         assert green_areas_blob.mock_calls == [mock.call.open("w")]
         assert soil_classes_blob.mock_calls == [mock.call.open("w")]
@@ -462,7 +470,11 @@ def test_prepare_and_upload_study_area_files_with_non_green_area_soil_class():
             mock.call.blob("TestArea1/soil_classes.txt"),
         ]
         assert elevation_blob.mock_calls == [
-            mock.call.upload_from_filename(str(prepared_inputs.elevation_file_path))
+            mock.call.upload_from_filename(
+                str(prepared_inputs.elevation_file_path),
+                timeout=study_area_transformers.UPLOAD_TIMEOUT_SECONDS,
+                retry=mock.ANY,
+            )
         ]
         assert green_areas_blob.mock_calls == [mock.call.open("w")]
         assert soil_classes_blob.mock_calls == [mock.call.open("w")]
