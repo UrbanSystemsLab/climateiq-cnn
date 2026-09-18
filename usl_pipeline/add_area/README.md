@@ -61,17 +61,76 @@ touching GCS.
 Data flow
 ============
 
+The file names below are from the `USA_CA_Watsonville` run, which spans the
+single H3 cell `822837fffffffff` and produces 20 chunks.
+
 1. **Preprocess.** Clips the city out of the H3 source tiles in
    `gs://raw-data-h3index`, producing a DEM, buildings, soil, green areas and a
-   city boundary.
+   city boundary. The city footprint comes from the urban areas shapefile; each
+   intersecting H3 cell contributes five layers.
+
+   ```
+   gs://raw-data-h3index/
+     Working_files/01_urban_areas_simplified_with_state.shp
+     CONUS_Data_H3Index/822837fffffffff/
+       Elevation/DEM_with_buildings_822837fffffffff.tif
+       Buildings/Buildings_822837fffffffff.shp
+       Green_spaces/green_spaces_822837fffffffff.tif
+       Soil/Soil_texture_822837fffffffff.shp
+       Land_use/Landcover_822837fffffffff.tif
+   ```
+
+   The clipped result is written locally, named after the area. Each `.shp`
+   carries the usual `.cpg` / `.dbf` / `.prj` / `.shx` sidecars.
+
+   ```
+   <work-dir>/USA_CA_Watsonville/
+     DEM_USA_CA_Watsonville.tif
+     Landcover_USA_CA_Watsonville.tif
+     Buildings_USA_CA_Watsonville.shp
+     Soil_USA_CA_Watsonville.shp
+     green_spaces_USA_CA_Watsonville.shp
+     green_spaces_USA_CA_Watsonville.tif
+     City_boundary_USA_CA_Watsonville.shp
+     H3_cells_USA_CA_Watsonville.shp
+     h3_index_list.txt
+   ```
+
 2. **Generate rainfall locally.** Downloads NOAA Atlas 14 data for the city
    centroid and generates the design storms. A download or generation failure
    stops the run before any spatial data is uploaded.
+
+   ```
+   <work-dir>/rainfall/
+     noaa-atlas14-mean-pds-depth-english.csv
+     Rainfall_Data_1.txt ... Rainfall_Data_9.txt
+     Rainfall_Scenario_Summary.csv
+   ```
+
 3. **Upload and chunk.** Runs `study_area_uploader`, which writes the study area
    files to `climateiq-study-areas/<area>/` and chunk archives to
    `climateiq-study-area-chunks/<area>/`. The chunk archives are what trigger
    the feature matrix cloud functions. Then uploads the generated rainfall
    files to `climateiq-flood-simulation-config/<area>_config/`.
+
+   ```
+   climateiq-study-areas/USA_CA_Watsonville/
+     header.json       elevation.tif     buildings.txt
+     green_areas.txt   soil_classes.txt  boundaries.txt
+
+   climateiq-study-area-chunks/USA_CA_Watsonville/
+     chunk_0_0.tar ... chunk_4_3.tar
+
+   climateiq-flood-simulation-config/USA_CA_Watsonville_config/
+     Rainfall_Data_1.txt ... Rainfall_Data_9.txt
+   ```
+
+   The cloud functions then write one scaled feature matrix per chunk.
+
+   ```
+   climateiq-study-area-feature-chunks/USA_CA_Watsonville/
+     scaled_chunk_0_0.npy ... scaled_chunk_4_3.npy
+   ```
 
 `--skip-rainfall` omits rainfall generation and upload.
 
