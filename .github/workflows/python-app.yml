@@ -91,6 +91,38 @@ jobs:
       run: |
         mypy usl_pipeline/study_area_uploader
 
+  add_area:
+    name: Add Area CI
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.11"
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo add-apt-repository ppa:ubuntugis/ppa -y
+        sudo apt-get update -qq
+        sudo apt-get install -y gdal-bin libgdal-dev
+        python -m pip install --upgrade pip
+        cd usl_pipeline/add_area
+        pip install -r requirements.txt \
+          --extra-index-url https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple
+        cd ../..
+        pip install -e usl_pipeline/usl_lib -e usl_pipeline/study_area_uploader
+        pip install black~=24.0 flake8~=7.0 flake8-docstrings~=1.7 mypy~=1.9
+    - name: Lint with flake8
+      run: |
+        flake8 usl_pipeline/add_area --show-source --statistics
+    - name: Ensure black auto-formatter has run
+      run: |
+        black usl_pipeline/add_area --check
+    - name: MyPy Type Checking
+      run: |
+        mypy usl_pipeline/add_area
+
   cloud_functions:
     name: Cloud Funcations CI
     runs-on: ubuntu-22.04

@@ -9,6 +9,8 @@ from google.cloud import storage
 import numpy
 from shapely import geometry
 
+from google.cloud.storage.retry import DEFAULT_RETRY
+
 from study_area_uploader.chunkers import elevation_chunkers
 from study_area_uploader.transformers import study_area_transformers
 from usl_lib.chunkers import polygon_chunkers
@@ -182,7 +184,11 @@ def build_and_upload_chunks(
         tar_fd.seek(0)
         study_area_chunk_bucket.blob(
             f"{study_area_name}/{chunk_file_name}.tar"
-        ).upload_from_file(tar_fd)
+        ).upload_from_file(
+            tar_fd,
+            timeout=study_area_transformers.UPLOAD_TIMEOUT_SECONDS,
+            retry=DEFAULT_RETRY,
+        )
 
 
 def _add_chunk_to_dir_if_present(

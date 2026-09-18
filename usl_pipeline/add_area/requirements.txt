@@ -1,0 +1,4 @@
+-r ../study_area_uploader/requirements.txt
+
+pfdf==3.0.4
+scipy==1.17.1
