@@ -62,6 +62,8 @@ def compute_slope_feature(elevation: geo_data.Elevation) -> npt.NDArray[numpy.fl
         rise, with NoData cells (and any gradient-adjacent NaNs) set to
         elevation.header.nodata_value.
     """
+    if elevation.data is None:
+        raise ValueError("Elevation data missing")
     nodata_value = elevation.header.nodata_value
     dem = elevation.data.astype(dtype=numpy.float32)
     mask = (dem == nodata_value) | numpy.isnan(dem)
@@ -212,11 +214,7 @@ def rescale_feature_matrix(
 
     slope_min = study_area_metadata.slope_min
     slope_max = study_area_metadata.slope_max
-    if (
-        slope_min is not None
-        and slope_max is not None
-        and feature_matrix.shape[2] > 8
-    ):
+    if slope_min is not None and slope_max is not None and feature_matrix.shape[2] > 8:
         slope_data = feature_matrix[:, :, 8]
         slope_data[presence_mask == 1] = (
             slope_data[presence_mask == 1] - slope_min
