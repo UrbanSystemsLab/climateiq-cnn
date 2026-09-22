@@ -108,7 +108,9 @@ class StudyArea:
         if not ref.exists:
             raise ValueError(f'No such study area "{name}"')
 
-        return cls(name=name, **ref.to_dict())
+        data = ref.to_dict()
+        assert data is not None
+        return cls(name=name, **data)
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
@@ -309,12 +311,16 @@ class StudyAreaChunk:
         if not ref.exists:
             raise ValueError(f'No such chunk {chunk_name} within {study_area_name}"')
 
-        return cls(id_=chunk_name, **ref.to_dict())
+        data = ref.to_dict()
+        assert data is not None
+        return cls(id_=chunk_name, **data)
 
     @classmethod
     def from_ref(cls, ref: firestore.DocumentReference) -> "StudyAreaChunk":
         """Creates an instance of the chunk class based on retrieved reference."""
-        return cls(id_=ref.id, **ref.get().to_dict())
+        data = ref.get().to_dict()
+        assert data is not None
+        return cls(id_=ref.id, **data)
 
     @staticmethod
     def get_ref(
@@ -344,7 +350,11 @@ class StudyAreaChunk:
           None otherwise.
         """
         ref = cls.get_ref(db, study_area_name, chunk_name).get()
-        return None if not ref.exists else cls(id_=chunk_name, **ref.to_dict())
+        if not ref.exists:
+            return None
+        data = ref.to_dict()
+        assert data is not None
+        return cls(id_=chunk_name, **data)
 
     @classmethod
     def update_scaling_done(
@@ -505,7 +515,9 @@ class FloodScenarioConfig:
         if not ref.exists:
             raise ValueError(f'No such flood config "{name}"')
 
-        return cls(name=name, **ref.to_dict())
+        data = ref.to_dict()
+        assert data is not None
+        return cls(name=name, **data)
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
@@ -564,7 +576,9 @@ class HeatScenarioConfig:
         if not ref.exists:
             raise ValueError(f'No such heat config "{name}"')
 
-        return cls(name=name, **ref.to_dict())
+        data = ref.to_dict()
+        assert data is not None
+        return cls(name=name, **data)
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
@@ -624,7 +638,9 @@ class Simulation:
         ref = cls.get_ref(db, study_area_name, config_path).get()
         if not ref.exists:
             raise ValueError(f"No such simulation for {study_area_name} {config_path}")
-        return Simulation(**ref.to_dict())
+        data = ref.to_dict()
+        assert data is not None
+        return Simulation(**data)
 
     @staticmethod
     def get_ref(
