@@ -57,6 +57,8 @@ class StudyArea:
     state: StudyAreaState | None = None
     elevation_min: float | None = None
     elevation_max: float | None = None
+    slope_min: float | None = None
+    slope_max: float | None = None
     chunk_size: int | None = None
     chunk_x_count: int | None = None
     chunk_y_count: int | None = None
@@ -106,7 +108,9 @@ class StudyArea:
         if not ref.exists:
             raise ValueError(f'No such study area "{name}"')
 
-        return cls(name=name, **ref.to_dict())
+        data = ref.to_dict()
+        assert data is not None
+        return cls(name=name, **data)
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
@@ -134,6 +138,28 @@ class StudyArea:
         study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
         transaction = db.transaction()
         _update_study_area_min_max_elevation(transaction, study_area_ref, min_, max_)
+
+    @staticmethod
+    def update_min_max_slope(
+        db: firestore.Client, study_area_name: str, min_: float, max_: float
+    ) -> None:
+        """Sets slope min & max if less or greater than the current min & max.
+
+        For the given study area, transactionally updates the slope_min and
+        slope_max field to the given min_ and max_ values if they are less than and
+        greater than the current values.
+
+        Args:
+          db: The firestore database client to use to make the update.
+          study_area_name: The study area to update.
+          min_: The min slope value for the study area. Will only be set if less
+                than the study area's current min.
+          max_: The max slope value for the study area. Will only be set if less
+                than the study area's current max.
+        """
+        study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
+        transaction = db.transaction()
+        _update_study_area_min_max_slope(transaction, study_area_ref, min_, max_)
 
     @staticmethod
     def update_chunk_info(
@@ -285,12 +311,16 @@ class StudyAreaChunk:
         if not ref.exists:
             raise ValueError(f'No such chunk {chunk_name} within {study_area_name}"')
 
-        return cls(id_=chunk_name, **ref.to_dict())
+        data = ref.to_dict()
+        assert data is not None
+        return cls(id_=chunk_name, **data)
 
     @classmethod
     def from_ref(cls, ref: firestore.DocumentReference) -> "StudyAreaChunk":
         """Creates an instance of the chunk class based on retrieved reference."""
-        return cls(id_=ref.id, **ref.get().to_dict())
+        data = ref.get().to_dict()
+        assert data is not None
+        return cls(id_=ref.id, **data)
 
     @staticmethod
     def get_ref(
@@ -320,7 +350,11 @@ class StudyAreaChunk:
           None otherwise.
         """
         ref = cls.get_ref(db, study_area_name, chunk_name).get()
-        return None if not ref.exists else cls(id_=chunk_name, **ref.to_dict())
+        if not ref.exists:
+            return None
+        data = ref.to_dict()
+        assert data is not None
+        return cls(id_=chunk_name, **data)
 
     @classmethod
     def update_scaling_done(
@@ -409,6 +443,35 @@ def _update_study_area_min_max_elevation(
         transaction.update(study_area_ref, update)
 
 
+@firestore.transactional
+def _update_study_area_min_max_slope(
+    transaction: firestore.Transaction,
+    study_area_ref: firestore.DocumentReference,
+    min_: float,
+    max_: float,
+) -> None:
+    """Updates the study area's slope min & max in a transaction."""
+    snapshot = study_area_ref.get(transaction=transaction)
+    update = {}
+
+    try:
+        cur_min = snapshot.get("slope_min")
+        if min_ < cur_min:
+            update["slope_min"] = min_
+    except KeyError:
+        update["slope_min"] = min_
+
+    try:
+        cur_max = snapshot.get("slope_max")
+        if max_ > cur_max:
+            update["slope_max"] = max_
+    except KeyError:
+        update["slope_max"] = max_
+
+    if update:
+        transaction.update(study_area_ref, update)
+
+
 @dataclasses.dataclass(slots=True)
 class FloodScenarioConfig:
     """A configuration file describing rainfall patterns for a CityCAT simulation.
@@ -452,7 +515,9 @@ class FloodScenarioConfig:
         if not ref.exists:
             raise ValueError(f'No such flood config "{name}"')
 
-        return cls(name=name, **ref.to_dict())
+        data = ref.to_dict()
+        assert data is not None
+        return cls(name=name, **data)
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
@@ -511,7 +576,9 @@ class HeatScenarioConfig:
         if not ref.exists:
             raise ValueError(f'No such heat config "{name}"')
 
-        return cls(name=name, **ref.to_dict())
+        data = ref.to_dict()
+        assert data is not None
+        return cls(name=name, **data)
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
@@ -571,7 +638,9 @@ class Simulation:
         ref = cls.get_ref(db, study_area_name, config_path).get()
         if not ref.exists:
             raise ValueError(f"No such simulation for {study_area_name} {config_path}")
-        return Simulation(**ref.to_dict())
+        data = ref.to_dict()
+        assert data is not None
+        return Simulation(**data)
 
     @staticmethod
     def get_ref(

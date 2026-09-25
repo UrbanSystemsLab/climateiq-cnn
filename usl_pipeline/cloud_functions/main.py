@@ -56,10 +56,14 @@ class FeatureMetadata:
     Attributes:
         elevation_min: The lowest elevation height encountered.
         elevation_max: The highest elevation height encountered.
+        slope_min: The lowest slope value encountered (percent rise).
+        slope_max: The highest slope value encountered (percent rise).
     """
 
     elevation_min: float | None = None
     elevation_max: float | None = None
+    slope_min: float | None = None
+    slope_max: float | None = None
     chunk_size: int | None = None
     time: datetime.datetime | None = None
 
@@ -966,6 +970,22 @@ def _build_flood_feature_matrix_from_archive(
             soil_classes,
             geo_data.DEFAULT_INFILTRATION_CONFIGURATION,
         )
+
+        slope_layer = feature_matrix[:, :, 8]
+        nodata = elevation.header.nodata_value
+        valid_slope = slope_layer[slope_layer != nodata]
+        if valid_slope.size > 0:
+            metadata.slope_min = float(valid_slope.min())
+            metadata.slope_max = float(valid_slope.max())
+        else:
+            logging.warning(
+                "No valid slope values found for study area (all cells nodata); "
+                "leaving slope_min/slope_max unset rather than using the nodata "
+                "sentinel, which would otherwise be treated as a real bound by "
+                "rescale_feature_matrix and never be displaceable by a genuine "
+                "value once persisted."
+            )
+
         return feature_matrix, metadata, elevation.header
 
     return None, FeatureMetadata(), None
@@ -1251,6 +1271,13 @@ def _update_study_area_metastore_entry(
             study_area_name,
             min_=metadata.elevation_min,
             max_=metadata.elevation_max,
+        )
+    if metadata.slope_min is not None and metadata.slope_max is not None:
+        metastore.StudyArea.update_min_max_slope(
+            db,
+            study_area_name,
+            min_=metadata.slope_min,
+            max_=metadata.slope_max,
         )
     if metadata.chunk_size is not None:
         metastore.StudyArea.update_chunk_info(db, study_area_name, metadata.chunk_size)
