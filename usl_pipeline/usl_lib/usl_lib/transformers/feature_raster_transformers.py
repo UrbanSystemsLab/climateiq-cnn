@@ -216,7 +216,8 @@ def rescale_feature_matrix(
     slope_max = study_area_metadata.slope_max
     if slope_min is not None and slope_max is not None and feature_matrix.shape[2] > 8:
         slope_data = feature_matrix[:, :, 8]
-        slope_data[presence_mask == 1] = (
-            slope_data[presence_mask == 1] - slope_min
-        ) / (slope_max - slope_min)
-        slope_data[presence_mask != 1] = -1
+        valid_slope = (presence_mask == 1) & (slope_data >= slope_min)
+        slope_data[valid_slope] = (slope_data[valid_slope] - slope_min) / (
+            slope_max - slope_min
+        )
+        slope_data[~valid_slope] = -1
