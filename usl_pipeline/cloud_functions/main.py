@@ -979,10 +979,12 @@ def _build_flood_feature_matrix_from_archive(
             metadata.slope_max = float(valid_slope.max())
         else:
             logging.warning(
-                "No valid slope values found for study area (all cells nodata)"
+                "No valid slope values found for study area (all cells nodata); "
+                "leaving slope_min/slope_max unset rather than using the nodata "
+                "sentinel, which would otherwise be treated as a real bound by "
+                "rescale_feature_matrix and never be displaceable by a genuine "
+                "value once persisted."
             )
-            metadata.slope_min = nodata
-            metadata.slope_max = nodata
 
         return feature_matrix, metadata, elevation.header
 
