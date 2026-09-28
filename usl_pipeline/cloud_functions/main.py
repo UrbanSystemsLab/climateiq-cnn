@@ -607,14 +607,15 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     )
 )
 def build_flood_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
-    """Builds a flood feature matrix when a chunk archive is uploaded.
+    """Builds a flood feature matrix when a chunk archive is uploaded."""
+    chunk_path = cloud_event.data["name"]
+    if not chunk_path.endswith(".tar"):
+        logging.debug("Skipping non-flood file %s", chunk_path)
+        return
 
-    Flood-only counterpart to build_feature_matrix. Deploy this behind an Eventarc
-    path-pattern filter for "*.tar" so the flood and heat paths are independent.
-    """
     _build_flood_feature_matrix(
         cloud_event.data["bucket"],
-        cloud_event.data["name"],
+        chunk_path,
         cloud_storage.FEATURE_CHUNKS_BUCKET,
     )
 
@@ -626,14 +627,15 @@ def build_flood_feature_matrix(cloud_event: functions_framework.CloudEvent) -> N
     )
 )
 def build_heat_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
-    """Builds heat feature matrices when a WPS output file is uploaded.
+    """Builds heat feature matrices when a WPS output file is uploaded."""
+    chunk_path = cloud_event.data["name"]
+    if not re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_path):
+        logging.debug("Skipping non-heat file %s", chunk_path)
+        return
 
-    Heat-only counterpart to build_feature_matrix. Deploy this behind an Eventarc
-    path-pattern filter for "*.nc" so the flood and heat paths are independent.
-    """
     _build_heat_feature_matrix(
         cloud_event.data["bucket"],
-        cloud_event.data["name"],
+        chunk_path,
         cloud_storage.FEATURE_CHUNKS_BUCKET,
     )
 
@@ -736,8 +738,7 @@ def _build_heat_feature_matrix(
 def _build_feature_matrix(
     bucket_name: str, chunk_path: str, output_bucket: str
 ) -> None:
-    """Dispatches a chunk to the flood or heat builder by file type.
-    """
+    """Dispatches a chunk to the flood or heat builder by file type."""
     if chunk_path.endswith(".tar"):
         _build_flood_feature_matrix(bucket_name, chunk_path, output_bucket)
     elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_path):
@@ -1434,10 +1435,10 @@ def _write_chunk_metastore_error(chunk_path: str, error_message: str) -> None:
       error_message: The error message to write into Firestore.
     """
     db = firestore.Client()
-    study_area_name, chunk_name = _parse_chunk_path(chunk_path)
-    metastore.StudyAreaChunk(id_=chunk_name, error=error_message).merge(
-        db, study_area_name
-    )
+    file_path = pathlib.PurePosixPath(chunk_path)
+    study_area_name = file_path.parts[0]
+    doc_id = file_path.stem.replace(".", "_").replace(":", "_")
+    metastore.StudyAreaChunk(id_=doc_id, error=error_message).merge(db, study_area_name)
 
 
 def _parse_chunk_path(chunk_path: str) -> Tuple[str, str]:
