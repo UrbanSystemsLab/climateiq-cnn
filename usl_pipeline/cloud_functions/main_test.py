@@ -130,24 +130,28 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
     # Ensure we attempted to upload a serialized matrix of the tiff.
     mock_feature_blob.upload_from_file.assert_called_once_with(mock.ANY)
     uploaded_array = numpy.load(mock_feature_blob.upload_from_file.call_args[0][0])
-    numpy.testing.assert_array_equal(
+    # Slope channel (index 8): (0,0) is NoData (elev==nodata==1); (0,1) and (1,0)
+    # are NaN-contaminated by numpy.gradient touching (0,0) and fold into the
+    # same NoData sentinel (which happens to be 1.0 here, matching this test's
+    # chosen TIFF nodata value); (1,1) is the only cell whose gradient never
+    # touches (0,0), so it gets a real computed slope value.
+    numpy.testing.assert_array_almost_equal(
         uploaded_array,
         numpy.array(
             [
                 # Row 1
                 [
-                    [1, 0, 0, 0, 0, 0, 0, 0],
-                    [2, 1, 0, 0, 0, 0, 0, 0],
+                    [1, 0, 0, 0, 0, 0, 0, 0, 1],
+                    [2, 1, 0, 0, 0, 0, 0, 0, 1],
                 ],
                 # Row 2
                 [
-                    [5, 1, 0, 0, 0, 0, 0, 0],
-                    [6, 1, 0, 0, 0, 0, 0, 0],
+                    [5, 1, 0, 0, 0, 0, 0, 0, 1],
+                    [6, 1, 0, 0, 0, 0, 0, 0, 412.310547],
                 ],
             ],
             dtype=numpy.float32,
         ),
-        strict=True,
     )
 
     # Ensure we wrote firestore entries for the chunk.
@@ -180,10 +184,18 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
             ),
         ]
     )
-    # Ensure we set the elevation min & max
-    mock_db.transaction().update.assert_called_once_with(
-        mock_db.collection().document(),
-        {"elevation_min": 2, "elevation_max": 6},
+    # Ensure we set the elevation min & max, and the slope min & max
+    mock_db.transaction().update.assert_has_calls(
+        [
+            mock.call(
+                mock_db.collection().document(),
+                {"elevation_min": 2, "elevation_max": 6},
+            ),
+            mock.call(
+                mock_db.collection().document(),
+                {"slope_min": 412.310546875, "slope_max": 412.310546875},
+            ),
+        ]
     )
     # Ensure that study area chunk-related fields and the state were updated
     mock_db.collection().document().update.assert_has_calls(
@@ -271,31 +283,38 @@ def test_build_feature_matrix_from_archive_empty_polygons():
         archive
     )
 
-    numpy.testing.assert_array_equal(
+    # Slope channel (index 8): (0,0) is NoData (elev==nodata==1); (0,1) and
+    # (1,0) are NaN-contaminated by numpy.gradient touching (0,0) and fold
+    # into the same NoData sentinel; the remaining three cells are far enough
+    # from (0,0) that they get a real, identical computed slope value.
+    numpy.testing.assert_array_almost_equal(
         feature_matrix,
         numpy.array(
             [
                 # Row 1
                 [
-                    [1, 0, 0, 0, 0, 0, 0, 0],
-                    [2, 1, 0, 0, 0, 0, 0, 0],
-                    [3, 1, 0, 0, 0, 0, 0, 0],
+                    [1, 0, 0, 0, 0, 0, 0, 0, 1],
+                    [2, 1, 0, 0, 0, 0, 0, 0, 1],
+                    [3, 1, 0, 0, 0, 0, 0, 0, 316.227783],
                 ],
                 # Row 2
                 [
-                    [4, 1, 0, 0, 0, 0, 0, 0],
-                    [5, 1, 0, 0, 0, 0, 0, 0],
-                    [6, 1, 0, 0, 0, 0, 0, 0],
+                    [4, 1, 0, 0, 0, 0, 0, 0, 1],
+                    [5, 1, 0, 0, 0, 0, 0, 0, 316.227783],
+                    [6, 1, 0, 0, 0, 0, 0, 0, 316.227783],
                 ],
             ],
             dtype=numpy.float32,
         ),
-        strict=True,
     )
 
-    # Ensure we set the elevation min & max
+    # Ensure we set the elevation and slope min & max
     assert metadata == main.FeatureMetadata(
-        elevation_min=2, elevation_max=6, chunk_size=2
+        elevation_min=2,
+        elevation_max=6,
+        slope_min=316.227783203125,
+        slope_max=316.227783203125,
+        chunk_size=2,
     )
 
     assert header == geo_data.ElevationHeader(

@@ -58,15 +58,17 @@ def test_transform_to_feature_raster_layers():
         infiltration_configuration,
     )
 
-    # Checking the first column (should be NODATA since outside the boundaries)
+    # Checking the first column (should be NODATA since outside the boundaries,
+    # including the slope channel -- slope respects the same boundary mask as
+    # every other channel, even though it's computed from the raw DEM)
     testing.assert_array_equal(
         feature_matrix[:, 0],
         numpy.array(
             [
-                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0],
+                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0],
+                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0],
+                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0],
             ],
             dtype=numpy.float32,
         ),
@@ -74,16 +76,18 @@ def test_transform_to_feature_raster_layers():
     )
 
     # Checking the remaining first row (should be elevation/mask present + buildings=1)
-    testing.assert_array_equal(
+    # Cell (0,1) has valid slope (flat corner, no NoData neighbours); (0,2) is
+    # NaN-contaminated by the NoData cell at (1,2) and (2,2) via numpy.gradient,
+    # so it's correctly folded into NoData by compute_slope_feature itself.
+    testing.assert_array_almost_equal(
         feature_matrix[0, 1:],
         numpy.array(
             [
-                [1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [2.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 316.227783],
+                [2.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0],
             ],
             dtype=numpy.float32,
         ),
-        strict=True,
     )
 
     # Checking cells row:col={1:2},{2:2} (should be NODATA as in original elevation)
@@ -91,22 +95,26 @@ def test_transform_to_feature_raster_layers():
         feature_matrix[1:3, 2],
         numpy.array(
             [
-                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0],
+                [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0],
             ],
             dtype=numpy.float32,
         ),
         strict=True,
     )
 
-    # Cell row:col=1:1 has just elevation (with mask=1), no buildings, no greens
+    # Cell row:col=1:1 has just elevation (with mask=1), no buildings, no greens.
+    # Its slope is NaN-contaminated (adjacent to NoData at (1,2)) -> NoData.
     testing.assert_array_equal(
         feature_matrix[1][1],
-        numpy.array([4.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=numpy.float32),
+        numpy.array(
+            [4.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0], dtype=numpy.float32
+        ),
         strict=True,
     )
 
-    # Checking remaining 3 soil-related cells:
+    # Checking remaining 3 soil-related cells (all adjacent to a NoData cell,
+    # so slope is NoData for each):
     # Cell row:col=2:1, soil class=3
     testing.assert_array_almost_equal(
         feature_matrix[2][1],
@@ -120,11 +128,13 @@ def test_transform_to_feature_raster_layers():
                 20.88 / max_wetting_front_suction_head,
                 0.309 / max_effective_porosity,
                 0.5 / max_effective_saturation,
+                -9999.0,
             ],
             dtype=numpy.float32,
         ),
     )
-    # Cell row:col=3:1, soil class=4
+    # Cell row:col=3:1, soil class=4 -- not adjacent to any NoData cell, so
+    # slope is a real computed value here.
     testing.assert_array_almost_equal(
         feature_matrix[3][1],
         numpy.array(
@@ -137,6 +147,7 @@ def test_transform_to_feature_raster_layers():
                 8.89 / max_wetting_front_suction_head,
                 0.434 / max_effective_porosity,
                 0.5 / max_effective_saturation,
+                316.227783,
             ],
             dtype=numpy.float32,
         ),
@@ -154,6 +165,7 @@ def test_transform_to_feature_raster_layers():
                 11.01 / max_wetting_front_suction_head,
                 0.412 / max_effective_porosity,
                 0.99 / max_effective_saturation,
+                -9999.0,
             ],
             dtype=numpy.float32,
         ),
@@ -186,23 +198,24 @@ def test_transform_to_feature_raster_layers_no_polygons():
         geo_data.DEFAULT_INFILTRATION_CONFIGURATION,
     )
 
-    # Checking results
-    testing.assert_array_equal(
+    # Checking results. (0,0) has a real computed slope since none of its
+    # neighbours are NoData; the other three cells are all adjacent to the
+    # NoData cell at (1,1), so their slope folds into NoData too.
+    testing.assert_array_almost_equal(
         feature_matrix,
         numpy.array(
             [
                 [
-                    [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                    [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 223.606797],
+                    [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0],
                 ],
                 [
-                    [2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                    [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0],
+                    [-9999.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -9999.0],
                 ],
             ],
             dtype=numpy.float32,
         ),
-        strict=True,
     )
 
 

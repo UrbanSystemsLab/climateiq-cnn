@@ -57,6 +57,8 @@ class StudyArea:
     state: StudyAreaState | None = None
     elevation_min: float | None = None
     elevation_max: float | None = None
+    slope_min: float | None = None
+    slope_max: float | None = None
     chunk_size: int | None = None
     chunk_x_count: int | None = None
     chunk_y_count: int | None = None
@@ -134,6 +136,28 @@ class StudyArea:
         study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
         transaction = db.transaction()
         _update_study_area_min_max_elevation(transaction, study_area_ref, min_, max_)
+
+    @staticmethod
+    def update_min_max_slope(
+        db: firestore.Client, study_area_name: str, min_: float, max_: float
+    ) -> None:
+        """Sets slope min & max if less or greater than the current min & max.
+
+        For the given study area, transactionally updates the slope_min and
+        slope_max field to the given min_ and max_ values if they are less than and
+        greater than the current values.
+
+        Args:
+          db: The firestore database client to use to make the update.
+          study_area_name: The study area to update.
+          min_: The min slope value for the study area. Will only be set if less
+                than the study area's current min.
+          max_: The max slope value for the study area. Will only be set if less
+                than the study area's current max.
+        """
+        study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
+        transaction = db.transaction()
+        _update_study_area_min_max_slope(transaction, study_area_ref, min_, max_)
 
     @staticmethod
     def update_chunk_info(
@@ -404,6 +428,35 @@ def _update_study_area_min_max_elevation(
             update["elevation_max"] = max_
     except KeyError:
         update["elevation_max"] = max_
+
+    if update:
+        transaction.update(study_area_ref, update)
+
+
+@firestore.transactional
+def _update_study_area_min_max_slope(
+    transaction: firestore.Transaction,
+    study_area_ref: firestore.DocumentReference,
+    min_: float,
+    max_: float,
+) -> None:
+    """Updates the study area's slope min & max in a transaction."""
+    snapshot = study_area_ref.get(transaction=transaction)
+    update = {}
+
+    try:
+        cur_min = snapshot.get("slope_min")
+        if min_ < cur_min:
+            update["slope_min"] = min_
+    except KeyError:
+        update["slope_min"] = min_
+
+    try:
+        cur_max = snapshot.get("slope_max")
+        if max_ > cur_max:
+            update["slope_max"] = max_
+    except KeyError:
+        update["slope_max"] = max_
 
     if update:
         transaction.update(study_area_ref, update)
