@@ -600,6 +600,44 @@ def build_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
     )
 
 
+@functions_framework.cloud_event
+@_retry_and_report_errors(
+    lambda cloud_event, exc: _write_chunk_metastore_error(
+        cloud_event.data["name"], str(exc)
+    )
+)
+def build_flood_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
+    """Builds a flood feature matrix when a chunk archive is uploaded.
+
+    Flood-only counterpart to build_feature_matrix. Deploy this behind an Eventarc
+    path-pattern filter for "*.tar" so the flood and heat paths are independent.
+    """
+    _build_flood_feature_matrix(
+        cloud_event.data["bucket"],
+        cloud_event.data["name"],
+        cloud_storage.FEATURE_CHUNKS_BUCKET,
+    )
+
+
+@functions_framework.cloud_event
+@_retry_and_report_errors(
+    lambda cloud_event, exc: _write_chunk_metastore_error(
+        cloud_event.data["name"], str(exc)
+    )
+)
+def build_heat_feature_matrix(cloud_event: functions_framework.CloudEvent) -> None:
+    """Builds heat feature matrices when a WPS output file is uploaded.
+
+    Heat-only counterpart to build_feature_matrix. Deploy this behind an Eventarc
+    path-pattern filter for "*.nc" so the flood and heat paths are independent.
+    """
+    _build_heat_feature_matrix(
+        cloud_event.data["bucket"],
+        cloud_event.data["name"],
+        cloud_storage.FEATURE_CHUNKS_BUCKET,
+    )
+
+
 @functions_framework.http
 @_error_to_response
 def build_feature_matrix_http(request: flask.Request) -> flask.Response:
@@ -618,83 +656,94 @@ def build_feature_matrix_http(request: flask.Request) -> flask.Response:
     return flask.jsonify({"message": "Feature matrix built."})
 
 
-def _build_feature_matrix(
+def _build_flood_feature_matrix(
     bucket_name: str, chunk_path: str, output_bucket: str
 ) -> None:
-    """Builds a feature matrix when a set of geo files is uploaded."""
+    """Builds a flood (CityCat) feature matrix from an uploaded chunk archive."""
     storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    chunk_blob = bucket.blob(chunk_path)
+    chunk_blob = storage_client.bucket(bucket_name).blob(chunk_path)
 
     with chunk_blob.open("rb") as chunk:
         study_area_name, chunk_name = _parse_chunk_path(chunk_path)
-        # Flood (CityCat)
-        if chunk_path.endswith(".tar"):
-            feature_file_name = pathlib.PurePosixPath(chunk_path).with_suffix(".npy")
+        feature_file_name = pathlib.PurePosixPath(chunk_path).with_suffix(".npy")
+        feature_blob = storage_client.bucket(output_bucket).blob(str(feature_file_name))
+        chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
+            firestore.Client(), study_area_name, chunk_name
+        )
+        # Let's check if the chunk metadata object is present and has the state
+        # different from None (which means it's either FEATURE_MATRIX_PROCESSING
+        # meaning that unscaled feature matrix is stored and this CF succeeded, or
+        # it's FEATURE_MATRIX_READY and the downstream rescaling CF is also done).
+        # If metadata object is not present it means we're in the first execution
+        # attempt. None state means that we're in the retry and either this CF
+        # crashed during previous execution attempt or it finished with an error.
+        if chunk_metadata is not None and chunk_metadata.state is not None:
+            logging.info(
+                "Flood feature matrix for chunk %s was already generated",
+                chunk_path,
+            )
+            return
+
+        start_time = time.time()
+        logging.info("Start generating flood feature matrix for chunk %s", chunk_path)
+        metastore.StudyAreaSpatialChunk(
+            id_=chunk_name,
+            error=firestore.DELETE_FIELD,
+        ).merge(firestore.Client(), study_area_name)
+        feature_matrix, metadata, header = _build_flood_feature_matrix_from_archive(
+            chunk
+        )
+
+        if feature_matrix is None or header is None:
+            raise ValueError(f"Empty archive found in {chunk_blob}")
+
+        # Updating min/max elevation in the study area metadata first before storing
+        # feature matrix file that will trigger rescaling post-processing.
+        _update_study_area_metastore_entry(chunk_blob, metadata)
+        _write_as_npy(feature_blob, feature_matrix)
+        logging.info(
+            "Flood feature matrix file was generated for chunk %s in %s seconds",
+            chunk_path,
+            time.time() - start_time,
+        )
+        _write_flood_chunk_metastore_entry(chunk_blob, header)
+
+
+def _build_heat_feature_matrix(
+    bucket_name: str, chunk_path: str, output_bucket: str
+) -> None:
+    """Builds heat (WRF) feature matrices from one uploaded WPS output file."""
+    storage_client = storage.Client()
+    chunk_blob = storage_client.bucket(bucket_name).blob(chunk_path)
+
+    with chunk_blob.open("rb") as chunk:
+        feature_matrices, metadata = _build_wps_feature_matrices(chunk)
+        # Write a separate file for each variable type
+        # (spatial, spatiotemporal, lu_index).
+        for var_type, feature_matrix in feature_matrices.items():
+            feature_path = pathlib.PurePosixPath(chunk_path)
+            feature_path_parent = feature_path.parent
+            feature_file_name = (
+                feature_path_parent / var_type.value / feature_path.name
+            ).with_suffix(".npy")
             feature_blob = storage_client.bucket(output_bucket).blob(
                 str(feature_file_name)
             )
-            chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
-                firestore.Client(), study_area_name, chunk_name
-            )
-            # Let's check if the chunk metadata object is present and has the state
-            # different from None (which means it's either FEATURE_MATRIX_PROCESSING
-            # meaning that unscaled feature matrix is stored and this CF succeeded, or
-            # it's FEATURE_MATRIX_READY and the downstream rescaling CF is also done).
-            # If metadata object is not present it means we're in the first execution
-            # attempt. None state means that we're in the retry and either this CF
-            # crashed during previous execution attempt or it finished with an error.
-            if chunk_metadata is not None and chunk_metadata.state is not None:
-                logging.info(
-                    "Flood feature matrix for chunk %s was already generated",
-                    chunk_path,
-                )
-                return
-
-            start_time = time.time()
-            logging.info(
-                "Start generating flood feature matrix for chunk %s", chunk_path
-            )
-            metastore.StudyAreaSpatialChunk(
-                id_=chunk_name,
-                error=firestore.DELETE_FIELD,
-            ).merge(firestore.Client(), study_area_name)
-            feature_matrix, metadata, header = _build_flood_feature_matrix_from_archive(
-                chunk
-            )
-
-            if feature_matrix is None or header is None:
-                raise ValueError(f"Empty archive found in {chunk_blob}")
-
-            # Updating min/max elevation in the study area metadata first before storing
-            # feature matrix file that will trigger rescaling post-processing.
-            _update_study_area_metastore_entry(chunk_blob, metadata)
             _write_as_npy(feature_blob, feature_matrix)
-            logging.info(
-                "Flood feature matrix file was generated for chunk %s in %s seconds",
-                chunk_path,
-                time.time() - start_time,
-            )
-            _write_flood_chunk_metastore_entry(chunk_blob, header)
+            _write_wps_chunk_metastore_entry(chunk_blob, feature_blob, metadata)
 
-        # Heat (WRF) - treat one WPS outout file as one chunk
-        elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_path):
-            feature_matrices, metadata = _build_wps_feature_matrices(chunk)
-            # Write a separate file for each variable type
-            # (spatial, spatiotemporal, lu_index).
-            for var_type, feature_matrix in feature_matrices.items():
-                feature_path = pathlib.PurePosixPath(chunk_path)
-                feature_path_parent = feature_path.parent
-                feature_file_name = (
-                    feature_path_parent / var_type.value / feature_path.name
-                ).with_suffix(".npy")
-                feature_blob = storage_client.bucket(output_bucket).blob(
-                    str(feature_file_name)
-                )
-                _write_as_npy(feature_blob, feature_matrix)
-                _write_wps_chunk_metastore_entry(chunk_blob, feature_blob, metadata)
-        else:
-            raise ValueError(f"Unexpected file {chunk_path}")
+
+def _build_feature_matrix(
+    bucket_name: str, chunk_path: str, output_bucket: str
+) -> None:
+    """Dispatches a chunk to the flood or heat builder by file type.
+    """
+    if chunk_path.endswith(".tar"):
+        _build_flood_feature_matrix(bucket_name, chunk_path, output_bucket)
+    elif re.search(file_names.WPS_DOMAIN3_NC_REGEX, chunk_path):
+        _build_heat_feature_matrix(bucket_name, chunk_path, output_bucket)
+    else:
+        raise ValueError(f"Unexpected file {chunk_path}")
 
 
 @functions_framework.cloud_event
