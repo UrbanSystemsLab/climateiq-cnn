@@ -1502,20 +1502,12 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
             following the "chunk_*.scale_trigger" pattern. Other files are ignored.
     """
     study_area_name, chunk_name = _parse_chunk_path(blob_path)
-    # Let's look up chunk metadata and check if scaling is needed
     db = firestore.Client()
-    chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
-        db, study_area_name, chunk_name
-    )
-    if chunk_metadata is None:
-        logging.info(
-            f"Chunk metadata is not registered for {study_area_name}/{chunk_name}"
-        )
+
+    if not chunk_name.startswith("chunk_"):
+        logging.info("Skipping %s, which is not an unscaled feature matrix", blob_path)
         return
 
-    if not chunk_metadata.needs_scaling:
-        logging.info(f"Chunk {study_area_name}/{chunk_name} doesn't need scaling")
-        return
     study_area = metastore.StudyArea.get(db, study_area_name)
 
     if blob_path.endswith(".npy"):
@@ -1559,6 +1551,19 @@ def _start_feature_rescaling_if_ready(feature_bucket: storage.Bucket, blob_path:
             )
             trigger_blob.upload_from_string(data="")  # Empty file content
     elif blob_path.endswith(_FEATURE_SCALING_TRIGGER_SUFFIX):
+        chunk_metadata = metastore.StudyAreaSpatialChunk.get_if_exists(
+            db, study_area_name, chunk_name
+        )
+        if chunk_metadata is None:
+            logging.info(
+                f"Chunk metadata is not registered for {study_area_name}/{chunk_name}"
+            )
+            return
+
+        if not chunk_metadata.needs_scaling:
+            logging.info(f"Chunk {study_area_name}/{chunk_name} doesn't need scaling")
+            return
+
         logging.info(
             "[Feature Rescaler] Rescaling feature matrix %s/%s.npy",
             study_area_name,

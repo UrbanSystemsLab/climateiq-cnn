@@ -169,6 +169,15 @@ def wait_for_study_area(
             study_area = metastore.StudyArea.get(db, area_name)
         except ValueError:
             state = None
+        except TypeError:
+            logger.warning(
+                "Could not read study area %s; it may have been written by newer code. "
+                "Rebuild this image from the branch the cloud functions are deployed "
+                "from.",
+                area_name,
+                exc_info=True,
+            )
+            state = None
         else:
             state = study_area.state
 

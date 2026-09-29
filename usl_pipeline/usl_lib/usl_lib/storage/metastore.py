@@ -3,6 +3,7 @@ import datetime
 import enum
 import hashlib
 import itertools
+import logging
 import math
 import random
 from typing import Iterable
@@ -22,6 +23,35 @@ WRF_HEAT_CONFIG = "wrf_heat_configs"
 
 SIMULATIONS = "simulations"
 SIMULATION_LABEL_CHUNKS = "label_chunks"
+
+
+def _declared_fields(cls: type, document: dict | None) -> dict:
+    """Drops document keys that the dataclass does not declare.
+
+    A Firestore document outlives the code that reads it. When a writer running newer
+    code adds a field, every reader built before it used to fail outright, because the
+    document was splatted straight into the constructor and an undeclared key raises
+    TypeError. Unknown keys are now logged and skipped, so a schema addition degrades
+    to a warning instead of breaking the reader.
+
+    Args:
+      cls: The dataclass the document is being read into.
+      document: The raw Firestore document contents, which may be None.
+
+    Returns:
+      The subset of the document whose keys the dataclass declares.
+    """
+    known = {field.name for field in dataclasses.fields(cls)}
+    contents = document or {}
+    unknown = contents.keys() - known
+    if unknown:
+        logging.warning(
+            "Ignoring %s field(s) not known to this build of %s: %s",
+            len(unknown),
+            cls.__name__,
+            ", ".join(sorted(unknown)),
+        )
+    return {key: value for key, value in contents.items() if key in known}
 
 
 class StudyAreaState(enum.StrEnum):
@@ -108,7 +138,7 @@ class StudyArea:
         if not ref.exists:
             raise ValueError(f'No such study area "{name}"')
 
-        return cls(name=name, **(ref.to_dict() or {}))
+        return cls(name=name, **_declared_fields(cls, ref.to_dict()))
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
@@ -309,12 +339,12 @@ class StudyAreaChunk:
         if not ref.exists:
             raise ValueError(f'No such chunk {chunk_name} within {study_area_name}"')
 
-        return cls(id_=chunk_name, **(ref.to_dict() or {}))
+        return cls(id_=chunk_name, **_declared_fields(cls, ref.to_dict()))
 
     @classmethod
     def from_ref(cls, ref: firestore.DocumentReference) -> "StudyAreaChunk":
         """Creates an instance of the chunk class based on retrieved reference."""
-        return cls(id_=ref.id, **(ref.get().to_dict() or {}))
+        return cls(id_=ref.id, **_declared_fields(cls, ref.get().to_dict()))
 
     @staticmethod
     def get_ref(
@@ -344,7 +374,9 @@ class StudyAreaChunk:
           None otherwise.
         """
         ref = cls.get_ref(db, study_area_name, chunk_name).get()
-        return None if not ref.exists else cls(id_=chunk_name, **(ref.to_dict() or {}))
+        if not ref.exists:
+            return None
+        return cls(id_=chunk_name, **_declared_fields(cls, ref.to_dict()))
 
     @classmethod
     def update_scaling_done(
@@ -505,7 +537,7 @@ class FloodScenarioConfig:
         if not ref.exists:
             raise ValueError(f'No such flood config "{name}"')
 
-        return cls(name=name, **(ref.to_dict() or {}))
+        return cls(name=name, **_declared_fields(cls, ref.to_dict()))
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
@@ -564,7 +596,7 @@ class HeatScenarioConfig:
         if not ref.exists:
             raise ValueError(f'No such heat config "{name}"')
 
-        return cls(name=name, **(ref.to_dict() or {}))
+        return cls(name=name, **_declared_fields(cls, ref.to_dict()))
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
@@ -624,7 +656,7 @@ class Simulation:
         ref = cls.get_ref(db, study_area_name, config_path).get()
         if not ref.exists:
             raise ValueError(f"No such simulation for {study_area_name} {config_path}")
-        return Simulation(**(ref.to_dict() or {}))
+        return Simulation(**_declared_fields(Simulation, ref.to_dict()))
 
     @staticmethod
     def get_ref(
@@ -663,7 +695,7 @@ class SimulationLabelChunk:
             SIMULATION_LABEL_CHUNKS
         )
         for chunk_ref in ref.list_documents():
-            yield cls(**chunk_ref.get().to_dict())
+            yield cls(**_declared_fields(cls, chunk_ref.get().to_dict()))
 
 
 class DatasetSplit(enum.StrEnum):
