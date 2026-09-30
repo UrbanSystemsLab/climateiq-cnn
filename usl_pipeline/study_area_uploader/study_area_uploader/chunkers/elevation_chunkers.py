@@ -47,6 +47,7 @@ def split_geotiff_into_chunks(
                 str(chunk_file_path),
                 ds,
                 srcWin=[col_start, row_start, col_count, row_count],
+                creationOptions=["COMPRESS=LZW"],
             )
             chunk_descriptors.append(
                 chunkers_data.ChunkDescriptor(

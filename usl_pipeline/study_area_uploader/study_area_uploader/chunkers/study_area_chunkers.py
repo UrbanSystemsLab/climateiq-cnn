@@ -189,6 +189,9 @@ def build_and_upload_chunks(
             timeout=study_area_transformers.UPLOAD_TIMEOUT_SECONDS,
             retry=DEFAULT_RETRY,
         )
+        # The chunk was rewritten uncompressed above; drop it so chunks do not
+        # accumulate in scratch space, which is memory on Cloud Run.
+        elevation_chunk_file_path.unlink()
 
 
 def _add_chunk_to_dir_if_present(

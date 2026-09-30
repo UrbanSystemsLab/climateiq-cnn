@@ -19,7 +19,6 @@ from usl_lib.transformers import (
 )
 from usl_lib.writers import elevation_writers, polygon_writers
 
-
 # Default soil class value that is recognized a non-green area.
 # Rasters can take well over the client's default 60s to upload, and the default
 # upload retry only applies when a generation is specified. Re-uploading an

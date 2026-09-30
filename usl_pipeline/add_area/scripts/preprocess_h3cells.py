@@ -12,22 +12,22 @@ import traceback
 
 import geopandas as gpd
 import pandas as pd
+from osgeo import gdal
 import rasterio
 
-from rasterio.mask import mask
 from rasterio.merge import merge
-from rasterio.vrt import WarpedVRT
 from rasterio.enums import Resampling
 from rasterio.crs import CRS
 from rasterio import features
-from shapely.geometry import mapping, shape
-
+from shapely.geometry import shape
 
 DEFAULT_TARGET_CRS = "EPSG:3395"
 DEFAULT_WORKING_DIR = "gs://raw-data-h3index/Working_files"
 DEFAULT_H3_ROOT = "gs://raw-data-h3index/CONUS_Data_H3Index"
 # Generated outputs go under data/, which is gitignored.
 DEFAULT_OUTPUT_DIR = Path("data/output")
+# Working memory, in MB, for each raster warp. Bounds memory regardless of city size.
+WARP_MEMORY_LIMIT_MB = 128
 
 # Urban areas shapefile.
 DEFAULT_URBAN_AREAS_FILE = "01_urban_areas_simplified_with_state.shp"
@@ -480,48 +480,55 @@ def extract_raster_by_mask(
 ):
     """Extract city portion from one H3 raster and optionally reproject/resample.
 
-    Only the blocks covering the mask are read, so this works on remote (gs://)
-    rasters without downloading them in full.
+    Only the blocks covering the mask are read, works on remote (gs://) rasters
+    without downloading them in full. The warp streams in bounded chunks
+    rather than holding the cropped raster in memory
     """
     output_raster.parent.mkdir(parents=True, exist_ok=True)
 
     with rasterio.open(gdal_path(input_raster)) as src:
         if src.crs is None:
             raise ValueError(f"Raster has no CRS: {input_raster}")
+        nodata = src.nodata
 
-        target_crs_obj = CRS.from_string(target_crs)
-        mask_target = mask_gdf.to_crs(target_crs_obj)
-        geometries = [
-            mapping(geom)
-            for geom in mask_target.geometry
-            if geom is not None and not geom.is_empty
-        ]
+    mask_target = mask_gdf.to_crs(CRS.from_string(target_crs))
+    geometries = [
+        geom for geom in mask_target.geometry if geom is not None and not geom.is_empty
+    ]
 
-        if not geometries:
-            raise RuntimeError(f"No valid mask geometry for {input_raster}")
+    if not geometries:
+        raise RuntimeError(f"No valid mask geometry for {input_raster}")
 
-        vrt_options = {"crs": target_crs_obj, "resampling": resampling}
-        if resolution is not None:
-            vrt_options["resolution"] = (resolution, resolution)
+    cutline = output_raster.with_suffix(".cutline.geojson")
+    gpd.GeoDataFrame(geometry=geometries, crs=mask_target.crs).to_file(
+        cutline, driver="GeoJSON"
+    )
 
-        with WarpedVRT(src, **vrt_options) as vrt:
-            out_image, out_transform = mask(
-                vrt, geometries, crop=True, filled=True, nodata=vrt.nodata
-            )
-            profile = vrt.profile.copy()
-            profile.update(
-                driver="GTiff",
-                height=out_image.shape[1],
-                width=out_image.shape[2],
-                transform=out_transform,
-                crs=target_crs_obj,
-                compress="LZW",
-                tiled=True,
-                BIGTIFF="IF_SAFER",
-            )
+    warp_options = {
+        "format": "GTiff",
+        "dstSRS": target_crs,
+        "resampleAlg": resampling.name,
+        "cutlineDSName": str(cutline),
+        "cropToCutline": True,
+        "dstNodata": nodata,
+        "warpMemoryLimit": WARP_MEMORY_LIMIT_MB,
+        "multithread": True,
+        "creationOptions": ["COMPRESS=LZW", "TILED=YES", "BIGTIFF=IF_SAFER"],
+    }
+    if resolution is not None:
+        # Aligned to the resolution so pieces from neighbouring H3 cells share a grid.
+        warp_options.update(xRes=resolution, yRes=resolution, targetAlignedPixels=True)
 
-            with rasterio.open(output_raster, "w", **profile) as dst:
-                dst.write(out_image)
+    try:
+        with gdal.ExceptionMgr(useExceptions=True):
+            # Closing flushes the output to disk.
+            gdal.Warp(
+                str(output_raster),
+                gdal_path(input_raster),
+                options=gdal.WarpOptions(**warp_options),
+            ).Close()
+    finally:
+        cutline.unlink(missing_ok=True)
 
     print(f"  Created raster piece: {output_raster.name}")
 
@@ -566,6 +573,11 @@ def mosaic_raster_parts(
     if not raster_parts:
         raise RuntimeError(f"No raster pieces supplied for {output_raster.name}")
 
+    if len(raster_parts) == 1:
+        shutil.move(raster_parts[0], output_raster)
+        print(f"Created final raster: {output_raster}")
+        return
+
     print(f"\nMosaicking {len(raster_parts)} cropped raster piece(s)...")
     sources = [rasterio.open(path) for path in raster_parts]
 
@@ -596,6 +608,9 @@ def mosaic_raster_parts(
     finally:
         for src in sources:
             src.close()
+
+    for path in raster_parts:
+        Path(path).unlink(missing_ok=True)
 
     if not output_raster.exists():
         raise RuntimeError(f"Final mosaic was not created: {output_raster}")
