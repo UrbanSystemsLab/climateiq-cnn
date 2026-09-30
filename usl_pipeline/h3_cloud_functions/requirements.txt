@@ -1,0 +1,19 @@
+# Core dependencies
+geopandas
+shapely>=2.0
+pyproj
+rtree
+pandas
+numpy
+h3
+pyyaml
+pyarrow>=10.0.0
+rasterio>=1.3.0
+
+# Streaming JSON parser (avoids OOM when merging large GeoJSON files)
+ijson>=3.2.0
+
+# GCP-specific dependencies
+functions-framework>=3.5.0
+google-cloud-storage>=2.10.0
+google-cloud-logging>=3.5.0
