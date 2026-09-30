@@ -4,6 +4,7 @@ import pathlib
 import sys
 import tempfile
 import time
+from typing import Sequence
 
 from google.cloud import firestore
 from google.cloud import storage
@@ -14,9 +15,13 @@ from usl_lib.storage import cloud_storage
 from usl_lib.storage import metastore
 
 
-def main() -> None:
-    """Breaks the input files into chunks and uploads them to GCS."""
-    args = _parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    """Breaks the input files into chunks and uploads them to GCS.
+
+    Args:
+      argv: Argument list to parse. Defaults to sys.argv.
+    """
+    args = _parse_args(argv)
     # Setting up logging:
     logging.getLogger("rasterio").setLevel(logging.WARNING)
     if args.verbose:
@@ -117,7 +122,7 @@ def main() -> None:
         study_area_chunkers.build_and_upload_chunks(
             args.name,
             prepared_inputs,
-            pathlib.Path(),
+            work_dir,
             chunk_bucket,
             1000,
             input_elevation_band=args.elevation_geotiff_band,
@@ -252,18 +257,10 @@ def _get_args_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parses command-line arguments."""
     parser = _get_args_parser()
-    args = parser.parse_args()
-
-    # Validation of CLI arguments
-    if args.soil_type_file and not args.non_green_area_soil_classes:
-        parser.error(
-            "--non_green_area_soil_classes required if --soil_type_file present"
-        )
-
-    return args
+    return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
