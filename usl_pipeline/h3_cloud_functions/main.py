@@ -523,9 +523,16 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
     blob, then replaces the original. Works for files of any size — peak
     memory is one feature at a time plus the current city's new features.
     """
+    import decimal
     import glob as _glob
     import re as _re
     import ijson
+
+    class _DecimalEncoder(json.JSONEncoder):
+        def default(self, o):
+            if isinstance(o, decimal.Decimal):
+                return float(o)
+            return super().default(o)
 
     output_files = _glob.glob(os.path.join(output_dir, "*.geojson"))
     if not output_files:
@@ -581,14 +588,14 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
                                 continue
                             if not first:
                                 out.write(b",")
-                            out.write(json.dumps(feature).encode("utf-8"))
+                            out.write(json.dumps(feature, cls=_DecimalEncoder).encode("utf-8"))
                             first = False
                             kept += 1
 
                 for feature in new_features:
                     if not first:
                         out.write(b",")
-                    out.write(json.dumps(feature).encode("utf-8"))
+                    out.write(json.dumps(feature, cls=_DecimalEncoder).encode("utf-8"))
                     first = False
 
                 out.write(b"]}")
