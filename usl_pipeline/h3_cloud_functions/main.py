@@ -515,20 +515,13 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
 # Upload per-city + rebuild all_cities from per-city parts
 # ---------------------------------------------------------------------------
 
-KNOWN_CITIES = {
-    "Atlanta", "Chicago", "LosAngeles", "Miami", "NYC",
-    "NewOrleans", "Philadelphia", "Phoenix", "Pittsburgh",
-    "SanAntonio", "SanDiego",
-}
-
-
 def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_run):
-    """Save per-city file, then rebuild all_cities only when safe.
+    """Upload per-city GeoJSONs. Does NOT rebuild all_cities.
 
-    1. Upload this city's GeoJSONs to output/by_city/{city}/
-    2. Check if all known cities have per-city files. Only rebuild all_cities
-       when every city is represented — otherwise skip rebuild to avoid
-       overwriting the existing all_cities with incomplete data.
+    Cities come through one at a time. Rebuilding all_cities from only
+    per-city files would overwrite the existing all_cities (which has all
+    legacy cities) with incomplete data. Per-city files accumulate in
+    output/by_city/{city}/ and all_cities stays untouched.
     """
     import glob as _glob
     import re as _re
@@ -544,8 +537,6 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
 
     output_files = sorted(output_files, key=_level_key)
 
-    client = storage.Client()
-    bucket_obj = client.bucket(bucket_name)
     city_name = next(iter(cities_in_run))
 
     for local_path in output_files:
@@ -554,70 +545,7 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
         _upload_to_gcs(bucket_name, local_path, per_city_dest)
         logging.info("Uploaded per-city: %s", per_city_dest)
 
-    per_city_prefix = f"{output_prefix}by_city/"
-    city_dirs = set()
-    for b in bucket_obj.list_blobs(prefix=per_city_prefix):
-        parts = b.name[len(per_city_prefix):].split("/")
-        if len(parts) >= 2:
-            city_dirs.add(parts[0])
-    city_dirs = sorted(city_dirs)
-
-    missing = KNOWN_CITIES - set(city_dirs)
-    if missing:
-        logging.info(
-            "Skipping all_cities rebuild: %d/%d known cities missing per-city files: %s. "
-            "Per-city file for %s uploaded successfully.",
-            len(missing), len(KNOWN_CITIES), sorted(missing), city_name,
-        )
-        return
-
-    logging.info("All %d known cities have per-city files — rebuilding all_cities from: %s",
-                 len(city_dirs), city_dirs)
-
-    for local_path in output_files:
-        fname = os.path.basename(local_path)
-        all_cities_dest = f"{output_prefix}{fname}"
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".geojson", delete=False) as tmp_out:
-            merged_path = tmp_out.name
-
-        try:
-            total = 0
-            with open(merged_path, "w") as out:
-                out.write('{"type":"FeatureCollection","features":[')
-                first = True
-                for city_dir in city_dirs:
-                    blob_path = f"{output_prefix}by_city/{city_dir}/{fname}"
-                    city_blob = bucket_obj.blob(blob_path)
-                    if not city_blob.exists():
-                        continue
-                    with tempfile.NamedTemporaryFile(suffix=".geojson", delete=False) as tmp_city:
-                        city_local = tmp_city.name
-                    try:
-                        city_blob.download_to_filename(city_local)
-                        with open(city_local) as cf:
-                            city_fc = json.load(cf)
-                        count = 0
-                        for feat in city_fc.get("features", []):
-                            if not first:
-                                out.write(",")
-                            json.dump(feat, out)
-                            first = False
-                            count += 1
-                        total += count
-                        logging.info("  %s: %d features from %s", fname, count, city_dir)
-                    finally:
-                        if os.path.exists(city_local):
-                            os.unlink(city_local)
-                out.write("]}")
-
-            _upload_to_gcs(bucket_name, merged_path, all_cities_dest)
-            logging.info("Rebuilt %s: %d total features", fname, total)
-        except Exception as e:
-            logging.error("Failed to rebuild %s: %s", fname, e)
-        finally:
-            if os.path.exists(merged_path):
-                os.unlink(merged_path)
+    logging.info("Per-city upload complete for %s. all_cities not modified.", city_name)
 
 
 # ---------------------------------------------------------------------------
