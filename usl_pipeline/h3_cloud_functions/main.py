@@ -570,6 +570,17 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
             logging.info("Updating %s: %d new features for %s",
                          fname, len(new_features), city_name)
 
+            MAX_STREAMING_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
+            if all_blob.exists():
+                all_blob.reload()
+                blob_size = all_blob.size or 0
+                if blob_size > MAX_STREAMING_BYTES:
+                    logging.warning(
+                        "Skipping streaming update for %s (%.1f GB) — "
+                        "too large. Per-city file already uploaded.",
+                        fname, blob_size / (1024**3))
+                    continue
+
             kept = 0
             dropped = 0
 
