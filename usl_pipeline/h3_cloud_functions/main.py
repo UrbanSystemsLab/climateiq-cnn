@@ -730,7 +730,10 @@ def process_h3_pipeline_on_tiff_upload(
 
     logging.info("Mosaic TIF detected: %s / %s", city_folder, mosaic_filename)
 
-    pipeline_bucket = os.environ.get("GCS_BUCKET", "climateiq-h3-pipeline-1770319032")
+    pipeline_bucket = os.environ.get("GCS_BUCKET")
+    if not pipeline_bucket:
+        logging.error("GCS_BUCKET environment variable is required")
+        return
     config_path = os.environ.get("CONFIG_PATH", "config/cities_config.yaml")
 
     client = storage.Client()
