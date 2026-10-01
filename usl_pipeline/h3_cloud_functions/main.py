@@ -515,13 +515,20 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
 # Upload per-city + rebuild all_cities from per-city parts
 # ---------------------------------------------------------------------------
 
+KNOWN_CITIES = {
+    "Atlanta", "Chicago", "LosAngeles", "Miami", "NYC",
+    "NewOrleans", "Philadelphia", "Phoenix", "Pittsburgh",
+    "SanAntonio", "SanDiego",
+}
+
+
 def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_run):
-    """Save per-city file, then rebuild all_cities from all per-city files.
+    """Save per-city file, then rebuild all_cities only when safe.
 
     1. Upload this city's GeoJSONs to output/by_city/{city}/
-    2. Rebuild all_cities by reading each city's per-city file one at a time
-       and streaming features into the combined output.
-    Peak memory = one city's data. Never downloads the old all_cities blob.
+    2. Check if all known cities have per-city files. Only rebuild all_cities
+       when every city is represented — otherwise skip rebuild to avoid
+       overwriting the existing all_cities with incomplete data.
     """
     import glob as _glob
     import re as _re
@@ -554,7 +561,18 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
         if len(parts) >= 2:
             city_dirs.add(parts[0])
     city_dirs = sorted(city_dirs)
-    logging.info("Rebuilding all_cities from %d cities: %s", len(city_dirs), city_dirs)
+
+    missing = KNOWN_CITIES - set(city_dirs)
+    if missing:
+        logging.info(
+            "Skipping all_cities rebuild: %d/%d known cities missing per-city files: %s. "
+            "Per-city file for %s uploaded successfully.",
+            len(missing), len(KNOWN_CITIES), sorted(missing), city_name,
+        )
+        return
+
+    logging.info("All %d known cities have per-city files — rebuilding all_cities from: %s",
+                 len(city_dirs), city_dirs)
 
     for local_path in output_files:
         fname = os.path.basename(local_path)
