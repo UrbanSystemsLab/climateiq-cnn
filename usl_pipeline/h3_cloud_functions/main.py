@@ -508,10 +508,17 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
 
 
 # ---------------------------------------------------------------------------
-# Merge & upload (keeps other cities' data intact on per-city runs)
+# Upload per-city + rebuild all_cities from per-city parts
 # ---------------------------------------------------------------------------
 
 def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_run):
+    """Save per-city file, then rebuild all_cities from all per-city files.
+
+    1. Upload this city's GeoJSONs to output/by_city/{city}/
+    2. Rebuild all_cities by reading each city's per-city file one at a time
+       and streaming features into the combined output.
+    Peak memory = one city's data. Never downloads the old all_cities blob.
+    """
     import glob as _glob
     import re as _re
 
@@ -528,104 +535,67 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
 
     client = storage.Client()
     bucket_obj = client.bucket(bucket_name)
-    STREAM_THRESHOLD_MB = 50
+    city_name = next(iter(cities_in_run))
 
     for local_path in output_files:
         fname = os.path.basename(local_path)
-        dest = f"{output_prefix}{fname}"
+        per_city_dest = f"{output_prefix}by_city/{city_name}/{fname}"
+        _upload_to_gcs(bucket_name, local_path, per_city_dest)
+        logging.info("Uploaded per-city: %s", per_city_dest)
 
-        with open(local_path) as f:
-            new_fc = json.load(f)
-        new_features = new_fc.get("features", [])
+    per_city_prefix = f"{output_prefix}by_city/"
+    city_dirs = set()
+    for b in bucket_obj.list_blobs(prefix=per_city_prefix):
+        parts = b.name[len(per_city_prefix):].split("/")
+        if len(parts) >= 2:
+            city_dirs.add(parts[0])
+    city_dirs = sorted(city_dirs)
+    logging.info("Rebuilding all_cities from %d cities: %s", len(city_dirs), city_dirs)
 
-        blob = bucket_obj.blob(dest)
+    for local_path in output_files:
+        fname = os.path.basename(local_path)
+        all_cities_dest = f"{output_prefix}{fname}"
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".geojson", delete=False) as tmp_out:
             merged_path = tmp_out.name
 
-        if not blob.exists():
-            logging.info("%s: new file, %d features", fname, len(new_features))
+        try:
+            total = 0
             with open(merged_path, "w") as out:
-                json.dump({"type": "FeatureCollection", "features": new_features}, out)
-        else:
-            with tempfile.NamedTemporaryFile(suffix=".geojson", delete=False) as tmp_dl:
-                existing_path = tmp_dl.name
-            try:
-                blob.download_to_filename(existing_path)
-                existing_mb = os.path.getsize(existing_path) / (1024 * 1024)
-
-                if existing_mb > STREAM_THRESHOLD_MB:
-                    streamed_ok = False
+                out.write('{"type":"FeatureCollection","features":[')
+                first = True
+                for city_dir in city_dirs:
+                    blob_path = f"{output_prefix}by_city/{city_dir}/{fname}"
+                    city_blob = bucket_obj.blob(blob_path)
+                    if not city_blob.exists():
+                        continue
+                    with tempfile.NamedTemporaryFile(suffix=".geojson", delete=False) as tmp_city:
+                        city_local = tmp_city.name
                     try:
-                        import ijson
-                        import decimal as _decimal
+                        city_blob.download_to_filename(city_local)
+                        with open(city_local) as cf:
+                            city_fc = json.load(cf)
+                        count = 0
+                        for feat in city_fc.get("features", []):
+                            if not first:
+                                out.write(",")
+                            json.dump(feat, out)
+                            first = False
+                            count += 1
+                        total += count
+                        logging.info("  %s: %d features from %s", fname, count, city_dir)
+                    finally:
+                        if os.path.exists(city_local):
+                            os.unlink(city_local)
+                out.write("]}")
 
-                        class _FloatEncoder(json.JSONEncoder):
-                            def default(self, o):
-                                if isinstance(o, _decimal.Decimal):
-                                    return float(o)
-                                return super().default(o)
-
-                        kept = 0
-                        with open(merged_path, "w") as out:
-                            out.write('{"type":"FeatureCollection","features":[')
-                            first = True
-                            with open(existing_path, "rb") as src:
-                                for feat in ijson.items(src, "features.item"):
-                                    if feat.get("properties", {}).get("city") not in cities_in_run:
-                                        if not first:
-                                            out.write(",")
-                                        out.write(json.dumps(feat, cls=_FloatEncoder))
-                                        first = False
-                                        kept += 1
-                            for feat in new_features:
-                                if not first:
-                                    out.write(",")
-                                json.dump(feat, out)
-                                first = False
-                            out.write("]}")
-                        logging.info("%s: streamed %d existing + %d new features (%.0f MB)",
-                                     fname, kept, len(new_features), existing_mb)
-                        streamed_ok = True
-                    except ImportError:
-                        pass
-
-                    if not streamed_ok:
-                        with open(existing_path) as f:
-                            existing_fc = json.load(f)
-                        existing_features = [
-                            feat for feat in existing_fc.get("features", [])
-                            if feat.get("properties", {}).get("city") not in cities_in_run
-                        ]
-                        with open(merged_path, "w") as out:
-                            json.dump({"type": "FeatureCollection",
-                                       "features": existing_features + new_features}, out)
-                else:
-                    with open(existing_path) as f:
-                        existing_fc = json.load(f)
-                    existing_features = [
-                        feat for feat in existing_fc.get("features", [])
-                        if feat.get("properties", {}).get("city") not in cities_in_run
-                    ]
-                    logging.info("%s: keeping %d existing + %d new features",
-                                 fname, len(existing_features), len(new_features))
-                    with open(merged_path, "w") as out:
-                        json.dump({"type": "FeatureCollection",
-                                   "features": existing_features + new_features}, out)
-            except Exception as e:
-                logging.error("Could not merge %s: %s — skipping upload", fname, e)
-                if os.path.exists(existing_path):
-                    os.unlink(existing_path)
-                if os.path.exists(merged_path):
-                    os.unlink(merged_path)
-                continue
-            finally:
-                if os.path.exists(existing_path):
-                    os.unlink(existing_path)
-
-        _upload_to_gcs(bucket_name, merged_path, dest)
-        if os.path.exists(merged_path):
-            os.unlink(merged_path)
+            _upload_to_gcs(bucket_name, merged_path, all_cities_dest)
+            logging.info("Rebuilt %s: %d total features", fname, total)
+        except Exception as e:
+            logging.error("Failed to rebuild %s: %s", fname, e)
+        finally:
+            if os.path.exists(merged_path):
+                os.unlink(merged_path)
 
 
 # ---------------------------------------------------------------------------
