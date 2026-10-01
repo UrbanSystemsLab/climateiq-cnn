@@ -373,7 +373,7 @@ def enrich_admin(
     from shapely.ops import unary_union as _unary_union
     from shapely.validation import make_valid as _make_valid
 
-    if water_polygon_path is not None and level != 8:
+    if water_polygon_path is not None:
         import pickle as _pickle
         from shapely import set_precision as _set_precision
         from shapely.geometry import Polygon as _Polygon, MultiPolygon as _MultiPolygon
