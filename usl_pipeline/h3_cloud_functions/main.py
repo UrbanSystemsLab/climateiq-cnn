@@ -516,15 +516,16 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
 # ---------------------------------------------------------------------------
 
 def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_run):
-    """Upload per-city GeoJSONs. Does NOT rebuild all_cities.
+    """Upload per-city files, then update each all_cities by streaming.
 
-    Cities come through one at a time. Rebuilding all_cities from only
-    per-city files would overwrite the existing all_cities (which has all
-    legacy cities) with incomplete data. Per-city files accumulate in
-    output/by_city/{city}/ and all_cities stays untouched.
+    Streams through the existing all_cities GeoJSON from GCS, drops old
+    features for this city, appends the new features, writes to a temp
+    blob, then replaces the original. Works for files of any size — peak
+    memory is one feature at a time plus the current city's new features.
     """
     import glob as _glob
     import re as _re
+    import ijson
 
     output_files = _glob.glob(os.path.join(output_dir, "*.geojson"))
     if not output_files:
@@ -537,6 +538,8 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
 
     output_files = sorted(output_files, key=_level_key)
 
+    client = storage.Client()
+    bucket_obj = client.bucket(bucket_name)
     city_name = next(iter(cities_in_run))
 
     for local_path in output_files:
@@ -545,7 +548,69 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
         _upload_to_gcs(bucket_name, local_path, per_city_dest)
         logging.info("Uploaded per-city: %s", per_city_dest)
 
-    logging.info("Per-city upload complete for %s. all_cities not modified.", city_name)
+    for local_path in output_files:
+        fname = os.path.basename(local_path)
+        all_cities_path = f"{output_prefix}{fname}"
+        temp_path = f"{output_prefix}_temp_update_{fname}"
+
+        all_blob = bucket_obj.blob(all_cities_path)
+        temp_blob = bucket_obj.blob(temp_path)
+
+        try:
+            with open(local_path) as f:
+                new_features = json.load(f).get("features", [])
+
+            logging.info("Updating %s: %d new features for %s",
+                         fname, len(new_features), city_name)
+
+            kept = 0
+            dropped = 0
+
+            temp_blob.chunk_size = 10 * 1024 * 1024
+            with temp_blob.open("wb") as out:
+                out.write(b'{"type":"FeatureCollection","features":[')
+                first = True
+
+                if all_blob.exists():
+                    all_blob.chunk_size = 10 * 1024 * 1024
+                    with all_blob.open("rb") as inp:
+                        for feature in ijson.items(inp, "features.item"):
+                            feat_city = (feature.get("properties") or {}).get("city")
+                            if feat_city == city_name:
+                                dropped += 1
+                                continue
+                            if not first:
+                                out.write(b",")
+                            out.write(json.dumps(feature).encode("utf-8"))
+                            first = False
+                            kept += 1
+
+                for feature in new_features:
+                    if not first:
+                        out.write(b",")
+                    out.write(json.dumps(feature).encode("utf-8"))
+                    first = False
+
+                out.write(b"]}")
+
+            logging.info("  %s: kept %d, dropped %d old %s, added %d new",
+                         fname, kept, dropped, city_name, len(new_features))
+
+            dest_blob = bucket_obj.blob(all_cities_path)
+            token = None
+            while True:
+                token, _, _ = dest_blob.rewrite(temp_blob, token=token)
+                if token is None:
+                    break
+            temp_blob.delete()
+
+            logging.info("  Updated %s (%d total features)",
+                         fname, kept + len(new_features))
+
+        except Exception as e:
+            logging.error("Failed to update %s: %s", fname, e)
+            if temp_blob.exists():
+                temp_blob.delete()
 
 
 # ---------------------------------------------------------------------------
