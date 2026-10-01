@@ -3,10 +3,10 @@ import functools
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import traceback
-from typing import Any, Dict
 
 import flask
 import functions_framework
@@ -16,7 +16,6 @@ from google.cloud import storage
 sys.path.insert(0, os.path.dirname(__file__))
 
 from cli_unified_pipeline import (
-    load_config,
     process_admin_levels,
     process_h3_tilesets,
 )
@@ -28,6 +27,33 @@ from cli_add_admin_breadcrumbs import (
 from cli_preprocess_tiff_to_h3csv import preprocess_city
 
 _MAX_RETRY_SECONDS = 60 * 60
+
+# These are constant across all cities — no config file needed.
+SCENARIO_MAPPING = {
+    "Rainfall_Data_1.txt": "flood_depth_1y",
+    "Rainfall_Data_2.txt": "flood_depth_5y",
+    "Rainfall_Data_3.txt": "flood_depth_10y",
+    "Rainfall_Data_4.txt": "flood_depth_25y",
+    "Rainfall_Data_5.txt": "flood_depth_50y",
+    "Rainfall_Data_6.txt": "flood_depth_100y",
+    "Rainfall_Data_7.txt": "flood_depth_200y",
+    "Rainfall_Data_8.txt": "flood_depth_500y",
+    "Rainfall_Data_9.txt": "flood_depth_1000y",
+}
+
+VALUE_COLS = list(SCENARIO_MAPPING.values())
+
+H3_HEX_RESOLUTIONS = [6, 7, 8, 9, 10, 11, 12]
+
+ADMIN_BOUNDARY_FILES = {
+    "level_6": "counties.parquet",
+    "level_8": "places.parquet",
+    "level_10": "tracts.parquet",
+}
+
+FILTER_THRESHOLD = 0.001
+
+EXPECTED_SCENARIO_COUNT = 9
 
 
 def _retry_and_report_errors():
@@ -119,6 +145,104 @@ def _download_directory_from_gcs(bucket_name, prefix, dest_dir):
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             blob.download_to_filename(dest_path)
             logging.info("Downloaded %s", blob.name)
+
+
+# ---------------------------------------------------------------------------
+# Derive city info from the predictions bucket path
+# ---------------------------------------------------------------------------
+
+def _parse_city_folder(city_folder):
+    """Derive city name and config prefix from folder name.
+
+    Pattern: '{CityName}_Predictions' or '{CityName}_Prediction'
+    e.g. 'NYC_Predictions' -> city_name='NYC', config_prefix='NYC'
+         'Chicago_Predictions' -> city_name='Chicago', config_prefix='Chicago'
+    """
+    m = re.match(r"^(.+?)_Predictions?(?:_.*)?$", city_folder)
+    if m:
+        city_name = m.group(1)
+    else:
+        city_name = city_folder
+    config_prefix = city_name
+    mosaic_filename = f"{city_folder}_mosaic_peak_wgs84.tif"
+    return city_name, config_prefix, mosaic_filename
+
+
+def _build_city_config(city_name, city_folder, predictions_bucket):
+    """Build a city config dict from just the folder name — no YAML needed."""
+    config_prefix = city_name
+    mosaic_filename = f"{city_folder}_mosaic_peak_wgs84.tif"
+    return {
+        "name": city_name,
+        "predictions": {
+            "bucket": predictions_bucket,
+            "city_folder": city_folder,
+            "config_prefix": config_prefix,
+            "mosaic_filename": mosaic_filename,
+        },
+    }
+
+
+def _derive_admin_fields(city_config, tiff_bbox, admin_boundaries):
+    """Derive state_fips, county_geoids, and place_name from the TIF bbox.
+
+    Uses spatial intersection against the Census parquet files so no
+    per-city config is needed.
+    """
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    if tiff_bbox is None:
+        logging.warning("No tiff_bbox — skipping admin field derivation")
+        return city_config
+
+    bbox_geom = box(*tiff_bbox)
+
+    counties_path = admin_boundaries.get("level_6")
+    if counties_path and os.path.exists(counties_path):
+        counties = gpd.read_parquet(counties_path)
+        counties = counties.to_crs("EPSG:4326")
+        hits = counties[counties.intersects(bbox_geom)]
+        if not hits.empty:
+            state_fips = hits["STATEFP"].mode().iloc[0]
+            county_geoids = sorted(hits["GEOID"].unique().tolist())
+            city_config["state_fips"] = state_fips
+            city_config["county_geoids"] = county_geoids
+            logging.info("Derived state_fips=%s, county_geoids=%s", state_fips, county_geoids)
+
+    places_path = admin_boundaries.get("level_8")
+    if places_path and os.path.exists(places_path):
+        places = gpd.read_parquet(places_path)
+        places = places.to_crs("EPSG:4326")
+        hits = places[places.intersects(bbox_geom)]
+        if not hits.empty:
+            areas = hits.geometry.area
+            largest = hits.loc[areas.idxmax()]
+            city_config["place_name"] = largest["NAME"]
+            logging.info("Derived place_name=%s", city_config["place_name"])
+
+    return city_config
+
+
+def _build_pipeline_config(work_dir, pipeline_bucket, cities):
+    """Build the full pipeline config dict without any YAML file."""
+    data_dir = os.path.join(work_dir, "data")
+    _download_directory_from_gcs(pipeline_bucket, "admin_boundaries/", data_dir)
+
+    return {
+        "output_dir": os.path.join(work_dir, "output"),
+        "h3_col": "cell_code",
+        "value_cols": VALUE_COLS,
+        "filter_threshold": FILTER_THRESHOLD,
+        "h3_hex_resolutions": H3_HEX_RESOLUTIONS,
+        "scenario_mapping": SCENARIO_MAPPING,
+        "admin_boundaries": {
+            "level_6": os.path.join(data_dir, ADMIN_BOUNDARY_FILES["level_6"]),
+            "level_8": os.path.join(data_dir, ADMIN_BOUNDARY_FILES["level_8"]),
+            "level_10": os.path.join(data_dir, ADMIN_BOUNDARY_FILES["level_10"]),
+        },
+        "cities": cities,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +352,6 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
     if files_exist[10]:
         gdfs[10] = gpd.read_file(level_10_path)
 
-    # is_city flag
     if 6 in gdfs:
         gdfs[6]["is_city"] = False
     if 8 in gdfs:
@@ -236,16 +359,13 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
     if 10 in gdfs:
         gdfs[10]["is_city"] = False
 
-    # Title-case before joins
     for lvl, gdf in gdfs.items():
         _title_case_gdf(gdf)
 
-    # Country-level breadcrumbs
     for lvl, gdf in gdfs.items():
         gdf["admin_level_2_parent_boundary_id"] = USA_BOUNDARY_ID
         gdf["admin_level_2_parent_localname"] = USA_NAME
 
-    # State-level breadcrumbs
     for lvl, gdf in gdfs.items():
         if "STATEFP" in gdf.columns:
             gdf["admin_level_4_parent_boundary_id"] = gdf["STATEFP"].map(
@@ -254,24 +374,7 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
             gdf["admin_level_4_parent_localname"] = gdf["STATEFP"].map(
                 lambda fp: STATE_FIPS_TO_INFO.get(str(fp), {}).get("name", "")
             )
-        elif config_dict:
-            city_to_state = {}
-            for city_cfg in config_dict.get("cities", []):
-                sfips = city_cfg.get("state_fips", "")
-                info = STATE_FIPS_TO_INFO.get(sfips, {})
-                city_to_state[city_cfg["name"]] = {
-                    "osm_id": info.get("osm_id", sfips),
-                    "name": info.get("name", ""),
-                }
-            if "city" in gdf.columns:
-                gdf["admin_level_4_parent_boundary_id"] = gdf["city"].map(
-                    lambda c: city_to_state.get(c, {}).get("osm_id", "")
-                )
-                gdf["admin_level_4_parent_localname"] = gdf["city"].map(
-                    lambda c: city_to_state.get(c, {}).get("name", "")
-                )
 
-    # Parent-child relationships
     if 8 in gdfs and 6 in gdfs:
         gdfs[8] = add_parent_fields_point_within(gdfs[8], gdfs[6], parent_level=6)
 
@@ -285,11 +388,9 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
         if "admin_level_6_parent_localname" in gdfs[10].columns:
             gdfs[10]["county_name"] = gdfs[10]["admin_level_6_parent_localname"]
 
-    # Final title-case pass
     for lvl, gdf in gdfs.items():
         _title_case_gdf(gdf)
 
-    # Save admin level files
     if 8 in gdfs:
         gdfs[8].to_file(level_8_path, driver="GeoJSON")
     if 10 in gdfs:
@@ -297,7 +398,6 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
     if 6 in gdfs:
         gdfs[6].to_file(level_6_path, driver="GeoJSON")
 
-    # NYC Level 4 aggregation
     if 6 in gdfs:
         nyc_geoids = {"36061", "36047", "36081", "36005", "36085"}
         gdf6 = gdfs[6]
@@ -335,7 +435,6 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
             level_4_gdf.to_file(level_4_path, driver="GeoJSON")
             logging.info("Created admin_level_4 (NYC aggregation)")
 
-    # H3 tileset breadcrumbs
     if 10 in gdfs:
         city_breadcrumbs = {}
         city_best_score = {}
@@ -568,129 +667,108 @@ def _run_pipeline(config_dict, work_dir, run_mode="full"):
 
 
 # ---------------------------------------------------------------------------
+# Core processing: takes a city_folder name and runs end to end
+# ---------------------------------------------------------------------------
+
+def _process_city_from_predictions(pipeline_bucket, predictions_bucket, city_folder, work_dir):
+    """Fully automatic: derive everything from the city_folder name."""
+    city_name, config_prefix, mosaic_filename = _parse_city_folder(city_folder)
+
+    city_config = _build_city_config(city_name, city_folder, predictions_bucket)
+    config_dict = _build_pipeline_config(work_dir, pipeline_bucket, [city_config])
+
+    logging.info("Processing %s (folder=%s, predictions=%s)",
+                 city_name, city_folder, predictions_bucket)
+
+    csv_cache_prefix = "h3_csv_cache"
+    cache_blob = f"{csv_cache_prefix}/{city_name}_max.csv"
+    bbox_blob = f"{csv_cache_prefix}/{city_name}_bbox.txt"
+    client = storage.Client()
+    bucket_obj = client.bucket(pipeline_bucket)
+
+    if bucket_obj.blob(cache_blob).exists():
+        logging.info("Cache hit: downloading %s", cache_blob)
+        local_h3_csv = os.path.join(work_dir, f"{city_name}_max.csv")
+        _download_from_gcs(pipeline_bucket, cache_blob, local_h3_csv)
+
+        tiff_bbox = None
+        if bucket_obj.blob(bbox_blob).exists():
+            local_bbox = os.path.join(work_dir, f"{city_name}_bbox.txt")
+            _download_from_gcs(pipeline_bucket, bbox_blob, local_bbox)
+            with open(local_bbox) as f:
+                parts = f.read().strip().split(",")
+                tiff_bbox = tuple(float(x) for x in parts)
+    else:
+        logging.info("Preprocessing tiffs for %s...", city_name)
+        local_h3_csv, tiff_bbox = preprocess_city(
+            city_config=city_config,
+            scenario_mapping=SCENARIO_MAPPING,
+            work_dir=work_dir,
+            n_workers=4,
+            intermediates_bucket=pipeline_bucket,
+            intermediates_prefix="intermediates",
+        )
+        _upload_to_gcs(pipeline_bucket, local_h3_csv, cache_blob)
+        if tiff_bbox is not None:
+            local_bbox = os.path.join(work_dir, f"{city_name}_bbox.txt")
+            with open(local_bbox, "w") as f:
+                f.write(",".join(str(x) for x in tiff_bbox))
+            _upload_to_gcs(pipeline_bucket, local_bbox, bbox_blob)
+
+    city_config["tiff_bbox"] = tiff_bbox
+    city_config["h3_csv"] = local_h3_csv
+
+    _derive_admin_fields(city_config, tiff_bbox, config_dict["admin_boundaries"])
+
+    os.makedirs(config_dict["output_dir"], exist_ok=True)
+
+    results = _run_pipeline(config_dict, work_dir, run_mode="full")
+
+    output_dir = os.path.join(work_dir, "output")
+    _add_breadcrumbs_to_outputs(output_dir, config_dict=config_dict)
+
+    _merge_and_upload_outputs(pipeline_bucket, "output/", output_dir, {city_name})
+
+    results["city"] = city_name
+    results["gcs_output"] = f"gs://{pipeline_bucket}/output/"
+    return results
+
+
+# ---------------------------------------------------------------------------
 # HTTP entry point
 # ---------------------------------------------------------------------------
 
 @functions_framework.http
 @_error_to_response
 def process_h3_pipeline(request: flask.Request) -> flask.Response:
+    """Process a city. Requires 'city_folder' and 'predictions_bucket' in JSON body.
+
+    Example: {"city_folder": "NYC_Predictions", "predictions_bucket": "test-climateiq-predictions"}
+    """
     request_json = request.get_json(silent=True) or {}
 
-    bucket_name = request_json.get("bucket") or os.environ.get("GCS_BUCKET")
-    if not bucket_name:
+    pipeline_bucket = request_json.get("bucket") or os.environ.get("GCS_BUCKET")
+    if not pipeline_bucket:
         return flask.jsonify(
             {"error": "GCS_BUCKET environment variable or 'bucket' parameter required"}
         ), 400
 
-    config_path = request_json.get("config_path", "config/cities_config.yaml")
-    output_prefix = request_json.get("output_prefix", "output/")
-    run_mode = request_json.get("run_mode", "full")
-    city_filter = request_json.get("city_filter")
-    h3_resolutions = request_json.get("h3_resolutions")
+    city_folder = request_json.get("city_folder")
+    predictions_bucket = request_json.get("predictions_bucket")
 
-    logging.info("Starting H3 pipeline — bucket=%s mode=%s", bucket_name, run_mode)
+    if not city_folder or not predictions_bucket:
+        return flask.jsonify(
+            {"error": "'city_folder' and 'predictions_bucket' are required"}
+        ), 400
+
+    logging.info("Starting H3 pipeline — city_folder=%s predictions=%s",
+                 city_folder, predictions_bucket)
 
     with tempfile.TemporaryDirectory() as work_dir:
-        local_config_path = os.path.join(work_dir, "cities_config.yaml")
-        _download_from_gcs(bucket_name, config_path, local_config_path)
-        config_dict = load_config(local_config_path)
-
-        data_dir = os.path.join(work_dir, "data")
-        _download_directory_from_gcs(bucket_name, "admin_boundaries/", data_dir)
-
-        config_dict["admin_boundaries"]["level_6"] = os.path.join(
-            data_dir, os.path.basename(config_dict["admin_boundaries"]["level_6"])
+        results = _process_city_from_predictions(
+            pipeline_bucket, predictions_bucket, city_folder, work_dir
         )
-        config_dict["admin_boundaries"]["level_8"] = os.path.join(
-            data_dir, os.path.basename(config_dict["admin_boundaries"]["level_8"])
-        )
-        config_dict["admin_boundaries"]["level_10"] = os.path.join(
-            data_dir, os.path.basename(config_dict["admin_boundaries"]["level_10"])
-        )
-
-        if city_filter:
-            original_cities = config_dict["cities"]
-            config_dict["cities"] = [c for c in original_cities if c["name"] == city_filter]
-            if not config_dict["cities"]:
-                return flask.jsonify(
-                    {"error": f"city_filter={city_filter!r} not found in config"}
-                ), 400
-            logging.info("city_filter=%s: processing 1 of %d cities",
-                         city_filter, len(original_cities))
-
-        global_scenario_mapping = config_dict.get("scenario_mapping", {})
-        csv_cache_prefix = "h3_csv_cache"
-        for city in config_dict["cities"]:
-            scenario_mapping = city.get("scenario_mapping") or global_scenario_mapping
-            if "predictions" in city and scenario_mapping:
-                city_name = city["name"]
-                cache_blob = f"{csv_cache_prefix}/{city_name}_max.csv"
-                bbox_blob = f"{csv_cache_prefix}/{city_name}_bbox.txt"
-                client = storage.Client()
-                bucket_obj = client.bucket(bucket_name)
-
-                if bucket_obj.blob(cache_blob).exists():
-                    logging.info("Cache hit: downloading %s", cache_blob)
-                    local_h3_csv = os.path.join(work_dir, f"{city_name}_max.csv")
-                    _download_from_gcs(bucket_name, cache_blob, local_h3_csv)
-
-                    tiff_bbox = None
-                    if bucket_obj.blob(bbox_blob).exists():
-                        local_bbox = os.path.join(work_dir, f"{city_name}_bbox.txt")
-                        _download_from_gcs(bucket_name, bbox_blob, local_bbox)
-                        with open(local_bbox) as f:
-                            parts = f.read().strip().split(",")
-                            tiff_bbox = tuple(float(x) for x in parts)
-                else:
-                    logging.info("Preprocessing tiffs for %s...", city_name)
-                    local_h3_csv, tiff_bbox = preprocess_city(
-                        city_config=city,
-                        scenario_mapping=scenario_mapping,
-                        work_dir=work_dir,
-                        n_workers=4,
-                        intermediates_bucket=bucket_name,
-                        intermediates_prefix="intermediates",
-                    )
-                    _upload_to_gcs(bucket_name, local_h3_csv, cache_blob)
-                    if tiff_bbox is not None:
-                        local_bbox = os.path.join(work_dir, f"{city_name}_bbox.txt")
-                        with open(local_bbox, "w") as f:
-                            f.write(",".join(str(x) for x in tiff_bbox))
-                        _upload_to_gcs(bucket_name, local_bbox, bbox_blob)
-
-                city["tiff_bbox"] = tiff_bbox
-            else:
-                h3_csv_gcs = city["h3_csv"]
-                local_h3_csv = os.path.join(work_dir, os.path.basename(h3_csv_gcs))
-                _download_from_gcs(bucket_name, f"h3_input/{h3_csv_gcs}", local_h3_csv)
-
-            city["h3_csv"] = local_h3_csv
-
-        config_dict["output_dir"] = os.path.join(work_dir, "output")
-        os.makedirs(config_dict["output_dir"], exist_ok=True)
-
-        if h3_resolutions:
-            config_dict["h3_hex_resolutions"] = h3_resolutions
-
-        if run_mode == "preprocess_only":
-            return flask.jsonify({
-                "status": "success",
-                "mode": "preprocess_only",
-                "cities_preprocessed": [c["name"] for c in config_dict["cities"]],
-                "gcs_output": f"gs://{bucket_name}/h3_csv_cache/",
-            })
-
-        results = _run_pipeline(config_dict, work_dir, run_mode=run_mode)
-
-        output_dir = os.path.join(work_dir, "output")
-        _add_breadcrumbs_to_outputs(output_dir, config_dict=config_dict)
-
-        cities_in_run = {c["name"] for c in config_dict["cities"]}
-        _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_run)
-
-        results["gcs_output"] = f"gs://{bucket_name}/{output_prefix}"
-        logging.info("Pipeline completed successfully")
-
+        logging.info("Pipeline completed successfully for %s", results.get("city"))
         return flask.jsonify(results)
 
 
@@ -703,6 +781,11 @@ def process_h3_pipeline(request: flask.Request) -> flask.Response:
 def process_h3_pipeline_on_tiff_upload(
     cloud_event: functions_framework.CloudEvent,
 ) -> None:
+    """Auto-triggers when a mosaic TIF is uploaded to the predictions bucket.
+
+    Detects city from the path, checks if all 9 scenarios are present,
+    and kicks off the full pipeline. No config file needed.
+    """
     data = cloud_event.data
     src_bucket_name = data["bucket"]
     file_name = data["name"]
@@ -710,69 +793,36 @@ def process_h3_pipeline_on_tiff_upload(
     logging.info("GCS finalize: gs://%s/%s", src_bucket_name, file_name)
 
     if not file_name.startswith("flood_predictions/"):
-        logging.info("Ignoring: not under flood_predictions/")
         return
 
     parts = file_name.split("/")
     if len(parts) < 4:
-        logging.info("Ignoring: path too short")
         return
 
     city_folder = parts[1]
     mosaic_filename = parts[-1]
 
     if not mosaic_filename.lower().endswith(".tif"):
-        logging.info("Ignoring: not a .tif file")
         return
     if "chunk" in mosaic_filename.lower():
-        logging.info("Ignoring: chunk TIF, waiting for mosaic")
         return
 
-    logging.info("Mosaic TIF detected: %s / %s", city_folder, mosaic_filename)
+    city_name, config_prefix, expected_mosaic = _parse_city_folder(city_folder)
+
+    logging.info("Mosaic TIF detected: city=%s folder=%s", city_name, city_folder)
 
     pipeline_bucket = os.environ.get("GCS_BUCKET")
     if not pipeline_bucket:
         logging.error("GCS_BUCKET environment variable is required")
         return
-    config_path = os.environ.get("CONFIG_PATH", "config/cities_config.yaml")
 
     client = storage.Client()
-    pipeline_bucket_obj = client.bucket(pipeline_bucket)
-
-    with tempfile.TemporaryDirectory() as work_dir:
-        local_config = os.path.join(work_dir, "cities_config.yaml")
-        _download_from_gcs(pipeline_bucket, config_path, local_config)
-        config_dict = load_config(local_config)
-
-    city_config = None
-    for city in config_dict["cities"]:
-        pred = city.get("predictions", {})
-        if pred.get("city_folder") == city_folder:
-            city_config = city
-            break
-
-    if city_config is None:
-        logging.info("No city config found for city_folder=%s — ignoring", city_folder)
-        return
-
-    city_name = city_config["name"]
-    pred = city_config["predictions"]
-    config_prefix = pred["config_prefix"]
-    expected_mosaic = pred["mosaic_filename"]
-
-    if mosaic_filename != expected_mosaic:
-        logging.info("%s != expected %s — ignoring", mosaic_filename, expected_mosaic)
-        return
-
-    global_scenario_mapping = config_dict.get("scenario_mapping", {})
-    scenario_mapping = city_config.get("scenario_mapping") or global_scenario_mapping
-    expected_scenarios = list(scenario_mapping.keys())
-    logging.info("%s: expecting %d scenarios", city_name, len(expected_scenarios))
-
     src_bucket_obj = client.bucket(src_bucket_name)
+
     present = []
     missing = []
-    for scenario_file in expected_scenarios:
+    for i in range(1, EXPECTED_SCENARIO_COUNT + 1):
+        scenario_file = f"Rainfall_Data_{i}.txt"
         blob_path = (
             f"flood_predictions/{city_folder}/"
             f"{config_prefix}%2F{scenario_file}/{expected_mosaic}"
@@ -782,27 +832,21 @@ def process_h3_pipeline_on_tiff_upload(
         else:
             missing.append(scenario_file)
 
-    logging.info("%s: %d/%d scenarios ready", city_name, len(present), len(expected_scenarios))
+    logging.info("%s: %d/%d scenarios ready", city_name, len(present), EXPECTED_SCENARIO_COUNT)
     if missing:
         logging.info("Still waiting for: %s", missing)
         return
 
+    pipeline_bucket_obj = client.bucket(pipeline_bucket)
     cache_blob = f"h3_csv_cache/{city_name}_max.csv"
     if pipeline_bucket_obj.blob(cache_blob).exists():
         logging.info("%s: CSV cache already exists — skipping", city_name)
         return
 
-    logging.info("%s: All %d scenarios ready — starting pipeline!",
-                 city_name, len(expected_scenarios))
+    logging.info("%s: All %d scenarios ready — starting pipeline!", city_name, EXPECTED_SCENARIO_COUNT)
 
-    class _MockRequest:
-        def get_json(self, silent=False):
-            return {
-                "bucket": pipeline_bucket,
-                "config_path": config_path,
-                "output_prefix": "output/",
-                "run_mode": "full",
-                "city_filter": city_name,
-            }
-
-    process_h3_pipeline(_MockRequest())
+    with tempfile.TemporaryDirectory() as work_dir:
+        results = _process_city_from_predictions(
+            pipeline_bucket, src_bucket_name, city_folder, work_dir
+        )
+        logging.info("Pipeline result for %s: %s", city_name, results.get("status"))
