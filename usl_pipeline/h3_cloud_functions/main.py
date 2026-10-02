@@ -516,17 +516,19 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
 # ---------------------------------------------------------------------------
 
 def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_run):
-    """Upload per-city files, then update each all_cities by streaming.
+    """Upload per-city files, then compose all_cities via GCS server-side compose.
 
-    Streams through the existing all_cities GeoJSON from GCS, drops old
-    features for this city, appends the new features, writes to a temp
-    blob, then replaces the original. Works for files of any size — peak
-    memory is one feature at a time plus the current city's new features.
+    For each admin level:
+    1. Upload per-city GeoJSON.
+    2. Create a features-only blob (raw features, no FeatureCollection wrapper).
+    3. Bootstrap features-only blobs for other cities from their per-city files.
+    4. GCS compose: header + city1 + comma + city2 + … + footer → all_cities.
+
+    The compose is server-side — no data streams through the function, so it
+    works for files of any size in seconds.
     """
     import glob as _glob
     import re as _re
-
-    _JSON_TOKENS = _re.compile(rb'\\.|[{}\[\]"]')
 
     output_files = _glob.glob(os.path.join(output_dir, "*.geojson"))
     if not output_files:
@@ -542,6 +544,8 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
     client = storage.Client()
     bucket_obj = client.bucket(bucket_name)
     city_name = next(iter(cities_in_run))
+    FEATURES_RAW_PREFIX = f"{output_prefix}features_raw"
+    CHUNK = 256 * 1024 * 1024
 
     for local_path in output_files:
         fname = os.path.basename(local_path)
@@ -549,150 +553,140 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
         _upload_to_gcs(bucket_name, local_path, per_city_dest)
         logging.info("Uploaded per-city: %s", per_city_dest)
 
-    update_order = sorted(output_files, key=_level_key, reverse=True)
+    def _strip_fc_wrapper(data):
+        """Return the content between [ and ] in a FeatureCollection."""
+        start = data.find(b"[")
+        end = data.rfind(b"]")
+        if start == -1 or end == -1 or end <= start:
+            return b""
+        return data[start + 1 : end]
 
-    for local_path in update_order:
+    def _ensure_features_raw(city, level_str, bucket_o):
+        """Create features_raw blob from per-city file if it doesn't exist."""
+        raw_path = f"{FEATURES_RAW_PREFIX}/{city}/level_{level_str}.bin"
+        raw_blob = bucket_o.blob(raw_path)
+        if raw_blob.exists():
+            return raw_blob
+
+        pc_path = f"{output_prefix}by_city/{city}/admin_level_{level_str}_all_cities.geojson"
+        pc_blob = bucket_o.blob(pc_path)
+        if not pc_blob.exists():
+            return None
+
+        pc_blob.reload()
+        pc_size = pc_blob.size or 0
+
+        if pc_size < 500 * 1024 * 1024:
+            content = pc_blob.download_as_bytes()
+            features_raw = _strip_fc_wrapper(content)
+        else:
+            raw_blob.chunk_size = CHUNK
+            pc_blob.chunk_size = CHUNK
+            with pc_blob.open("rb") as inp, raw_blob.open("wb") as out:
+                header_done = False
+                leftover = b""
+                while True:
+                    block = inp.read(CHUNK)
+                    if not block:
+                        if leftover:
+                            end = leftover.rfind(b"]")
+                            if end > 0:
+                                out.write(leftover[:end])
+                        break
+                    if not header_done:
+                        combined = leftover + block
+                        bracket = combined.find(b"[")
+                        if bracket == -1:
+                            leftover = combined[-100:]
+                            continue
+                        header_done = True
+                        leftover = combined[bracket + 1 :]
+                        continue
+                    if leftover:
+                        out.write(leftover)
+                    leftover = block
+            return raw_blob
+
+        if features_raw:
+            raw_blob.upload_from_string(features_raw)
+            return raw_blob
+        return None
+
+    for local_path in output_files:
         fname = os.path.basename(local_path)
+        level_match = _re.search(r"admin_level_(\d+)_", fname)
+        if not level_match:
+            continue
+        level_str = level_match.group(1)
         all_cities_path = f"{output_prefix}{fname}"
-        temp_path = f"{output_prefix}_temp_update_{fname}"
-
-        all_blob = bucket_obj.blob(all_cities_path)
-        temp_blob = bucket_obj.blob(temp_path)
 
         try:
             with open(local_path, "rb") as f:
-                new_bytes = f.read()
+                content = f.read()
+            features_raw = _strip_fc_wrapper(content)
 
-            logging.info("Updating %s for %s", fname, city_name)
+            raw_path = f"{FEATURES_RAW_PREFIX}/{city_name}/level_{level_str}.bin"
+            raw_blob = bucket_obj.blob(raw_path)
+            raw_blob.upload_from_string(features_raw)
+            logging.info("Uploaded features_raw for %s level %s (%d bytes)",
+                         city_name, level_str, len(features_raw))
 
-            kept = 0
-            dropped = 0
-            CHUNK = 256 * 1024 * 1024
-            WRITE_BUF_LIMIT = 8 * 1024 * 1024
-            city_marker = ('"city":"' + city_name + '"').encode()
-            city_marker_sp = ('"city": "' + city_name + '"').encode()
+            by_city_prefix = f"{output_prefix}by_city/"
+            city_dirs = set()
+            blobs_iter = client.list_blobs(bucket_name,
+                                           prefix=by_city_prefix,
+                                           delimiter="/")
+            for _ in blobs_iter:
+                pass
+            for prefix_str in blobs_iter.prefixes:
+                c = prefix_str.replace(by_city_prefix, "").rstrip("/")
+                if c:
+                    city_dirs.add(c)
 
-            temp_blob.chunk_size = CHUNK
-            with temp_blob.open("wb") as out:
-                wbuf = bytearray()
-                wbuf.extend(b'{"type":"FeatureCollection","features":[')
-                first = True
+            logging.info("Found %d cities for level %s compose: %s",
+                         len(city_dirs), level_str, sorted(city_dirs))
 
-                def _flush():
-                    nonlocal wbuf
-                    if wbuf:
-                        out.write(bytes(wbuf))
-                        wbuf = bytearray()
+            city_raw_blobs = []
+            for c in sorted(city_dirs):
+                if c == city_name:
+                    city_raw_blobs.append((c, raw_blob))
+                    continue
+                rb = _ensure_features_raw(c, level_str, bucket_obj)
+                if rb is not None:
+                    city_raw_blobs.append((c, rb))
 
-                if all_blob.exists():
-                    all_blob.chunk_size = CHUNK
-                    with all_blob.open("rb") as inp:
-                        scan_buf = bytearray()
-                        in_features = False
-                        in_string = False
-                        depth = 0
-                        feat_start = -1
+            if not city_raw_blobs:
+                logging.warning("No features_raw blobs found for level %s",
+                                level_str)
+                continue
 
-                        while True:
-                            raw = inp.read(CHUNK)
-                            if not raw and not scan_buf:
-                                break
-                            if not raw:
-                                data = bytes(scan_buf)
-                                scan_buf = bytearray()
-                            elif scan_buf:
-                                scan_buf.extend(raw)
-                                data = bytes(scan_buf)
-                                scan_buf = bytearray()
-                            else:
-                                data = raw
+            header_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_header.bin")
+            header_blob.upload_from_string(
+                b'{"type":"FeatureCollection","features":[')
 
-                            if not in_features:
-                                idx = data.find(b'"features"')
-                                if idx == -1:
-                                    continue
-                                bracket = data.find(b"[", idx + 10)
-                                if bracket == -1:
-                                    continue
-                                in_features = True
-                                scan_from = bracket + 1
-                            else:
-                                scan_from = 0
+            comma_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_comma.bin")
+            comma_blob.upload_from_string(b",")
 
-                            done = False
-                            for m in _JSON_TOKENS.finditer(data, scan_from):
-                                tok = m.group()
-                                if len(tok) == 2:
-                                    continue
-                                ch = tok[0]
+            footer_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_footer.bin")
+            footer_blob.upload_from_string(b"]}")
 
-                                if ch == ord('"'):
-                                    in_string = not in_string
-                                    continue
-                                if in_string:
-                                    continue
+            sources = [header_blob]
+            for i, (c, rb) in enumerate(city_raw_blobs):
+                if i > 0:
+                    sources.append(comma_blob)
+                sources.append(rb)
+            sources.append(footer_blob)
 
-                                if ch == ord("{"):
-                                    if depth == 0:
-                                        feat_start = m.start()
-                                    depth += 1
-                                elif ch == ord("}"):
-                                    depth -= 1
-                                    if depth == 0 and feat_start >= 0:
-                                        fb = data[feat_start:m.start() + 1]
-                                        if city_marker in fb or city_marker_sp in fb:
-                                            dropped += 1
-                                        else:
-                                            if not first:
-                                                wbuf.extend(b",")
-                                            wbuf.extend(fb)
-                                            first = False
-                                            kept += 1
-                                            if len(wbuf) >= WRITE_BUF_LIMIT:
-                                                _flush()
-                                        feat_start = -1
-                                elif ch == ord("]") and depth == 0:
-                                    done = True
-                                    break
-
-                            if done:
-                                break
-
-                            if depth > 0 and feat_start >= 0:
-                                scan_buf = bytearray(data[feat_start:])
-                                in_string = False
-                                depth = 0
-                                feat_start = -1
-
-                new_fc = json.loads(new_bytes)
-                for feature in new_fc.get("features", []):
-                    if not first:
-                        wbuf.extend(b",")
-                    wbuf.extend(json.dumps(feature).encode())
-                    first = False
-
-                wbuf.extend(b"]}")
-                _flush()
-
-            logging.info("  %s: kept %d, dropped %d old %s, added %d new",
-                         fname, kept, dropped, city_name,
-                         len(new_fc.get("features", [])))
+            logging.info("Composing %s from %d sources (%d cities)",
+                         fname, len(sources), len(city_raw_blobs))
 
             dest_blob = bucket_obj.blob(all_cities_path)
-            token = None
-            while True:
-                token, _, _ = dest_blob.rewrite(temp_blob, token=token)
-                if token is None:
-                    break
-            temp_blob.delete()
+            dest_blob.compose(sources)
 
-            logging.info("  Updated %s (%d total features)",
-                         fname, kept + len(new_fc.get("features", [])))
+            logging.info("  Composed %s successfully", fname)
 
         except Exception as e:
-            logging.error("Failed to update %s: %s", fname, e)
-            if temp_blob.exists():
-                temp_blob.delete()
+            logging.error("Failed to compose %s: %s", fname, e)
 
 
 # ---------------------------------------------------------------------------
