@@ -570,27 +570,25 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
             logging.info("Updating %s: %d new features for %s",
                          fname, len(new_features), city_name)
 
-            MAX_STREAMING_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
-            if all_blob.exists():
-                all_blob.reload()
-                blob_size = all_blob.size or 0
-                if blob_size > MAX_STREAMING_BYTES:
-                    logging.warning(
-                        "Skipping streaming update for %s (%.1f GB) — "
-                        "too large. Per-city file already uploaded.",
-                        fname, blob_size / (1024**3))
-                    continue
-
             kept = 0
             dropped = 0
+            CHUNK = 256 * 1024 * 1024  # 256 MB chunks
+            WRITE_BUF_LIMIT = 8 * 1024 * 1024  # flush every 8 MB
 
-            temp_blob.chunk_size = 10 * 1024 * 1024
+            temp_blob.chunk_size = CHUNK
             with temp_blob.open("wb") as out:
-                out.write(b'{"type":"FeatureCollection","features":[')
+                buf = bytearray()
+                buf.extend(b'{"type":"FeatureCollection","features":[')
                 first = True
 
+                def _flush_buf():
+                    nonlocal buf
+                    if buf:
+                        out.write(bytes(buf))
+                        buf = bytearray()
+
                 if all_blob.exists():
-                    all_blob.chunk_size = 10 * 1024 * 1024
+                    all_blob.chunk_size = CHUNK
                     with all_blob.open("rb") as inp:
                         for feature in ijson.items(inp, "features.item"):
                             feat_city = (feature.get("properties") or {}).get("city")
@@ -598,18 +596,21 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
                                 dropped += 1
                                 continue
                             if not first:
-                                out.write(b",")
-                            out.write(json.dumps(feature, cls=_DecimalEncoder).encode("utf-8"))
+                                buf.extend(b",")
+                            buf.extend(json.dumps(feature, cls=_DecimalEncoder).encode("utf-8"))
                             first = False
                             kept += 1
+                            if len(buf) >= WRITE_BUF_LIMIT:
+                                _flush_buf()
 
                 for feature in new_features:
                     if not first:
-                        out.write(b",")
-                    out.write(json.dumps(feature, cls=_DecimalEncoder).encode("utf-8"))
+                        buf.extend(b",")
+                    buf.extend(json.dumps(feature, cls=_DecimalEncoder).encode("utf-8"))
                     first = False
 
-                out.write(b"]}")
+                buf.extend(b"]}")
+                _flush_buf()
 
             logging.info("  %s: kept %d, dropped %d old %s, added %d new",
                          fname, kept, dropped, city_name, len(new_features))
