@@ -220,23 +220,25 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.sha }}
       - uses: google-github-actions/auth@v3
+        id: auth
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
           project_id: ${{ vars.GCP_PROJECT_ID }}
+          token_format: access_token
       - name: Check Artifact Registry repository
         run: |
           gcloud artifacts repositories describe usl-pipeline \
             --location "$REGION" --project "$PROJECT" --format='value(name)'
-      - name: Build and push image (Cloud Build)
+      - name: Build and push image
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
           set -euo pipefail
-          gcloud builds submit . --project "$PROJECT" \
-            --config usl_pipeline/add_area/cloudbuild.yaml \
-            --substitutions "_PROJECT=$PROJECT,_TAG=$SHA" \
-            --timeout 2400s
-          gcloud artifacts docker tags add "$IMAGE:$SHA" "$IMAGE:$ENV_TAG" --quiet
-          echo "Pushed $IMAGE:$SHA (also tagged :$ENV_TAG)"
+          echo "$ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGION-docker.pkg.dev"
+          docker build -f usl_pipeline/add_area/Dockerfile -t "$IMAGE:$SHA" -t "$IMAGE:$ENV_TAG" .
+          docker push "$IMAGE:$SHA"
+          docker push "$IMAGE:$ENV_TAG"
       - name: Update Cloud Run job
         run: |
           set -euo pipefail
