@@ -170,7 +170,7 @@ def make_hybrid_loss(y_true, y_pred):
     valid_float = tf.cast(valid, tf.float32)
 
     # ── depth cap — GT capped at 4 m; pred left uncapped ────────────
-    y_true = tf.minimum(y_true, DEPTH_CAP_M)
+    # y_true = tf.minimum(y_true, DEPTH_CAP_M)
     y_pred_relu = tf.nn.relu(y_pred)  # non-negative, uncapped
 
     # ── 5×5 spatial-activity mask ───────────────────────────────────
@@ -196,16 +196,21 @@ def make_hybrid_loss(y_true, y_pred):
         flood_weight * log_squared_error * effective_mask
     ) / (tf.reduce_sum(effective_mask) + 1e-8)
 
+    # weighted_log_mse = tf.reduce_sum(
+    #     log_squared_error * effective_mask
+    # ) / (tf.reduce_sum(effective_mask) + 1e-8)
+
     # ── peak-depth penalty (log space, weight 2.0) ───────────────────
-    valid_f = tf.cast(valid, tf.float32)
-    log_pred_max = tf.reduce_max(log_pred * valid_f, axis=[1, 2])
-    log_true_max = tf.reduce_max(log_true * valid_f, axis=[1, 2])
-    peak_penalty = tf.reduce_mean(tf.square(log_pred_max - log_true_max))
+    # valid_f = tf.cast(valid, tf.float32)
+    # log_pred_max = tf.reduce_max(log_pred * valid_f, axis=[1, 2])
+    # log_true_max = tf.reduce_max(log_true * valid_f, axis=[1, 2])
+    # peak_penalty = tf.reduce_mean(tf.square(log_pred_max - log_true_max))
 
     # ── flood-detection focal loss (weight 0.5) ──────────────────────
     focal = _flood_focal_loss(y_true, y_pred_relu)
 
-    return weighted_log_mse + 0.5 * peak_penalty + 0.5 * focal
+    # return weighted_log_mse + 0.5 * peak_penalty + 0.5 * focal
+    return weighted_log_mse + 0.5 * focal
 
 
 @register_keras_serializable(package="Custom", name="make_hybrid_loss_v3")

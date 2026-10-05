@@ -16,7 +16,9 @@ from usl_models.flood_ml import customloss
 
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
 PadMode: TypeAlias = Literal["REFLECT", "CONSTANT"]
-
+RESOLUTION = 2
+REVOLVESTEPS = 30
+EPS = 1e-7 
 
 @register_keras_serializable()
 class SpatialAttention(layers.Layer):
@@ -182,7 +184,8 @@ class FloodModel:
         return hypermodel
 
     def _build_model(self) -> keras.Model:
-        model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
+        model = FloodPhysicConvLSTM(self._params, spatial_dims=self._spatial_dims)
+        # model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
         loss_fn = (
             customloss.make_hybrid_loss_v3
             if getattr(self._params, "loss_version", "v1") == "v3"
@@ -396,10 +399,16 @@ class GreenAmptGate(keras.layers.Layer):
         """Return Keras serialisation config (no extra params)."""
         return super().get_config()
 
-
 @register_keras_serializable()
-class FloodConvLSTM(keras.Model):
-    """Flood ConvLSTM model.
+class FloodPhysicConvLSTM(keras.Model):
+    """Flood Physical ConvLSTM model.
+
+    Changes to old model:
+    1. Changed from depth prediction -> velocity prediction + depth calculation;
+    2. Removed Green Ampt Gate -> added a NN layer to predict infiltration;
+    3. Added a layer for geofeature extraction (same size), then shortcut to velocity prediction;
+    4. Training process changed from fixed lenght prediction to varied length prediction.
+    5. Loss function removed peak value punishment
 
     The architecture is an autoregressive ConvLSTM. Spatiotemporal and
     geospatial features are passed through initial CNN blocks for feature
@@ -432,6 +441,34 @@ class FloodConvLSTM(keras.Model):
         self._params = params
         self._spatial_height, self._spatial_width = spatial_dims
         self._sampling_prob = tf.Variable(0.0, trainable=False, name="sampling_prob")
+
+        # the core used to get all adjacent pixel depth
+        # index map:
+        # 5, 6, 7
+        # 4, x, 0
+        # 3, 2, 1
+
+        core = np.zeros((3, 3, 4, 4), dtype=float)
+        core[1, 2, 2, 0] = 1
+        core[2, 1, 3, 1] = 1
+        core[1, 0, 0, 2] = 1
+        core[0, 1, 1, 3] = 1
+
+        self.core_layer = layers.Conv2D(filters=4, kernel_size=(3, 3), padding='valid', use_bias=False, trainable=False)
+        self.core_layer.build(input_shape=(None, None, None, 4))
+        self.core_layer.set_weights([core])
+
+        # the core used to get all adjacent water speed
+
+        v_core = np.zeros((3, 3, 2, 2), dtype=float)
+        v_core[1, 0, 0, 0] = 1
+        v_core[0, 1, 1, 1] = 1
+
+        self.v_core_layer = layers.Conv2D(filters=2, kernel_size=(3, 3), padding='valid', use_bias=False, trainable=False)
+        self.v_core_layer.build(input_shape=(None, None, None, 2))
+        self.v_core_layer.set_weights([v_core])
+        
+
 
         # CNN padding config
         K_PAD = 2  # 5x5 kernel means 2-pixel padding
@@ -528,6 +565,21 @@ class FloodConvLSTM(keras.Model):
             self.storm_embed_dim = 0
 
         # === Geospatial CNN ===
+        self.geo_cnn_same = keras.Sequential(
+            [
+                # Input shape: (height, width, channels)
+                layers.InputLayer(
+                    (self._spatial_height, self._spatial_width, constants.GEO_FEATURES)
+                ),
+                pad_layers.Pad2D(cnn_pad, mode="REFLECT"),
+                layers.Conv2D(12, 5, padding="valid", activation=activation),
+
+                pad_layers.Pad2D(cnn_pad, mode="REFLECT"),
+                layers.Conv2D(12, 5, padding="valid", activation=activation),
+            ],
+            name="geospatial_cnn_same",
+        )
+
         self.geo_cnn = keras.Sequential(
             [
                 # Input shape: (height, width, channels)
@@ -634,7 +686,9 @@ class FloodConvLSTM(keras.Model):
 
         # Final 3×3 to single output channel. Linear activation lets
         # the loss gradient flow unconstrained; clip to ≥0 at inference.
-        self.output_conv = layers.Conv2D(1, 3, padding="same", activation="linear")
+        self.output_d_conv = layers.Conv2D(2, 3, padding="same", activation="tanh")
+        self.output_s_conv = layers.Conv2D(2, 3, padding="same", activation="linear")
+        self.infil_transp_conv = layers.Conv2D(1, 3, padding="same", activation="linear")
 
         # Physics-based infiltration correction (no trainable weights)
         self.green_ampt_gate = GreenAmptGate(name="green_ampt_gate")
@@ -659,6 +713,8 @@ class FloodConvLSTM(keras.Model):
         geospatial = input["geospatial"]
         temporal = input["temporal"]
 
+        current_depth = input["spatiotemporal"][:, -1]
+
         N = self._params.n_flood_maps
 
         # === V3.1: Rain broadcast — tile rain_rate + rain_cum per-timestep
@@ -678,7 +734,7 @@ class FloodConvLSTM(keras.Model):
         # Spatiotemporal CNN (two stages for skip connection)
         # Stage 1: [B, n, H, W, st_in] -> [B, n, H/2, W/2, 8]
         skip1 = self.st_cnn_stage1(spatiotemporal)
-        # Stage 2: [B, n, H/2, W/2, 8] -> [B, n, H/4, W/4, 16]
+        # Stage 2: [B, n, H/2, W/2, 8] -> [B, n, H/4, W/4, 16]ß
         st_cnn_output = self.st_cnn_stage2(skip1)
 
         # === V3.2: Dilated geo refinement (residual) ===
@@ -688,7 +744,8 @@ class FloodConvLSTM(keras.Model):
         # Geospatial CNN
         # [B, H, W, f ]-> [B, H', W', k2]
         # Add a new time axis and repeat n times -> [B, n, H', W', k2].
-        geo_cnn_output = self.geo_cnn(geospatial)
+        geo_skip1 = self.geo_cnn_same(geospatial)
+        geo_cnn_output = self.geo_cnn(geo_skip1)
         geo_cnn_output = geo_cnn_output[:, tf.newaxis, :, :, :]
         geo_cnn_output = tf.repeat(geo_cnn_output, N, axis=1)
 
@@ -726,6 +783,8 @@ class FloodConvLSTM(keras.Model):
             x = self.decoder_conv1b(x)
             x = self.decoder_bn1b(x)
         x = self.decoder_up2(x)  # [B, H, W, 32]
+        # add geospatial skip information
+        x = tf.concat([x, geo_skip1], axis=-1)
         x = self.decoder_conv2(x)  # [B, H, W, 16]
         x = self.decoder_bn2(x)
         # V3.4: extra refinement at full resolution
@@ -734,9 +793,87 @@ class FloodConvLSTM(keras.Model):
             x = self.decoder_bn2b(x)
             x = self.decoder_refine(x)
             x = self.decoder_refine_bn(x)
-        output = self.output_conv(x)  # [B, H, W, 1]
+        
+        #######################################################
 
-        return output
+        # the speed direction s_d, output [B, H, W, 2]
+        flood_d = self.output_d_conv(x)
+        # the speed for 4 direction s_8: output [B, H, W, 2]
+        flood_s = self.output_s_conv(x)
+
+        flood_velocity = flood_d * flood_s
+        # flood_velocity = self.output_s_conv(x)
+        # the infiltration
+        infiltration_transpiration = self.infil_transp_conv(x)
+
+        step_time = 300 / REVOLVESTEPS # in seconds
+        # the rainfall: rain_rate
+        rain_volume = rain_rate[:, -1] * RESOLUTION**2 * 300 / REVOLVESTEPS # cubic meters per time step
+        infil_transp_volume = infiltration_transpiration * RESOLUTION**2 / REVOLVESTEPS
+
+        adj_v = tf.pad(flood_velocity, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
+        adj_v = self.v_core_layer(adj_v)
+        
+        for i in range(REVOLVESTEPS):
+
+            self_out = tf.nn.relu(flood_velocity) * current_depth * RESOLUTION
+
+            adj_out = tf.nn.relu(-1 * adj_v) * current_depth * RESOLUTION
+
+            total_out = tf.reduce_sum(self_out, axis=-1, keepdims=True) + tf.reduce_sum(adj_out, axis=-1, keepdims=True)
+            out_rate = tf.clip_by_value((current_depth * RESOLUTION**2 + EPS) / (total_out + EPS), 0, 1)
+
+            self_out = self_out * out_rate
+            adj_out = adj_out * out_rate
+
+            out_flow = tf.concat([self_out, adj_out], axis=-1) # [B, H, W, 4]
+            in_flow = tf.pad(out_flow, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT") 
+            in_flow = self.core_layer(in_flow) # [B, H, W, 4]
+
+            volume_change = tf.reduce_sum(in_flow - out_flow, axis=-1, keepdims=True) + rain_volume -  infil_transp_volume
+
+            current_depth = tf.nn.relu(current_depth + volume_change/(RESOLUTION**2))
+
+        return current_depth
+
+    # def call_n_modified(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
+    #     spatiotemporal = full_input["spatiotemporal"]
+    #     geospatial = full_input["geospatial"]
+    #     temporal = full_input["temporal"]
+
+    #     batch_size = tf.shape(spatiotemporal)[0]
+
+    #     cumul_F = tf.zeros(
+    #             (batch_size, self._spatial_height, self._spatial_width, 1),
+    #             dtype=tf.float32,
+    #         )
+
+    #     prediction = []
+
+    #     has_temporal_per_step = len(temporal.shape) == 4
+        
+
+    #     for k in range(n):
+            
+    #         temporal_k = temporal[:, k] if has_temporal_per_step else temporal
+    #         pred = self({
+    #             "geospatial": geospatial,
+    #             "temporal": temporal_k,
+    #             "spatiotemporal": spatiotemporal
+    #         })
+            
+    #         pred = tf.nn.relu(pred)
+    #         # Green-Ampt infiltration correction
+    #         # pred, cumul_F = self.green_ampt_gate(pred, geospatial, cumul_F)
+    #         prediction.append(pred[:, tf.newaxis, :, :, :])
+
+    #         spatiotemporal = tf.concat([
+    #             spatiotemporal[:, 1:, :, :, :], 
+    #             pred[:, tf.newaxis, :, :, :]
+    #         ], axis=1,)
+    #     result = tf.concat(prediction, axis=1)
+    #     return result
+
 
     def call_n(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
         """Runs the entire autoregressive model.
@@ -784,7 +921,7 @@ class FloodConvLSTM(keras.Model):
             prediction = tf.nn.relu(prediction)  # enforce non-negative depth
 
             # Green-Ampt infiltration correction — subtracts what soil absorbs
-            prediction, cumul_F = self.green_ampt_gate(prediction, geospatial, cumul_F)
+            # prediction, cumul_F = self.green_ampt_gate(prediction, geospatial, cumul_F)
 
             predictions = predictions.write(t - 1, prediction)
 
@@ -818,58 +955,6 @@ class FloodConvLSTM(keras.Model):
             ],
             axis=1,
         )
-
-    # ------------------------------------------------------------------
-    # PREVIOUS: Scheduled sampling train_step (commented for backtracking)
-    # ------------------------------------------------------------------
-    # def train_step_scheduled_sampling(self, data):
-    #     """Custom train step with scheduled sampling.
-    #
-    #     Always runs two forward passes:
-    #     - Pass 1: standard teacher-forced (GT spatiotemporal input)
-    #     - Pass 2: spatiotemporal input where the most recent GT map is
-    #       replaced with the model's own prediction (probability controlled
-    #       by self._sampling_prob, ramped via ScheduledSamplingCallback).
-    #
-    #     When sampling_prob=0, pass 2 is identical to pass 1 (no-op).
-    #     """
-    #     x, y = data
-    #     with tf.GradientTape() as tape:
-    #         y_pred = self(x, training=True)
-    #         loss_tf = self.compute_loss(y=y, y_pred=y_pred)
-    #         st = x["spatiotemporal"]
-    #         pred_detached = tf.stop_gradient(y_pred)
-    #         corrupted_st = tf.concat(
-    #             [st[:, 1:, :, :, :], pred_detached[:, tf.newaxis, :, :, :]],
-    #             axis=1,
-    #         )
-    #         batch_size = tf.shape(st)[0]
-    #         use_pred = tf.cast(
-    #             tf.random.uniform([batch_size, 1, 1, 1, 1])
-    #             < self._sampling_prob,
-    #             tf.float32,
-    #         )
-    #         mixed_st = corrupted_st * use_pred + st * (1.0 - use_pred)
-    #         x_ss = {
-    #             "geospatial": x["geospatial"],
-    #             "temporal": x["temporal"],
-    #             "spatiotemporal": mixed_st,
-    #         }
-    #         y_pred_ss = self(x_ss, training=True)
-    #         loss_ss = self.compute_loss(y=y, y_pred=y_pred_ss)
-    #         loss = 0.5 * (loss_tf + loss_ss)
-    #     gradients = tape.gradient(loss, self.trainable_variables)
-    #     self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
-    #     for metric in self.metrics:
-    #         if metric.name == "loss":
-    #             metric.update_state(loss)
-    #         else:
-    #             metric.update_state(y, y_pred)
-    #     return {m.name: m.result() for m in self.metrics}
-
-    # ------------------------------------------------------------------
-    # CURRENT: Autoregressive unrolling train_step (K-step)
-    # ------------------------------------------------------------------
     @staticmethod
     def _normalize_labels(y):
         """Normalize labels to (B, K, H, W, 1) regardless of input shape."""
@@ -928,7 +1013,12 @@ class FloodConvLSTM(keras.Model):
         y_steps = self._normalize_labels(y)
         # Unstack along step axis → Python list with static length K.
         # Avoids tf.while_loop dynamic-shape XLA issues.
+        
+
         y_step_list = tf.unstack(y_steps, axis=1)
+        if len(y_step_list) > 1:
+            varied_future_steps = np.random.randint(1, len(y_step_list))
+            y_step_list = y_step_list[0:varied_future_steps]
         K = len(y_step_list)
         has_temporal_per_step = len(temporal.shape) == 4
 
@@ -959,7 +1049,7 @@ class FloodConvLSTM(keras.Model):
                 pred = tf.nn.relu(pred)
 
                 # Green-Ampt infiltration correction
-                pred, cumul_F = self.green_ampt_gate(pred, geospatial, cumul_F)
+                # pred, cumul_F = self.green_ampt_gate(pred, geospatial, cumul_F)
 
                 step_loss = self.compute_loss(y=yk, y_pred=pred)
 
@@ -1047,7 +1137,7 @@ class FloodConvLSTM(keras.Model):
             pred = tf.nn.relu(pred)
 
             # Green-Ampt infiltration correction
-            pred, cumul_F = self.green_ampt_gate(pred, geospatial, cumul_F)
+            # pred, cumul_F = self.green_ampt_gate(pred, geospatial, cumul_F)
 
             step_loss = self.compute_loss(y=yk, y_pred=pred)
 
@@ -1104,25 +1194,3 @@ class FloodConvLSTM(keras.Model):
             params=FloodModel.Params.from_dict(config["params"]),
             spatial_dims=tuple(config["spatial_dims"]),
         )
-
-
-class ScheduledSamplingCallback(keras.callbacks.Callback):
-    """Linearly ramps scheduled sampling probability over training.
-
-    During training, FloodConvLSTM.train_step uses self._sampling_prob
-    to decide whether to corrupt the spatiotemporal input with the model's
-    own prediction. This callback ramps that probability from 0 to max_prob
-    over warmup_epochs, then holds it constant.
-    """
-
-    def __init__(self, max_prob=0.5, warmup_epochs=15):
-        """Configure peak sampling probability and the warmup ramp length."""
-        super().__init__()
-        self.max_prob = max_prob
-        self.warmup_epochs = warmup_epochs
-
-    def on_epoch_begin(self, epoch, logs=None):
-        """Update the model's scheduled-sampling probability at each epoch."""
-        prob = min(epoch / max(self.warmup_epochs, 1), 1.0) * self.max_prob
-        self.model._sampling_prob.assign(prob)
-        print(f"  Scheduled sampling prob: {prob:.3f}")

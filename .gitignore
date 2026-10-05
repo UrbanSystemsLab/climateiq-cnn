@@ -34,6 +34,7 @@ baseline_comparison/
 train_output/
 FLOODML_CHANGES_SUMMARY.md
 .ipynb_checkpoints/
+# model_train_and_evaluation/
 
 # Local experiment / diagnostic scripts (not for production)
 .codex
