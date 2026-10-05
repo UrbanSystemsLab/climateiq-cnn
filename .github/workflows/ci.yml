@@ -1,0 +1,170 @@
+# Lint, format-check, test and type-check each package, running only the
+# checks whose inputs changed. A passing push to main deploys to test; a
+# passing push to release deploys to production.
+# `ci-ok` is the single job to require in branch protection: it is green when
+# every selected check passed, including when nothing needed checking.
+name: CI
+
+on:
+  push:
+    branches: [main, release]
+  pull_request:
+    branches: [main, release]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      deploy_functions: ${{ steps.filter.outputs.deploy_functions }}
+      deploy_add_area: ${{ steps.filter.outputs.deploy_add_area }}
+    steps:
+      - uses: actions/checkout@v4
+      # On push, diff against the last successful CI run on this branch so a
+      # failed run's changes are picked up by the next push.
+      - name: Find last successful run on this branch
+        id: base
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=$GITHUB_REF_NAME&event=push&status=success&per_page=1"             | jq -r '.workflow_runs[0].head_sha // empty')
+          echo "base=${sha:-$GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "diff base: ${sha:-previous push to $GITHUB_REF_NAME}"
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          base: ${{ steps.base.outputs.base || github.ref_name }}
+          filters: |
+            ci:
+              - '.github/workflows/ci.yml'
+              - '.github/actions/**'
+              - '.github/ci-matrix.json'
+              - 'requirements-dev.txt'
+              - '.flake8'
+              - 'mypy.ini'
+            usl_lib:
+              - 'usl_pipeline/usl_lib/**'
+            study_area_uploader:
+              - 'usl_pipeline/usl_lib/**'
+              - 'usl_pipeline/study_area_uploader/**'
+            add_area:
+              - 'usl_pipeline/usl_lib/**'
+              - 'usl_pipeline/study_area_uploader/**'
+              - 'usl_pipeline/add_area/**'
+            cloud_functions:
+              - 'usl_pipeline/usl_lib/**'
+              - 'usl_pipeline/cloud_functions/**'
+              - '.github/deploy/functions.json'
+            usl_models:
+              - 'usl_models/**'
+            deploy_functions:
+              - 'usl_pipeline/usl_lib/**'
+              - 'usl_pipeline/cloud_functions/**'
+              - 'scripts/stage_cloud_functions.sh'
+              - '.github/deploy/**'
+              - '.github/workflows/_deploy.yml'
+            deploy_add_area:
+              - 'usl_pipeline/usl_lib/**'
+              - 'usl_pipeline/study_area_uploader/**'
+              - 'usl_pipeline/add_area/**'
+              - '.github/workflows/_deploy.yml'
+      - name: Build check matrix
+        id: matrix
+        env:
+          CHANGED: ${{ steps.filter.outputs.changes }}
+        run: |
+          set -euo pipefail
+          if echo "$CHANGED" | jq -e 'index("ci")' >/dev/null; then
+            matrix=$(jq -c '.' .github/ci-matrix.json)
+          else
+            matrix=$(jq -c --argjson changed "$CHANGED" \
+              '[ .[] | select(.service as $s | $changed | index($s)) ]' .github/ci-matrix.json)
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Checks to run: $(echo "$matrix" | jq -c '[.[].service]')"
+
+  check:
+    name: ${{ matrix.service }}
+    needs: changes
+    if: needs.changes.outputs.matrix != '[]'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ${{ matrix.deps }}
+      - name: Install GDAL
+        if: matrix.gdal
+        uses: ./.github/actions/install-gdal
+      - name: Start Firestore emulator
+        if: matrix.emulator
+        uses: ./.github/actions/firestore-emulator
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          ${{ matrix.install }}
+      - name: flake8
+        run: flake8 ${{ matrix.path }} --show-source --statistics
+      - name: black
+        run: black --check ${{ matrix.path }}
+      - name: pytest
+        if: matrix.pytest
+        run: pytest ${{ matrix.path }}
+      - name: mypy
+        run: mypy ${{ matrix.path }}
+
+  ci-ok:
+    name: ci-ok
+    needs: [changes, check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate results
+        run: |
+          echo "changes=${{ needs.changes.result }} check=${{ needs.check.result }}"
+          [ "${{ needs.changes.result }}" = success ] || exit 1
+          case "${{ needs.check.result }}" in
+            success|skipped) exit 0 ;;
+            *) exit 1 ;;
+          esac
+
+  deploy:
+    name: Deploy to ${{ github.ref_name == 'release' && 'production' || 'test' }}
+    needs: [changes, ci-ok]
+    if: >-
+      github.event_name == 'push'
+      && (needs.changes.outputs.deploy_functions == 'true'
+          || needs.changes.outputs.deploy_add_area == 'true')
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: ${{ github.ref_name == 'release' && 'production' || 'test' }}
+      functions: ${{ needs.changes.outputs.deploy_functions == 'true' && 'all' || 'none' }}
+      add_area: ${{ needs.changes.outputs.deploy_add_area == 'true' }}
+      ref: ${{ github.sha }}

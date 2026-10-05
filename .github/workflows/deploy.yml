@@ -1,0 +1,45 @@
+# Manual deploy of this repo's services to climateiq-test or climateiq.
+# Pushes to main (test) and release (production) deploy automatically via
+# ci.yml; use this to redeploy or roll back. Production runs must be started
+# from the release branch; set `ref` to an older commit to roll back.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target GitHub Environment (GCP project)
+        type: choice
+        options: [test, production]
+        default: test
+        required: true
+      functions:
+        description: >-
+          Cloud Functions to deploy: "all", "none", or comma-separated names
+          from .github/deploy/functions.json
+        type: string
+        default: all
+      add_area:
+        description: Build the add-area image and update the Cloud Run job
+        type: boolean
+        default: false
+      ref:
+        description: Commit SHA to deploy (default is the head of the branch you run from)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: ${{ inputs.environment }}
+      functions: ${{ inputs.functions }}
+      add_area: ${{ inputs.add_area }}
+      ref: ${{ inputs.ref || github.sha }}

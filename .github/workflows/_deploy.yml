@@ -1,0 +1,253 @@
+# Reusable deploy. Called by ci.yml (push to main -> test, push to release ->
+# production) and deploy.yml (manual -> test, or production from release).
+#
+# Required GitHub Environment variables (per environment):
+#   GCP_PROJECT_ID                  climateiq-test | climateiq
+#   GCP_WORKLOAD_IDENTITY_PROVIDER  projects/<num>/locations/global/workloadIdentityPools/github/providers/github-oidc
+#   GCP_DEPLOYER_SERVICE_ACCOUNT    github-deployer@<project>.iam.gserviceaccount.com
+name: _deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: test | production
+        type: string
+        required: true
+      functions:
+        description: '"all", "none", or comma-separated function names'
+        type: string
+        default: all
+      add_area:
+        type: boolean
+        default: false
+      ref:
+        description: Commit to deploy
+        type: string
+        required: true
+
+env:
+  REGION: us-central1
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      functions: ${{ steps.plan.outputs.functions }}
+      image_tag: ${{ steps.plan.outputs.image_tag }}
+      bucket_prefix: ${{ steps.plan.outputs.bucket_prefix }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      # The workflow's own commit supplies the manifest and scripts; inputs.ref
+      # is only the code to ship, so rollbacks to older commits still work.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve what to deploy
+        id: plan
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          FUNCTIONS: ${{ inputs.functions }}
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            test)       image_tag=dev;  bucket_prefix="test-" ;;
+            production) image_tag=prod; bucket_prefix="" ;;
+            *) echo "::error::unknown environment '$ENVIRONMENT'"; exit 1 ;;
+          esac
+
+          sha=$(git rev-parse --verify "${REF}^{commit}")
+
+          # Production ships only commits on the protected release branch.
+          if [ "$ENVIRONMENT" = production ]; then
+            if [ "$GITHUB_REF" != refs/heads/release ]; then
+              echo "::error::production deploys must run from the release branch (got $GITHUB_REF)"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$sha" origin/release; then
+              echo "::error::$sha is not on the release branch"
+              exit 1
+            fi
+          fi
+
+          all=$(jq -c '
+            .groups | to_entries[] | .key as $group | .value as $g
+            | $g.functions | to_entries[]
+            | {group: $group, name: .key, entry_point: .value.entry_point,
+               runtime: $g.runtime, stage: $g.stage}
+          ' .github/deploy/functions.json | jq -sc '.')
+
+          case "$FUNCTIONS" in
+            all)     selected="$all" ;;
+            none|"") selected='[]' ;;
+            *)
+              selected=$(echo "$all" | jq -c --arg csv "$FUNCTIONS" '
+                ($csv | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))) as $want
+                | map(select(.name as $n | $want | index($n)))
+                | if length != ($want | length)
+                  then error("unknown function name(s) in: \($want | join(","))")
+                  else . end
+              ') ;;
+          esac
+
+          {
+            echo "functions=$selected"
+            echo "image_tag=$image_tag"
+            echo "bucket_prefix=$bucket_prefix"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+          echo "environment=$ENVIRONMENT sha=$sha image_tag=$image_tag add_area=${{ inputs.add_area }}"
+          echo "functions: $(echo "$selected" | jq -c '[.[].name]')"
+
+  functions:
+    name: fn ${{ matrix.name }}
+    needs: plan
+    if: needs.plan.outputs.functions != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}-fn-${{ matrix.name }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.functions) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          path: src
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+      - name: Stage source
+        id: stage
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/source"
+          REPO_ROOT="$GITHUB_WORKSPACE/src" bash "${{ matrix.stage }}" "$out" >/dev/null
+          echo "dir=$out" >> "$GITHUB_OUTPUT"
+          (cd "$out" && find . -type f | sort)
+      - name: Deploy ${{ matrix.name }}
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          NAME: ${{ matrix.name }}
+          ENTRY_POINT: ${{ matrix.entry_point }}
+          RUNTIME: ${{ matrix.runtime }}
+          SRC: ${{ steps.stage.outputs.dir }}
+          EXPECTED_BUCKET_PREFIX: ${{ needs.plan.outputs.bucket_prefix }}
+        run: |
+          set -euo pipefail
+          common=(--gen2 --region "$REGION" --project "$PROJECT")
+          summary='{state, updateTime, entryPoint: .buildConfig.entryPoint,
+                    revision: .serviceConfig.revision,
+                    serviceAccount: .serviceConfig.serviceAccountEmail,
+                    memory: .serviceConfig.availableMemory,
+                    timeoutSeconds: .serviceConfig.timeoutSeconds,
+                    env: .serviceConfig.environmentVariables}'
+
+          # Terraform creates functions; we only update code. Skip if absent.
+          if ! before=$(gcloud functions describe "$NAME" "${common[@]}" --format=json 2>&1); then
+            if grep -qiE 'status=\[404\]|NOT_FOUND|not found|does not exist' <<<"$before"; then
+              echo "::warning title=Skipped $NAME::$NAME does not exist in $PROJECT. Create it with terraform first."
+              exit 0
+            fi
+            echo "$before"
+            echo "::error title=$NAME::describe failed"
+            exit 1
+          fi
+
+          # Preflight: the manifest must match the live function, and the
+          # terraform-owned BUCKET_PREFIX must already be right.
+          live_entry=$(jq -r '.buildConfig.entryPoint' <<<"$before")
+          if [ "$live_entry" != "$ENTRY_POINT" ]; then
+            echo "::error title=$NAME::live entry point is '$live_entry' but the manifest says '$ENTRY_POINT'"
+            exit 1
+          fi
+          live_prefix=$(jq -r '.serviceConfig.environmentVariables.BUCKET_PREFIX // ""' <<<"$before")
+          if [ "$live_prefix" != "$EXPECTED_BUCKET_PREFIX" ]; then
+            echo "::error title=$NAME::BUCKET_PREFIX is '$live_prefix', expected '$EXPECTED_BUCKET_PREFIX'. Fix in terraform before deploying."
+            exit 1
+          fi
+          echo "before:"; jq "$summary" <<<"$before"
+
+          # Only code-bearing flags; gcloud keeps the rest on update.
+          gcloud functions deploy "$NAME" "${common[@]}" \
+            --runtime "$RUNTIME" \
+            --entry-point "$ENTRY_POINT" \
+            --source "$SRC" \
+            --quiet
+
+          after=$(gcloud functions describe "$NAME" "${common[@]}" --format=json)
+          echo "after:"; jq "$summary" <<<"$after"
+          after_prefix=$(jq -r '.serviceConfig.environmentVariables.BUCKET_PREFIX // ""' <<<"$after")
+          if [ "$after_prefix" != "$EXPECTED_BUCKET_PREFIX" ]; then
+            echo "::error title=$NAME::BUCKET_PREFIX changed to '$after_prefix' during deploy; re-apply terraform."
+            exit 1
+          fi
+
+  add-area:
+    name: add-area job
+    needs: plan
+    if: inputs.add_area
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}-add-area
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/usl-pipeline/add-area
+      SHA: ${{ needs.plan.outputs.sha }}
+      ENV_TAG: ${{ needs.plan.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+      - name: Check Artifact Registry repository
+        run: |
+          gcloud artifacts repositories describe usl-pipeline \
+            --location "$REGION" --project "$PROJECT" --format='value(name)'
+      - name: Build and push image (Cloud Build)
+        run: |
+          set -euo pipefail
+          gcloud builds submit . --project "$PROJECT" \
+            --config usl_pipeline/add_area/cloudbuild.yaml \
+            --substitutions "_PROJECT=$PROJECT,_TAG=$SHA" \
+            --timeout 2400s
+          gcloud artifacts docker tags add "$IMAGE:$SHA" "$IMAGE:$ENV_TAG" --quiet
+          echo "Pushed $IMAGE:$SHA (also tagged :$ENV_TAG)"
+      - name: Update Cloud Run job
+        run: |
+          set -euo pipefail
+          if gcloud run jobs describe add-area --region "$REGION" --project "$PROJECT" \
+               --format='value(name)' >/dev/null 2>&1; then
+            gcloud run jobs update add-area --region "$REGION" --project "$PROJECT" \
+              --image "$IMAGE:$SHA"
+            gcloud run jobs describe add-area --region "$REGION" --project "$PROJECT" \
+              --format='yaml(spec.template.spec.template.spec.containers[0].image,
+                             spec.template.spec.template.spec.serviceAccountName,
+                             spec.template.spec.template.spec.containers[0].env)'
+          else
+            echo "::warning title=add-area job missing::No Cloud Run job 'add-area' in $PROJECT. Image pushed as $IMAGE:$SHA and :$ENV_TAG; create the job per usl_pipeline/add_area/README.md."
+          fi

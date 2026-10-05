@@ -1,0 +1,8 @@
+# Lint, format, test and type-check tooling shared by every CI check.
+# Keep in sync with the "dev" extras in usl_models/setup.py,
+# usl_pipeline/usl_lib/setup.py and usl_pipeline/study_area_uploader/setup.py.
+black~=24.0
+flake8~=7.0
+flake8-docstrings~=1.7
+pytest~=8.0
+mypy~=1.9
