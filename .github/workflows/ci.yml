@@ -163,6 +163,7 @@ jobs:
       id-token: write
       contents: read
     uses: ./.github/workflows/_deploy.yml
+    secrets: inherit
     with:
       environment: ${{ github.ref_name == 'release' && 'production' || 'test' }}
       functions: ${{ needs.changes.outputs.deploy_functions == 'true' && 'all' || 'none' }}

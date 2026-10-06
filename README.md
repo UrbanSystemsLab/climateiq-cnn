@@ -4,8 +4,9 @@ ClimateIQ CNN Workstream
 ## Deployment
 
 GitHub Actions deploys this repo's services; `climateiq-terraform` owns the infrastructure
-around them (service accounts, IAM, buckets, triggers, memory, timeouts, env vars) and
-creates each function once. CI only updates code and images.
+around them (service accounts, IAM, buckets, triggers, memory, timeouts, env vars). CI only
+updates code and images. Bumping the submodule in `climateiq-terraform` and applying still
+recreates all 12 functions from the pinned code, which overwrites anything CI deployed since.
 
 | Event | Target |
 | --- | --- |
@@ -16,10 +17,10 @@ creates each function once. CI only updates code and images.
 Covered: the 12 pipeline Cloud Functions (`.github/deploy/functions.json`) and the `add-area`
 Cloud Run job image. The H3 functions and the AtmoML image are still deployed by hand.
 
-One-time setup: apply the `ci_deployer` module in `climateiq-terraform` (`dev/`, then `prod/`),
-create GitHub Environments `test` and `production` with `GCP_PROJECT_ID`,
-`GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOYER_SERVICE_ACCOUNT` from the terraform
-outputs, restrict `production` deployments to the `release` branch, require `ci-ok` on `main`,
+One-time setup: create GitHub Environments `test` and `production`, each with the variable
+`GCP_PROJECT_ID` (`climateiq-test` / `climateiq`) and the secret `GCP_SA_KEY` (a JSON key for
+that project's Compute Engine default service account, which holds Editor; rotate it
+periodically), restrict `production` deployments to the `release` branch, require `ci-ok` on `main`,
 and create `release` from `main` as a protected branch (PRs only, `ci-ok` required, no force
 pushes, restricted pushers). Creating the branch deploys nothing; run Actions → **Deploy** from
 `release` with `functions: all` and `add_area` ticked for the first full production deploy.

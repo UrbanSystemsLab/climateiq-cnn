@@ -1,10 +1,9 @@
 # Reusable deploy. Called by ci.yml (push to main -> test, push to release ->
 # production) and deploy.yml (manual -> test, or production from release).
 #
-# Required GitHub Environment variables (per environment):
-#   GCP_PROJECT_ID                  climateiq-test | climateiq
-#   GCP_WORKLOAD_IDENTITY_PROVIDER  projects/<num>/locations/global/workloadIdentityPools/github/providers/github-oidc
-#   GCP_DEPLOYER_SERVICE_ACCOUNT    github-deployer@<project>.iam.gserviceaccount.com
+# Required per GitHub Environment:
+#   variable GCP_PROJECT_ID  climateiq-test | climateiq
+#   secret   GCP_SA_KEY      JSON key of a service account with roles/editor
 name: _deploy
 
 on:
@@ -128,8 +127,7 @@ jobs:
           path: src
       - uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
           project_id: ${{ vars.GCP_PROJECT_ID }}
       - name: Stage source
         id: stage
@@ -222,8 +220,7 @@ jobs:
       - uses: google-github-actions/auth@v3
         id: auth
         with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
           project_id: ${{ vars.GCP_PROJECT_ID }}
           token_format: access_token
       - name: Check Artifact Registry repository

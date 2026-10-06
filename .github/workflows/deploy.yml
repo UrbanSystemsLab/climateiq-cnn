@@ -38,6 +38,7 @@ jobs:
       id-token: write
       contents: read
     uses: ./.github/workflows/_deploy.yml
+    secrets: inherit
     with:
       environment: ${{ inputs.environment }}
       functions: ${{ inputs.functions }}
