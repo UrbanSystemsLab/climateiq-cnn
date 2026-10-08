@@ -156,7 +156,9 @@ jobs:
     name: Deploy to ${{ github.ref_name == 'release' && 'production' || 'test' }}
     needs: [changes, ci-ok]
     if: >-
-      github.event_name == 'push'
+      !cancelled()
+      && needs.ci-ok.result == 'success'
+      && github.event_name == 'push'
       && (needs.changes.outputs.deploy_functions == 'true'
           || needs.changes.outputs.deploy_add_area == 'true')
     permissions:
