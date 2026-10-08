@@ -12,6 +12,10 @@ steps:
         "--file=./usl_pipeline/add_area/Dockerfile",
         ".",
       ]
+options:
+  # Stream logs via Cloud Logging so CI (roles/logging.viewer) can follow the
+  # build without access to the default GCS logs bucket.
+  logging: CLOUD_LOGGING_ONLY
 substitutions:
   _PROJECT: climateiq-test
   _TAG: dev

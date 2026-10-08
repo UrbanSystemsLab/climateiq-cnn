@@ -1,0 +1,25 @@
+name: Install GDAL
+description: >-
+  Install gdal-bin and libgdal-dev from the ubuntugis PPA (published for jammy
+  only, so callers must run on ubuntu-22.04).
+runs:
+  using: composite
+  steps:
+    - name: apt install gdal (with retries)
+      shell: bash
+      run: |
+        set -euo pipefail
+        for attempt in 1 2 3; do
+          if sudo add-apt-repository -y ppa:ubuntugis/ppa \
+            && sudo apt-get update -qq \
+            && sudo apt-get install -y --no-install-recommends gdal-bin libgdal-dev; then
+            break
+          fi
+          if [ "$attempt" = 3 ]; then
+            echo "::error::apt install of GDAL failed after 3 attempts"
+            exit 1
+          fi
+          echo "apt attempt $attempt failed; retrying in 15s"
+          sleep 15
+        done
+        echo "libgdal $(gdal-config --version)"

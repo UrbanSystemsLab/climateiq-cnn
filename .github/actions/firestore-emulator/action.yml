@@ -1,0 +1,36 @@
+name: Start Firestore emulator
+description: >-
+  Run Firestore emulator from the official Cloud SDK emulators image in Docker
+  and wait until it answers. Exports FIRESTORE_EMULATOR_HOST for later steps.
+inputs:
+  port:
+    description: Host port to publish the emulator on
+    default: "8085"
+  image:
+    description: Image that ships the emulator
+    default: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+runs:
+  using: composite
+  steps:
+    - name: Start emulator container
+      shell: bash
+      run: |
+        set -euo pipefail
+        docker run -d --name firestore-emulator \
+          -p "${{ inputs.port }}:8085" "${{ inputs.image }}" \
+          gcloud emulators firestore start --host-port=0.0.0.0:8085
+    - name: Wait for emulator
+      shell: bash
+      run: |
+        set -euo pipefail
+        for i in $(seq 1 60); do
+          if curl -fsS "http://localhost:${{ inputs.port }}" >/dev/null 2>&1; then
+            echo "Firestore emulator ready after ~$((i * 2))s"
+            echo "FIRESTORE_EMULATOR_HOST=localhost:${{ inputs.port }}" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "::error::Firestore emulator not ready after 120s"
+        docker logs firestore-emulator || true
+        exit 1

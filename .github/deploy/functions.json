@@ -1,0 +1,25 @@
+{
+  "region": "us-central1",
+  "groups": {
+    "pipeline": {
+      "description": "Data pipeline Cloud Functions (gen2). Infra is owned by climateiq-terraform/modules/data_pipeline; only code is deployed from here.",
+      "source": "usl_pipeline/cloud_functions",
+      "stage": "scripts/stage_cloud_functions.sh",
+      "runtime": "python311",
+      "functions": {
+        "write-citycat-config-data": {"entry_point": "write_flood_scenario_metadata_and_features"},
+        "delete-citycat-config-metadata": {"entry_point": "delete_flood_scenario_metadata"},
+        "write-processed-citycat-labels": {"entry_point": "process_citycat_outputs"},
+        "generate-feature-matrix": {"entry_point": "build_heat_feature_matrix"},
+        "generate-flood-feature-matrix": {"entry_point": "build_flood_feature_matrix"},
+        "generate-feature-matrix-http": {"entry_point": "build_feature_matrix_http"},
+        "build-wrf-label-matrix": {"entry_point": "build_wrf_label_matrix"},
+        "build-wrf-label-matrix-http": {"entry_point": "build_wrf_label_matrix_http"},
+        "upload-wrf-study-area-chunk": {"entry_point": "build_and_upload_study_area_chunk"},
+        "rescale-feature-matrix": {"entry_point": "rescale_feature_matrices"},
+        "write-study-area-metadata": {"entry_point": "write_study_area_metadata"},
+        "write-wrf-heat-config-metadata": {"entry_point": "write_heat_scenario_config_metadata"}
+      }
+    }
+  }
+}
