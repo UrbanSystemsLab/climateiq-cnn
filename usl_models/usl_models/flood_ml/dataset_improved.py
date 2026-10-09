@@ -11,7 +11,7 @@ from google.cloud import firestore  # type:ignore[attr-defined]
 from google.cloud import storage  # type:ignore[attr-defined]
 import tensorflow as tf
 
-from usl_models.flood_physical_ml import constants
+from usl_models.flood_ml import constants
 from usl_models.flood_ml import metastore
 from usl_models.flood_ml import model
 from usl_models.shared import downloader

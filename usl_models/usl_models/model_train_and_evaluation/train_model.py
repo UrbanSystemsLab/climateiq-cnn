@@ -50,10 +50,10 @@ from usl_models.flood_ml.dataset_improved import load_dataset_windowed_patches
 # =====================================================================
 # CONFIGURATION
 # =====================================================================
-FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
-OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output")
+FILECACHE_DIR = pathlib.Path("/Users/hw4402/research/climateiq_filecache_us")
+OUTPUT_DIR = pathlib.Path("/Users/hw4402/research/climateiq_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LOG_NAME = "10_09_VariedLength_6_steps_loss_no_peak"
+LOG_NAME = "semi_physical_test"
 
 PATCH_SIZE = 256
 PATCH_STRIDE = 128

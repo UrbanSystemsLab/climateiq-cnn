@@ -621,7 +621,7 @@ class FloodPhysicConvLSTM(keras.Model):
                     recurrent_dropout=self._params.lstm_recurrent_dropout,
                     return_sequences=True,
                 ),
-                layers.BatchNormalization(),
+                layers.BatchNormalization(fused=False),
                 # Second ConvLSTM: integrates wider neighbourhood
                 layers.ConvLSTM2D(
                     self._params.lstm_units,
@@ -649,14 +649,14 @@ class FloodPhysicConvLSTM(keras.Model):
             # 32ch / 8 = 4ch/group
             self.decoder_bn1 = layers.GroupNormalization(groups=8)
         else:
-            self.decoder_bn1 = layers.BatchNormalization()
+            self.decoder_bn1 = layers.BatchNormalization(fused=False)
         self.decoder_up2 = layers.UpSampling2D(size=2, interpolation="bilinear")
         self.decoder_conv2 = layers.Conv2D(16, 3, padding="same", activation="relu")
         if self._params.use_group_norm:
             # 16ch / 4 = 4ch/group
             self.decoder_bn2 = layers.GroupNormalization(groups=4)
         else:
-            self.decoder_bn2 = layers.BatchNormalization()
+            self.decoder_bn2 = layers.BatchNormalization(fused=False)
 
         # === V3.4: Deep decoder — extra refinement convs per stage ===
         # Gives the model explicit capacity to reconstruct fine-grained depth
@@ -666,16 +666,16 @@ class FloodPhysicConvLSTM(keras.Model):
             self.decoder_conv1b = layers.Conv2D(
                 32, 3, padding="same", activation="relu"
             )
-            self.decoder_bn1b = layers.BatchNormalization()
+            self.decoder_bn1b = layers.BatchNormalization(fused=False)
             self.decoder_conv2b = layers.Conv2D(
                 16, 3, padding="same", activation="relu"
             )
-            self.decoder_bn2b = layers.BatchNormalization()
+            self.decoder_bn2b = layers.BatchNormalization(fused=False)
             # Extra final-resolution refinement before output
             self.decoder_refine = layers.Conv2D(
                 16, 3, padding="same", activation="relu"
             )
-            self.decoder_refine_bn = layers.BatchNormalization()
+            self.decoder_refine_bn = layers.BatchNormalization(fused=False)
         else:
             self.decoder_conv1b = None
             self.decoder_bn1b = None
