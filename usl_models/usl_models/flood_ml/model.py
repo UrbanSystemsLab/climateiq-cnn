@@ -964,20 +964,20 @@ class FloodPhysicConvLSTM(keras.Model):
         temporal = x["temporal"]
         spatiotemporal = x["spatiotemporal"]
 
-        # Scheduled sampling probability.
-        # With temporal_feature_version=2, temporal channels already encode
-        # storm progression (cumulative/time channels), so additional random
-        # zero-context corruption is disabled by default.
-        # Curriculum AR sampling: ramp up zero-context fraction over training.
-        # Early epochs: learn flood physics from GT context.
-        # Later epochs: force geospatial-only routing for cold-start.
-        _ar_step = tf.cast(self.optimizer.iterations, tf.float32)
-        _ar_prob = tf.minimum(0.20, 0.0 + _ar_step / 50000.0 * 0.20)
-        spatiotemporal = tf.cond(
-            tf.random.uniform(()) < _ar_prob,
-            lambda: tf.zeros_like(spatiotemporal),
-            lambda: spatiotemporal,
-        )
+        # # Scheduled sampling probability.
+        # # With temporal_feature_version=2, temporal channels already encode
+        # # storm progression (cumulative/time channels), so additional random
+        # # zero-context corruption is disabled by default.
+        # # Curriculum AR sampling: ramp up zero-context fraction over training.
+        # # Early epochs: learn flood physics from GT context.
+        # # Later epochs: force geospatial-only routing for cold-start.
+        # _ar_step = tf.cast(self.optimizer.iterations, tf.float32)
+        # _ar_prob = tf.minimum(0.20, 0.0 + _ar_step / 50000.0 * 0.20)
+        # spatiotemporal = tf.cond(
+        #     tf.random.uniform(()) < _ar_prob,
+        #     lambda: tf.zeros_like(spatiotemporal),
+        #     lambda: spatiotemporal,
+        # )
 
         y_steps = self._normalize_labels(y)
         # Unstack along step axis → Python list with static length K.
@@ -1034,9 +1034,10 @@ class FloodPhysicConvLSTM(keras.Model):
 
                 # Feed corrected prediction back: clip at 4.0m to match GT depth cap
                 # (was 2.5m which caused hard ceiling — pred never learned >2.5m)
-                fb = tf.minimum(tf.stop_gradient(pred), 4.0)
+                # fb = tf.minimum(tf.stop_gradient(pred), 4.0)
+                fb = tf.stop_gradient(pred)
                 # Feedback noise: teaches robustness to imperfect context
-                fb = fb + tf.random.normal(tf.shape(fb), stddev=0.02)
+                # fb = fb + tf.random.normal(tf.shape(fb), stddev=0.02)
                 fb = tf.nn.relu(fb)  # keep non-negative after noise
                 st = tf.concat(
                     [st[:, 1:, :, :, :], fb[:, tf.newaxis, :, :, :]],
@@ -1118,9 +1119,9 @@ class FloodPhysicConvLSTM(keras.Model):
             total_loss += time_weight * (step_loss + 0.2 * mass_loss)
 
             # Feed corrected prediction back: clip at 4.0m (matches train_step)
-            pred_fb = tf.minimum(pred, 4.0)
+            # pred_fb = tf.minimum(pred, 4.0)
             st = tf.concat(
-                [st[:, 1:, :, :, :], pred_fb[:, tf.newaxis, :, :, :]],
+                [st[:, 1:, :, :, :], pred[:, tf.newaxis, :, :, :]],
                 axis=1,
             )
             last_pred = pred
