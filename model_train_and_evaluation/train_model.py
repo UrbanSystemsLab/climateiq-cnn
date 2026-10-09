@@ -44,7 +44,7 @@ else:
 print(f"Strategy: {strategy.__class__.__name__}, num_replicas={strategy.num_replicas_in_sync}")
 
 from usl_models.flood_ml.model import FloodModel
-from usl_models.flood_ml.dataset import load_dataset_windowed_patches
+from usl_models.flood_ml.dataset_improved import load_dataset_windowed_patches
 # from usl_models.flood_ml.emissions_callback import EmissionsCallback  # disabled — causes 2-epoch stop
 
 # =====================================================================
@@ -53,7 +53,7 @@ from usl_models.flood_ml.dataset import load_dataset_windowed_patches
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
 OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LOG_NAME = "09_21_VariedLength_6_steps_loss_no_peak"
+LOG_NAME = "10_09_VariedLength_6_steps_loss_no_peak"
 
 PATCH_SIZE = 256
 PATCH_STRIDE = 128

@@ -715,6 +715,13 @@ class FloodPhysicConvLSTM(keras.Model):
 
         current_depth = input["spatiotemporal"][:, -1]
 
+        new_dem = geospatial[:, :, :, 0:1] - tf.reduce_min(geospatial[:, :, :, 0:1], axis=(1, 2, 3), keepdims=True)
+
+        geospatial = tf.concat([
+            new_dem, 
+            geospatial[:, :, :, 1:]
+        ], axis=-1)
+
         N = self._params.n_flood_maps
 
         # === V3.1: Rain broadcast — tile rain_rate + rain_cum per-timestep
@@ -795,14 +802,14 @@ class FloodPhysicConvLSTM(keras.Model):
             x = self.decoder_refine_bn(x)
         
         #######################################################
-
+        # need to modify here: 
         # the speed direction s_d, output [B, H, W, 2]
-        flood_d = self.output_d_conv(x)
+        # flood_d = self.output_d_conv(x)
         # the speed for 4 direction s_8: output [B, H, W, 2]
-        flood_s = self.output_s_conv(x)
+        # flood_s = self.output_s_conv(x)
 
-        flood_velocity = flood_d * flood_s
-        # flood_velocity = self.output_s_conv(x)
+        # flood_velocity = flood_d * flood_s
+        flood_velocity = self.output_s_conv(x)
         # the infiltration
         infiltration_transpiration = self.infil_transp_conv(x)
 
@@ -835,44 +842,6 @@ class FloodPhysicConvLSTM(keras.Model):
             current_depth = tf.nn.relu(current_depth + volume_change/(RESOLUTION**2))
 
         return current_depth
-
-    # def call_n_modified(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
-    #     spatiotemporal = full_input["spatiotemporal"]
-    #     geospatial = full_input["geospatial"]
-    #     temporal = full_input["temporal"]
-
-    #     batch_size = tf.shape(spatiotemporal)[0]
-
-    #     cumul_F = tf.zeros(
-    #             (batch_size, self._spatial_height, self._spatial_width, 1),
-    #             dtype=tf.float32,
-    #         )
-
-    #     prediction = []
-
-    #     has_temporal_per_step = len(temporal.shape) == 4
-        
-
-    #     for k in range(n):
-            
-    #         temporal_k = temporal[:, k] if has_temporal_per_step else temporal
-    #         pred = self({
-    #             "geospatial": geospatial,
-    #             "temporal": temporal_k,
-    #             "spatiotemporal": spatiotemporal
-    #         })
-            
-    #         pred = tf.nn.relu(pred)
-    #         # Green-Ampt infiltration correction
-    #         # pred, cumul_F = self.green_ampt_gate(pred, geospatial, cumul_F)
-    #         prediction.append(pred[:, tf.newaxis, :, :, :])
-
-    #         spatiotemporal = tf.concat([
-    #             spatiotemporal[:, 1:, :, :, :], 
-    #             pred[:, tf.newaxis, :, :, :]
-    #         ], axis=1,)
-    #     result = tf.concat(prediction, axis=1)
-    #     return result
 
 
     def call_n(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
