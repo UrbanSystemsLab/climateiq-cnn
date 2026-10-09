@@ -9,6 +9,4 @@
     "editor.formatOnSave": true,
     "notebook.formatOnSave.enabled": true,
     "python.envFile": "${workspaceFolder}/.env",
-    "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda",
 }
