@@ -53,7 +53,7 @@ from usl_models.flood_physical_ml.dataset import load_dataset_windowed_patches
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
 OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LOG_NAME = "10_09_physical_test"
+LOG_NAME = "10_08_newdataset_4_steps_no_velocity_relu"
 
 PATCH_SIZE = 256
 PATCH_STRIDE = 128
@@ -611,3 +611,4 @@ plt.tight_layout()
 plt.savefig(str(log_dir / "prediction_comparison.png"), dpi=150)
 # plt.savefig("/home/jainr/climateiq-cnn-6/prediction_comparison.png", dpi=150)
 print("Saved prediction_comparison.png")
+

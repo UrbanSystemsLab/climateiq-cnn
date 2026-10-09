@@ -13,10 +13,10 @@ import matplotlib.pyplot as plt
 for gpu in tf.config.list_physical_devices("GPU"):
     tf.config.experimental.set_memory_growth(gpu, True)
 
-from usl_models.flood_ml.model import FloodModel
-from usl_models.flood_ml.model import SpatialAttention
-from usl_models.flood_ml.dataset import load_dataset_windowed_patches
-from usl_models.flood_ml.Eva_sup import *
+from usl_models.flood_physical_ml.model import FloodModel
+from usl_models.flood_physical_ml.model import SpatialAttention
+from usl_models.flood_physical_ml.dataset import load_dataset_windowed_patches
+from usl_models.flood_physical_ml.Eva_sup import *
 import pandas as pd
 
 SEED = 42
