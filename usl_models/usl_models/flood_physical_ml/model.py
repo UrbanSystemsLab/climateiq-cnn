@@ -347,6 +347,11 @@ class FloodPhysicConvLSTM(keras.Model):
         self._spatial_height, self._spatial_width = spatial_dims
         self._sampling_prob = tf.Variable(0.0, trainable=False, name="sampling_prob")
         self.A, self.B, _ = get_gauss_legendre_IRK(MID_STEPS)
+
+        self.loss_tracker = tf.keras.metrics.Mean(name="loss")
+        self.momentum_loss_tracker = tf.keras.metrics.Mean(name="momentum_loss")
+        self.mass_loss_tracker = tf.keras.metrics.Mean(name="mass_loss")
+        self.depth_loss_tracker = tf.keras.metrics.Mean(name="depth_loss")
         
 
         # index map:
@@ -769,6 +774,15 @@ class FloodPhysicConvLSTM(keras.Model):
             name="v_pred_conv"
         )
 
+    @property
+    def metrics(self):
+        return [
+            self.loss_tracker,
+            self.momentum_loss_tracker,
+            self.mass_loss_tracker,
+            self.depth_loss_tracker,
+        ]
+    
     def call(self, input: FloodModel.Input) -> tf.Tensor:
         """Makes a single forward pass on a batch of data.
 
@@ -1133,6 +1147,10 @@ class FloodPhysicConvLSTM(keras.Model):
             batch_size = tf.shape(spatiotemporal)[0]
 
             total_loss = tf.constant(0.0)
+            momentum_loss = tf.constant(0.0)
+            mass_loss = tf.constant(0.0)
+            depth_loss = tf.constant(0.0)
+
             st = spatiotemporal
             last_pred = tf.zeros(
                 (batch_size, self._spatial_height, self._spatial_width, 1),
@@ -1149,7 +1167,7 @@ class FloodPhysicConvLSTM(keras.Model):
                     training=True,
                 )
 
-                step_loss = customloss.physical_loss(
+                step_loss, step_momentum, step_mass, step_depth = customloss.physical_loss(
                     velocity_sequence = pred[0],
                     depth_sequence = pred[1],
                     A = self.A,
@@ -1178,6 +1196,9 @@ class FloodPhysicConvLSTM(keras.Model):
                 # total_loss += time_weight * (step_loss + 0.2 * mass_loss)
                 
                 total_loss += step_loss
+                momentum_loss += step_momentum
+                mass_loss += step_mass
+                depth_loss += step_depth
 
                 # Feed corrected prediction back: clip at 4.0m to match GT depth cap
                 # (was 2.5m which caused hard ceiling — pred never learned >2.5m)
@@ -1198,6 +1219,9 @@ class FloodPhysicConvLSTM(keras.Model):
 
 
             total_loss = total_loss / K
+            momentum_loss = momentum_loss / K
+            mass_loss = mass_loss / K
+            depth_loss = depth_loss / K
 
             # arrival_time_loss disabled: log1p gradient explosion when depth > 0.5m
             # (sigmoid saturates -> grad = -1/1e-8 = -1e8 per step, NaN over K=7)
@@ -1211,11 +1235,11 @@ class FloodPhysicConvLSTM(keras.Model):
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
         # Metrics on last-step prediction
-        for metric in self.metrics:
-            if metric.name == "loss":
-                metric.update_state(total_loss)
-            else:
-                metric.update_state(y_steps[:, -1], last_pred)
+        self.loss_tracker.update_state(total_loss)
+        self.momentum_loss_tracker.update_state(momentum_loss)
+        self.mass_loss_tracker.update_state(mass_loss)
+        self.depth_loss_tracker.update_state(depth_loss)
+
         return {m.name: m.result() for m in self.metrics}
 
     def test_step(self, data):
@@ -1242,6 +1266,10 @@ class FloodPhysicConvLSTM(keras.Model):
         batch_size = tf.shape(spatiotemporal)[0]
 
         total_loss = tf.constant(0.0)
+        momentum_loss = tf.constant(0.0)
+        mass_loss = tf.constant(0.0)
+        depth_loss = tf.constant(0.0)
+
         st = spatiotemporal
         last_pred = tf.zeros(
             (batch_size, self._spatial_height, self._spatial_width, 1),
@@ -1259,7 +1287,7 @@ class FloodPhysicConvLSTM(keras.Model):
                 training=False,
             )
 
-            step_loss = customloss.physical_loss(
+            step_loss, step_momentum, step_mass, step_depth = customloss.physical_loss(
                     velocity_sequence = pred[0],
                     depth_sequence = pred[1],
                     A = self.A,
@@ -1279,6 +1307,9 @@ class FloodPhysicConvLSTM(keras.Model):
             # time_weight = 1.0 + 0.3 * k
             # total_loss += time_weight * (step_loss + 0.2 * mass_loss)
             total_loss += step_loss
+            momentum_loss += step_momentum
+            mass_loss += step_mass
+            depth_loss += step_depth
 
             # Feed corrected prediction back: clip at 4.0m (matches train_step)
             # pred_fb = tf.minimum(pred, 4.0)
@@ -1292,15 +1323,14 @@ class FloodPhysicConvLSTM(keras.Model):
             last_final_velocity = pred[0][:, -1]
 
         total_loss = total_loss / K
+        momentum_loss = momentum_loss / K
+        mass_loss = mass_loss / K
+        depth_loss = depth_loss / K
 
-        if self.losses:
-            total_loss += tf.add_n(self.losses)
-
-        for metric in self.metrics:
-            if metric.name == "loss":
-                metric.update_state(total_loss)
-            else:
-                metric.update_state(y_steps[:, -1], last_pred)
+        self.loss_tracker.update_state(total_loss)
+        self.momentum_loss_tracker.update_state(momentum_loss)
+        self.mass_loss_tracker.update_state(mass_loss)
+        self.depth_loss_tracker.update_state(depth_loss)
 
         # Flooded-pixel MAE: MAE computed only where GT > 0.01m.
         # Overall MAE is dominated by ~90% dry pixels (always near zero), hiding

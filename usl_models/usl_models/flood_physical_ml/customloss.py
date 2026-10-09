@@ -192,10 +192,10 @@ def physical_loss(
 
     # physical_l = momentum_l + mass_l + depth_l + velocity_l
 
-    tf.print("momentum loss is: ", momentum_l, "| depth loss is: ", depth_l, " | mass loss is: ", mass_l)
+    # tf.print("momentum loss is: ", momentum_l, "| depth loss is: ", depth_l, " | mass loss is: ", mass_l)
     physical_l = 100 * momentum_l + mass_l + 200 * depth_l
 
-    return physical_l
+    return physical_l, momentum_l, mass_l, depth_l
 
 
 if __name__ == "__main__":
