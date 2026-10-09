@@ -50,8 +50,12 @@ from usl_models.flood_physical_ml.dataset import load_dataset_windowed_patches
 # =====================================================================
 # CONFIGURATION
 # =====================================================================
-FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
+# FILECACHE_DIR = pathlib.Path("/Users/hw4402/research/climateiq_filecache_us")
+# OUTPUT_DIR = pathlib.Path("/Users/hw4402/climateiq_output")
+
+FILECACHE_DIR = pathlib.Path("/scratch/hw4402/research/climateiq_filecache_us")
 OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output")
+
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 LOG_NAME = "10_09_physical_test"
 
