@@ -57,7 +57,7 @@ FILECACHE_DIR = pathlib.Path("../../climateiq_filecache_us")
 OUTPUT_DIR = pathlib.Path("../../climateiq_output")
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LOG_NAME = "full_physical_test"
+LOG_NAME = "full_physical_test_with_loss_info"
 
 PATCH_SIZE = 256
 PATCH_STRIDE = 128
@@ -65,7 +65,7 @@ BATCH_SIZE = 4   # reverted from 6 — batch 4 had 16x better MAE (0.012 vs 0.19
 EPOCHS = 100  # ROUND 5 ABLATION — V3 loss only, validate before long run
 N_FLOOD_MAPS = 5
 M_RAINFALL = 6
-N_FUTURE_STEPS = 4  # 13 → 0 windows (last_t = T - n_future = 13 - 13 = 0); 12 gives last_t=1 per chunk
+N_FUTURE_STEPS = 1  # 13 → 0 windows (last_t = T - n_future = 13 - 13 = 0); 12 gives last_t=1 per chunk
 DEPTH_CAP = 4.0  # metres — raised from 2.5; covers Atlanta peak (~4.4m capped at 4m)
                   # Manhattan 5-7m ponding in closed canyons above this are outliers
 DRY_TIMESTEP_FRACTION = 0.12  # calibrated from prior best run to avoid dry-step dominance
