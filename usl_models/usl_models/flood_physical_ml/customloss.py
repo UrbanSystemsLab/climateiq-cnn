@@ -28,7 +28,7 @@ def momentum_loss(
         N: [B, H, W, 1]
     """
 
-    depth_sequence = tf.nn.relu(depth_sequence[:, 0:-1]) # [B, V_M_STEPS, H, W, 1]
+    # depth_sequence = tf.nn.relu(depth_sequence[:, 0:-1]) # [B, V_M_STEPS, H, W, 1]
 
     velocity_0 = velocity_sequence[:, 0][:, tf.newaxis] # [B, 1, H, W, 2], predicted initial velocity
     velocity_1 = velocity_sequence[:, -1][:, tf.newaxis] # [B, 1, H, W, 2], predicted velocity of next time step
@@ -71,23 +71,18 @@ def momentum_loss(
 
     water_surface_differences_u = water_level_padded[:, :, 1:-1, 2:] - water_level_padded[:, :, 1:-1, 1:-1]
     water_surface_differences_v = water_level_padded[:, :, 2:, 1:-1] - water_level_padded[:, :, 1:-1, 1:-1]
-    water_surface_differences = tf.concat([water_surface_differences_u, water_surface_differences_v], axis=-1) # [B, V_M_STEPS, H, W, 2] two directions < and ^
+    water_surface_differences = tf.concat([water_surface_differences_u, water_surface_differences_v], axis=-1) # [B, V_M_STEPS+2, H, W, 2] two directions < and ^
 
-    # water_surface_differences = core_layer(water_level_padded) # [B, V_M_STEPS, H, W, 2] two directions < and ^
-    water_surface_gradient = water_surface_differences/RESOLUTION # [B, V_M_STEPS, H, W, 2]
+    water_surface_gradient = water_surface_differences/RESOLUTION # [B, V_M_STEPS+2, H, W, 2]
 
-    # no water momentum for dry areas
-    water_surface_gradient = tf.where(depth_sequence > EPS_WATER, water_surface_gradient, 0.0)
-
-    water_surface_momentum = GRAVITY * water_surface_gradient # [B, V_M_STEPS, H, W, 2]
+    water_surface_momentum = GRAVITY * water_surface_gradient # [B, V_M_STEPS+2, H, W, 2]
 
     #################################Fraction momentum####################
     N = N[:, tf.newaxis] # [B, 1, H, W, 1]
-    # velocity_norm = tf.linalg.norm(velocity_sequence[:, 1:-1], axis=-1, keepdims=True) #[B, V_M_STEPS, H, W, 1]
-    velocity_norm = tf.reduce_sum(tf.square(velocity_sequence[:, 1:-1]), axis=-1, keepdims=True)
-    velocity_norm = tf.sqrt(velocity_norm + EPS) #[B, V_M_STEPS, H, W, 1]
+    velocity_norm = tf.reduce_sum(tf.square(velocity_sequence), axis=-1, keepdims=True)
+    velocity_norm = tf.sqrt(velocity_norm) #[B, V_M_STEPS, H, W, 1]
 
-    friction = N**2*GRAVITY/tf.maximum(depth_sequence, EPS_WATER)**(4/3)*velocity_norm*velocity_sequence[:, 1:-1] #[B, V_M_STEPS, H, W, 2]
+    friction = N**2*GRAVITY/depth_sequence**(4/3)*velocity_norm*velocity_sequence[:, 1:-1] #[B, V_M_STEPS, H, W, 2]
     friction = tf.where(depth_sequence > EPS_WATER, friction, 0.0)
     #################################total momentum#######################
     momentum = -1 * (water_surface_momentum + friction) #[B, V_M_STEPS, H, W, 2]
