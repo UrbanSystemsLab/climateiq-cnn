@@ -716,6 +716,7 @@ class FloodPhysicConvLSTM(keras.Model):
         current_depth = input["spatiotemporal"][:, -1]
 
         new_dem = geospatial[:, :, :, 0:1] - tf.reduce_min(geospatial[:, :, :, 0:1], axis=(1, 2, 3), keepdims=True)
+        new_dem = new_dem + 4 * geospatial[:, :, :, 2:3]
 
         geospatial = tf.concat([
             new_dem, 
