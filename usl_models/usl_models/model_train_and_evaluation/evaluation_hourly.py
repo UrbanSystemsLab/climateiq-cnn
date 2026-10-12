@@ -22,8 +22,8 @@ import pandas as pd
 SEED = 42
 keras.utils.set_random_seed(SEED)
 
-FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us_raw")
-OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output/09_21_VariedLength_6_steps_loss_no_peak/percentail_20_evaluation_hourly")
+FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
+OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output/semi_physical_test/evaluation_hourly")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PATCH_SIZE   = 256
@@ -34,7 +34,7 @@ N_SAMPLES = 1000  # batches — more = more reliable correlation estimate
 
 CHECKPOINTS = {
     "R14 (focal loss, 8 US cities)": pathlib.Path(
-        "/scratch/hw4402/climateiq_output/09_21_VariedLength_6_steps_loss_no_peak/weights_ordered.npz"
+        "/scratch/hw4402/climateiq_output/semi_physical_test/weights_ordered.npz"
     ),
 }
 
@@ -269,17 +269,17 @@ for sim_idx, sim in enumerate(all_sim_list):
             ###########################################
             # GET percentail value map:
             
-            tensor_pred = tf.transpose(pred, perm=[0, 2, 3, 1])
-            T = tf.shape(tensor_pred)[-1]
-            k = tf.maximum(tf.cast(tf.math.ceil(0.20*tf.cast(T, tf.float32)), tf.int32), 1)
-            top_values, _ = tf.math.top_k(tensor_pred, k=k, sorted=True)
+            # tensor_pred = tf.transpose(pred, perm=[0, 2, 3, 1])
+            # T = tf.shape(tensor_pred)[-1]
+            # k = tf.maximum(tf.cast(tf.math.ceil(0.20*tf.cast(T, tf.float32)), tf.int32), 1)
+            # top_values, _ = tf.math.top_k(tensor_pred, k=k, sorted=True)
 
-            percential_max = top_values[..., -1] # [B, H, W, 1]
+            # percential_max = top_values[..., -1] # [B, H, W, 1]
 
             ###########################################
             label_max = tf.reduce_max(labels, axis=1)
-            # pred_time_split[-1].append(pred_max)
-            pred_time_split[-1].append(percential_max)
+            pred_time_split[-1].append(pred_max)
+            # pred_time_split[-1].append(percential_max)
             label_time_split[-1].append(label_max)
         except:
             print("some error occurs")

@@ -1252,6 +1252,7 @@ def load_dataset_windowed_patches(
                         labels_patch = labels_full[:, y0:y1, x0:x1]
                         if _is_valid_patch(labels_patch):
                             valid_patches.append((y0, x0))
+
                     else:
                         # Without labels, include all patches
                         valid_patches.append((y0, x0))
@@ -1268,6 +1269,7 @@ def load_dataset_windowed_patches(
 
             # Step 5. Yield temporal windows for each valid patch
             for y0, x0 in valid_patches:
+                
                 geo_patch = _extract_patch(geospatial_full, y0, x0, is_3d=False)
                 geo_tensor = tf.convert_to_tensor(geo_patch, dtype=tf.float32)
 
@@ -1283,45 +1285,89 @@ def load_dataset_windowed_patches(
                 # Need n_future_steps labels ahead, so last valid t is reduced
                 last_t = num_timesteps - n_future_steps if include_labels else 1
                 for t in range(last_t):
-                    if include_labels:
-                        label_step = labels_tensor[t]  # (H, W) — current timestep
-                        is_dry = float(label_step.numpy().max()) < min_label_max_depth
-                        if is_dry:
-                            if dry_timestep_fraction <= 0.0:
-                                continue
-                            if random.random() >= dry_timestep_fraction:
-                                continue
+                    try:
+                        if include_labels:
+                            label_step = labels_tensor[t]  # (H, W) — current timestep
+                            is_dry = float(label_step.numpy().max()) < min_label_max_depth
+                            if is_dry:
+                                if dry_timestep_fraction <= 0.0:
+                                    continue
+                                if random.random() >= dry_timestep_fraction:
+                                    continue
 
-                    if n_future_steps == 1:
-                        window_temporal = _extract_temporal(
-                            t, n_flood_maps, temporal_tensor
-                        )
-                    else:
-                        temporal_windows = [
-                            _extract_temporal(t + k, n_flood_maps, temporal_tensor)
-                            for k in range(n_future_steps)
-                        ]
-                        window_temporal = tf.stack(temporal_windows, axis=0)
-                    window_spatiotemporal = _extract_spatiotemporal_patch(
-                        t, n_flood_maps, labels_tensor, patch_size
-                    )
-
-                    window_input = model.FloodModel.Input(
-                        geospatial=geo_tensor,
-                        temporal=window_temporal,
-                        spatiotemporal=window_spatiotemporal,
-                    )
-
-                    if include_labels:
                         if n_future_steps == 1:
-                            yield window_input, labels_tensor[t]
+                            window_temporal = _extract_temporal(
+                                t, n_flood_maps, temporal_tensor
+                            )
+                            expected_temporal_shape = (n_flood_maps, m_rainfall)
                         else:
-                            yield window_input, labels_tensor[t : t + n_future_steps]
-                    else:
-                        empty_label = tf.zeros(
-                            (patch_size, patch_size), dtype=tf.float32
+                            temporal_windows = [
+                                _extract_temporal(t + k, n_flood_maps, temporal_tensor)
+                                for k in range(n_future_steps)
+                            ]
+                            window_temporal = tf.stack(temporal_windows, axis=0)
+                            expected_temporal_shape = (
+                                n_future_steps,
+                                n_flood_maps,
+                                m_rainfall,
+                            )
+                        window_spatiotemporal = _extract_spatiotemporal_patch(
+                            t, n_flood_maps, labels_tensor, patch_size
                         )
-                        yield window_input, empty_label
+                        expected_spatiotemporal_shape = (
+                            n_flood_maps,
+                            patch_size,
+                            patch_size,
+                            1,
+                        )
+                        expected_geospatial_shape = (
+                            patch_size,
+                            patch_size,
+                            constants.GEO_FEATURES,
+                        )
+
+                        # Defensive: a rare, not-yet-root-caused edge case can yield a
+                        # malformed geospatial/temporal/spatiotemporal window, which
+                        # otherwise crashes tf.data's generator validation mid-training.
+                        # Skip the malformed sample instead of aborting the whole run.
+                        if (
+                            tuple(geo_tensor.shape) != expected_geospatial_shape
+                            or tuple(window_temporal.shape) != expected_temporal_shape
+                            or tuple(window_spatiotemporal.shape)
+                            != expected_spatiotemporal_shape
+                        ):
+                            print(
+                                f"WARNING: skipping malformed sample "
+                                f"sim={sim_dir.name} stem={stem} t={t}: "
+                                f"geospatial.shape={tuple(geo_tensor.shape)} "
+                                f"(expected {expected_geospatial_shape}), "
+                                f"temporal.shape={tuple(window_temporal.shape)} "
+                                f"(expected {expected_temporal_shape}), "
+                                f"spatiotemporal.shape={tuple(window_spatiotemporal.shape)} "
+                                f"(expected {expected_spatiotemporal_shape})",
+                                flush=True,
+                            )
+                            continue
+
+                        window_input = model.FloodModel.Input(
+                            geospatial=geo_tensor,
+                            temporal=window_temporal,
+                            spatiotemporal=window_spatiotemporal,
+                        )
+
+                        if include_labels:
+                            if n_future_steps == 1:
+                                yield window_input, labels_tensor[t]
+                            else:
+                                yield window_input, labels_tensor[t : t + n_future_steps]
+                        else:
+                            empty_label = tf.zeros(
+                                (patch_size, patch_size), dtype=tf.float32
+                            )
+                    
+                            yield window_input, empty_label
+                    except:
+                        continue
 
     # Build dataset
     dataset = tf.data.Dataset.from_generator(
@@ -1375,3 +1421,110 @@ def _extract_spatiotemporal_patch(
         data = tf.zeros((0, patch_size, patch_size), dtype=tf.float32)
 
     return tf.expand_dims(tf.concat([zeros, data], axis=0), axis=-1)
+
+if __name__ == "__main__":
+
+    FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
+    OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_NAME = "09_23_VariedLength_6_steps_loss_no_peak"
+
+    PATCH_SIZE = 256
+    PATCH_STRIDE = 128
+    BATCH_SIZE = 8   # reverted from 6 — batch 4 had 16x better MAE (0.012 vs 0.197)
+    EPOCHS = 100  # ROUND 5 ABLATION — V3 loss only, validate before long run
+    N_FLOOD_MAPS = 5
+    M_RAINFALL = 6
+    N_FUTURE_STEPS = 6  # 13 → 0 windows (last_t = T - n_future = 13 - 13 = 0); 12 gives last_t=1 per chunk
+    DEPTH_CAP = 4.0  # metres — raised from 2.5; covers Atlanta peak (~4.4m capped at 4m)
+                    # Manhattan 5-7m ponding in closed canyons above this are outliers
+    DRY_TIMESTEP_FRACTION = 0.12  # calibrated from prior best run to avoid dry-step dominance
+
+    old_sims = [
+        # Atlanta (3 scenarios)
+        "Atlanta-Atlanta_config/Rainfall_Data_1.txt",
+        "Atlanta-Atlanta_config/Rainfall_Data_2.txt",
+        "Atlanta-Atlanta_config/Rainfall_Data_5.txt",
+        # Phoenix SM (4 scenarios)
+        "Phoenix_SM-PHX_SM/Rainfall_Data_1.txt",
+        "Phoenix_SM-PHX_SM/Rainfall_Data_5.txt",
+        "Phoenix_SM-PHX_SM/Rainfall_Data_15.txt",
+        "Phoenix_SM-PHX_SM/Rainfall_Data_16.txt",
+        # Manhattan (8 scenarios; 7 and 15 reserved for test)
+        "Manhattan-Manhattan_config/Rainfall_Data_1.txt",
+        "Manhattan-Manhattan_config/Rainfall_Data_2.txt",
+        "Manhattan-Manhattan_config/Rainfall_Data_5.txt",
+        "Manhattan-Manhattan_config/Rainfall_Data_6.txt",
+        "Manhattan-Manhattan_config/Rainfall_Data_10.txt",
+        "Manhattan-Manhattan_config/Rainfall_Data_13.txt",
+        "Manhattan-Manhattan_config/Rainfall_Data_16.txt",
+        "Manhattan-Manhattan_config/Rainfall_Data_19.txt",
+        # Phoenix PV (2 scenarios)
+        "Phoenix_PV-PHX_PV/Rainfall_Data_1.txt",
+        "Phoenix_PV-PHX_PV/Rainfall_Data_5.txt",]
+
+    # ── New cities (never seen by model) ─────────────────────────────────
+    new_sims = [
+            # Denton TX (13 timesteps, 1 chunk each)
+        "Denton_TX-Denton_config/Rainfall_Data_1.txt",
+        "Denton_TX-Denton_config/Rainfall_Data_2.txt",
+        "Denton_TX-Denton_config/Rainfall_Data_5.txt",
+        # Lafayette LA (13 timesteps, 1 chunk each)
+        "Lafayette_LA-Lafayette_config/Rainfall_Data_1.txt",
+        "Lafayette_LA-Lafayette_config/Rainfall_Data_2.txt",
+        "Lafayette_LA-Lafayette_config/Rainfall_Data_5.txt",
+        # Boise ID (13 timesteps, 1 chunk each)
+        "Boise_ID-Boise_config/Rainfall_Data_1.txt",
+        "Boise_ID-Boise_config/Rainfall_Data_2.txt",
+        "Boise_ID-Boise_config/Rainfall_Data_5.txt",
+        # Navarre FL (13 timesteps, 1-2 chunks each)
+        "Navarre_FL-Navarre_config/Rainfall_Data_1.txt",
+        "Navarre_FL-Navarre_config/Rainfall_Data_2.txt",
+        "Navarre_FL-Navarre_config/Rainfall_Data_5.txt",
+        # New Orleans
+        "New_Orleans-New_Orleans_config/Rainfall_Data_1.txt",
+        "New_Orleans-New_Orleans_config/Rainfall_Data_2.txt",
+        "New_Orleans-New_Orleans_config/Rainfall_Data_5.txt",]
+
+    # BASELINE TRAINING: Only old cities for clean comparison
+    # Filter to only existing sims
+    old_sims = [s for s in old_sims if (FILECACHE_DIR / s).exists()]
+    new_sims = [s for s in new_sims if (FILECACHE_DIR / s).exists()]
+    sim_names = old_sims + new_sims  # All cities — learning new flow channels
+    # print(f"BASELINE TRAINING: {len(sim_names)} old city simulations (batch_size={BATCH_SIZE})")
+    # for s in sim_names:
+    #     print(f"  {s}")
+
+    split = "train"
+
+    ds = load_dataset_windowed_patches(
+        filecache_dir=FILECACHE_DIR,
+        sim_names=sim_names,
+        dataset_split="train",
+        patch_size=PATCH_SIZE,
+        stride=PATCH_STRIDE,
+        batch_size=BATCH_SIZE,
+        n_flood_maps=N_FLOOD_MAPS,
+        m_rainfall=M_RAINFALL,
+        max_patches_per_chunk=None,
+        min_flood_fraction=0.12,    # ≥1% flooded pixels — excludes all-dry patches
+        min_max_depth=0.05,         # lowered from 0.1 — include early onset patches
+        min_label_max_depth=0.001,  # lowered from 0.01 — include very early flood onset
+        n_future_steps=N_FUTURE_STEPS,
+        dry_timestep_fraction=DRY_TIMESTEP_FRACTION if split == "train" else 0.0,
+        shuffle=True,
+        temporal_feature_version=2,
+    )
+
+    i = 0
+    print("start")
+    for d in ds:
+        print("printing the sample: ", i)
+
+        geo = d[0]["geospatial"]
+        temp = d[0]["temporal"]
+        spatemp = d[0]["spatiotemporal"]
+        print("geofeature shape is:", geo.shape)
+        print("temporal feature shape is:", temp.shape)
+        print("spatiotemporal feature shape is:", spatemp.shape)
+        i+=1

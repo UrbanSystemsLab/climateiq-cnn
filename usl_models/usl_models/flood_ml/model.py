@@ -1023,15 +1023,16 @@ class FloodPhysicConvLSTM(keras.Model):
 
                 step_loss = self.compute_loss(y=yk, y_pred=pred)
 
-                # Mass preservation: penalise mismatch in mean depth
-                pred_mass = tf.reduce_mean(pred, axis=[1, 2, 3])
-                gt_mass = tf.reduce_mean(yk, axis=[1, 2, 3])
-                mass_loss = tf.reduce_mean(tf.square(pred_mass - gt_mass))
+                # # Mass preservation: penalise mismatch in mean depth
+                # pred_mass = tf.reduce_mean(pred, axis=[1, 2, 3])
+                # gt_mass = tf.reduce_mean(yk, axis=[1, 2, 3])
+                # mass_loss = tf.reduce_mean(tf.square(pred_mass - gt_mass))
 
                 # Later steps matter more (error should not accumulate)
                 time_weight = 1.0 + 0.3 * k
 
-                total_loss += time_weight * (step_loss + 0.2 * mass_loss)
+                # total_loss += time_weight * (step_loss + 0.2 * mass_loss)
+                total_loss += (time_weight * step_loss)
 
                 # Feed corrected prediction back: clip at 4.0m to match GT depth cap
                 # (was 2.5m which caused hard ceiling — pred never learned >2.5m)
