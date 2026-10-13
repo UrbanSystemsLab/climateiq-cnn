@@ -34,14 +34,14 @@ FILECACHE_DIR = pathlib.Path("../../climateiq_filecache_us")
 
 # Defaults; both can be overridden from the command line (see parse_args()).
 DEFAULT_OUTPUT_DIR = pathlib.Path(
-    "../../climateiq_output/semi_physical_test/examples_test"
+    "../../climateiq_output/semi_physical_test_6_steps_no_mass_loss/examples_test"
 )
 DEFAULT_GT_MAX_DEPTH_RANGE = (0, 100)
 
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 
 CHECKPOINT_PATH = pathlib.Path(
-    "../../climateiq_output/semi_physical_test/weights_ordered.npz"
+    "../../climateiq_output/semi_physical_test_6_steps_no_mass_loss/weights_ordered.npz"
 )
 
 PATCH_SIZE   = 1000
