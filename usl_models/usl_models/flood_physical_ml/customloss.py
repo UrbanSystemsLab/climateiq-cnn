@@ -42,10 +42,10 @@ def momentum_loss(
         Valid_Mask: [B, H, W, 1]
     """
     nan_mask = tf.math.is_nan(velocity_sequence)
-    tf.print("Total number of predicted nan is: ", tf.reduce_sum(tf.cast(nan_mask, tf.int32)))
+    # tf.print("Total number of predicted nan is: ", tf.reduce_sum(tf.cast(nan_mask, tf.int32)))
 
     nan_mask = tf.math.is_nan(DEM)
-    tf.print("Total number of DEM nan is: ", tf.reduce_sum(tf.cast(nan_mask, tf.int32)))
+    # tf.print("Total number of DEM nan is: ", tf.reduce_sum(tf.cast(nan_mask, tf.int32)))
 
     velocity_0 = velocity_sequence[:, 0][:, tf.newaxis] # [B, 1, H, W, 2], predicted initial velocity
     velocity_1 = velocity_sequence[:, -1][:, tf.newaxis] # [B, 1, H, W, 2], predicted velocity of next time step
@@ -55,7 +55,7 @@ def momentum_loss(
 
     water_level = depth_sequence + elevation # [B, V_M_STEPS+2, H, W, 1]
 
-    tf.print("water depth ave is: ", tf.reduce_mean(depth_sequence))
+    # tf.print("water depth ave is: ", tf.reduce_mean(depth_sequence))
 
     ############################################################
     #####################Calculate Momentum#####################
