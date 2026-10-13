@@ -115,7 +115,7 @@ def momentum_loss(
     ##########################Calculate momentum loss#####################
     ######################################################################
     ######################################################################
-    overall_loss = local_acceleration + advective_acceleration + (momentum[:, 1:]) # [B, V_M_STEPS+1, H, W, 2]
+    overall_loss = local_acceleration + advective_acceleration - (momentum[:, 1:]) # [B, V_M_STEPS+1, H, W, 2]
 
     depth_mask = depth_sequence[:, 1:]
     depth_mask = tf.cast(depth_mask>0, dtype=tf.float32) # [B, V_M_STEPS+1, H, W, 2]

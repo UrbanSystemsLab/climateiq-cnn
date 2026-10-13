@@ -890,7 +890,7 @@ class FloodPhysicConvLSTM(keras.Model):
 
         # infiltration prediction
         infil_pred = self.infiltration_pred_conv(spatiotemporal_embedding) # [B, H, W, 1] Unit: m/s
-        infil_pred = tf.minimum(infil_pred, most_recent_rain_rate[0])
+        # infil_pred = tf.minimum(infil_pred, most_recent_rain_rate[0])
 
         # u prediction
         u_pred = self.u_pred_conv(spatiotemporal_embedding) # [B, H, W, U_PRED_CONV2_OUTPUT_DIM]
