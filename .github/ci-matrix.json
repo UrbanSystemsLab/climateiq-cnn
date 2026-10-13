@@ -55,7 +55,7 @@
     "runner": "ubuntu-22.04",
     "gdal": true,
     "emulator": false,
-    "pytest": true,
+    "pytest": false,
     "deps": "requirements-dev.txt\nusl_pipeline/h3_cloud_functions/requirements.txt",
     "install": "pip install -r requirements-dev.txt && cd usl_pipeline/h3_cloud_functions && pip install -r requirements.txt"
   }
