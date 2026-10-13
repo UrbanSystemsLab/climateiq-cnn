@@ -7,6 +7,19 @@ from usl_models.flood_physical_ml.constants import *
 from keras import layers
 from usl_models.flood_physical_ml.customloss_old import make_hybrid_loss
 
+def _compute_advective_acceleration(padded_v_sequence):
+    u = padded_v_sequence[..., 0:1] # [B, V_M_STEPS+2, H+2, W+2, 1]
+    v = padded_v_sequence[..., 1:2] # [B, V_M_STEPS+2, H+2, W+2, 1]
+    d_u_d_x = (u[:, :, 1:-1, 2:] - u[:, :, 1:-1, 0:-2])/(2*RESOLUTION) #[B, V_M_STEPS+2, H, W, 1]
+    d_u_d_y = (u[:, :, 2:, 1:-1] - u[:, :, 0:-2, 1:-1])/(2*RESOLUTION) #[B, V_M_STEPS+2, H, W, 1]
+    d_v_d_x = (v[:, :, 1:-1, 2:] - v[:, :, 1:-1, 0:-2])/(2*RESOLUTION) #[B, V_M_STEPS+2, H, W, 1]
+    d_v_d_y = (v[:, :, 2:, 1:-1] - v[:, :, 0:-2, 1:-1])/(2*RESOLUTION) #[B, V_M_STEPS+2, H, W, 1]
+
+    acceleration_u = u[:, :, 1:-1, 1:-1] * d_u_d_x + v[:, :, 1:-1, 1:-1] * d_u_d_y #[B, V_M_STEPS+2, H, W, 1]
+    acceleration_v = u[:, :, 1:-1, 1:-1] * d_v_d_x + v[:, :, 1:-1, 1:-1] * d_v_d_y #[B, V_M_STEPS+2, H, W, 1]
+
+    return tf.concat([acceleration_u, acceleration_v], axis=-1) # [B, V_M_STEPS+2, H, W, 1]
+
 def momentum_loss(
     velocity_sequence: tf.Tensor,
     depth_sequence: tf.Tensor,
@@ -20,15 +33,19 @@ def momentum_loss(
     """
     Args:
         velocity_sequence: Velocity output of the model [B, V_M_STEPS+2, H, W, 2], with [:, 0] as the predicted initial velocity, [:, 1: V_M_STEPS+1] as the predicted middle velocities, and [:, V_M_STEPS+1] as the predicted velocity of next time step;
-        depth_sequence: The flood depth output of the model [B, V_M_STEPS+1, H, W, 1], with [:, 0:V_M_STEPS] as the calculated flooding depths at middle steps, and [:, -1] as the predicted flooding depth of next time step;
+        depth_sequence: The flood depth output of the model [B, V_M_STEPS+2, H, W, 1], with [:, 0:V_M_STEPS] as the calculated flooding depths at middle steps, and [:, -1] as the predicted flooding depth of next time step;
         A: [V_M_STEPS, V_M_STEPS]
         B: [1, V_M_STEPS]
         DEM_map: The DEM [B, H, W, 1]
         Building: the Bulding heights [B, H, W, 1]
         N: [B, H, W, 1]
+        Valid_Mask: [B, H, W, 1]
     """
+    nan_mask = tf.math.is_nan(velocity_sequence)
+    tf.print("Total number of predicted nan is: ", tf.reduce_sum(tf.cast(nan_mask, tf.int32)))
 
-    # depth_sequence = tf.nn.relu(depth_sequence[:, 0:-1]) # [B, V_M_STEPS, H, W, 1]
+    nan_mask = tf.math.is_nan(DEM)
+    tf.print("Total number of DEM nan is: ", tf.reduce_sum(tf.cast(nan_mask, tf.int32)))
 
     velocity_0 = velocity_sequence[:, 0][:, tf.newaxis] # [B, 1, H, W, 2], predicted initial velocity
     velocity_1 = velocity_sequence[:, -1][:, tf.newaxis] # [B, 1, H, W, 2], predicted velocity of next time step
@@ -36,30 +53,15 @@ def momentum_loss(
     elevation = DEM + Building # [B, H, W, 1]
     elevation = elevation[:, tf.newaxis] # [B, 1, H, W, 1]
 
-    water_level = depth_sequence + elevation # [B, V_M_STEPS, H, W, 1]
+    water_level = depth_sequence + elevation # [B, V_M_STEPS+2, H, W, 1]
+
+    tf.print("water depth ave is: ", tf.reduce_mean(depth_sequence))
 
     ############################################################
     #####################Calculate Momentum#####################
     ############################################################
 
     #########################Water Level Diff###################
-
-    # # index map
-    # # x, x, x
-    # # x, x, 0
-    # # x, 1, x
-    # level_core = np.zeros((3, 3, 1, 2), dtype=float)
-    # level_core[1, 1, 0, 0] = -1
-    # level_core[1, 1, 0, 1] = -1
-    # level_core[1, 2, 0, 0] = 1
-    # level_core[2, 1, 0, 1] = 1 
-
-    # core_layer = layers.Conv2D(filters=2, kernel_size=(3,3), padding='valid', use_bias=False, trainable=False)
-    # core_layer.build(input_shape=(None, None, None, 1))
-    # core_layer.set_weights([level_core])
-
-    
-
     # x,  x, x
     # x, -1, 1
     # x,  x, x
@@ -69,51 +71,59 @@ def momentum_loss(
     # x,  1, x
     water_level_padded = tf.pad(water_level, [[0, 0], [0, 0], [1, 1], [1, 1], [0, 0]], mode = "REFLECT")
 
-    water_surface_differences_u = water_level_padded[:, :, 1:-1, 2:] - water_level_padded[:, :, 1:-1, 1:-1]
-    water_surface_differences_v = water_level_padded[:, :, 2:, 1:-1] - water_level_padded[:, :, 1:-1, 1:-1]
+    water_surface_differences_u = water_level_padded[:, :, 1:-1, 2:] - water_level_padded[:, :, 1:-1, 1:-1] # [B, V_M_STEPS+2, H, W, 1] <
+    water_surface_differences_v = water_level_padded[:, :, 2:, 1:-1] - water_level_padded[:, :, 1:-1, 1:-1] # [B, W_M_STEPS+2, H, W, 1] ^
     water_surface_differences = tf.concat([water_surface_differences_u, water_surface_differences_v], axis=-1) # [B, V_M_STEPS+2, H, W, 2] two directions < and ^
 
     water_surface_gradient = water_surface_differences/RESOLUTION # [B, V_M_STEPS+2, H, W, 2]
 
     water_surface_momentum = GRAVITY * water_surface_gradient # [B, V_M_STEPS+2, H, W, 2]
 
+    # tf.print("water surface momentum ave is: ", tf.reduce_mean(water_surface_momentum))
+
     #################################Fraction momentum####################
     N = N[:, tf.newaxis] # [B, 1, H, W, 1]
     velocity_norm = tf.reduce_sum(tf.square(velocity_sequence), axis=-1, keepdims=True)
-    velocity_norm = tf.sqrt(velocity_norm) #[B, V_M_STEPS, H, W, 1]
+    velocity_norm = tf.sqrt(velocity_norm + EPS) #[B, V_M_STEPS+2, H, W, 1]
 
-    friction = N**2*GRAVITY/depth_sequence**(4/3)*velocity_norm*velocity_sequence[:, 1:-1] #[B, V_M_STEPS, H, W, 2]
-    friction = tf.where(depth_sequence > EPS_WATER, friction, 0.0)
+    friction = N**2*GRAVITY/depth_sequence**(4/3)*velocity_norm*velocity_sequence #[B, V_M_STEPS+2, H, W, 2]
+    friction = tf.where(depth_sequence > EPS_WATER, friction, 0.0) #[B, V_M_STEPS+2, H, W, 2]
     #################################total momentum#######################
-    momentum = -1 * (water_surface_momentum + friction) #[B, V_M_STEPS, H, W, 2]
+    momentum = -1 * (water_surface_momentum + friction) #[B, V_M_STEPS+2, H, W, 2]
 
     ######################################################################
-    ########################Acceleration for each step####################
+    ########################Local Acceleration####################
     ######################################################################
-    step_acceleration = tf.einsum('bvhwd, vk->bkhwd', momentum, tf.transpose(A)) # [B, V_M_STEPS, H, W, 2]
+    #steps
+    acceleration = (velocity_sequence[:, 1:-1] - velocity_sequence[:, 0:-2])/STEP_LENGTH # [B, V_M_STEPS, H, W, 2]
+    step_acceleration = tf.einsum('bvhwd, vk->bkhwd', acceleration, tf.transpose(A)) # [B, V_M_STEPS, H, W, 2]
+
+    # final
+    final_acceleration = tf.einsum('bvhwd, vk->bkhwd', acceleration, tf.transpose(B)) # [B, 1, H, W, 2]
+
+    # all
+    local_acceleration = tf.concat([step_acceleration, final_acceleration], axis=1) # [B, V_M_STEPS+1, H, W, 2]
 
     ######################################################################
-    ###########################overall acceleration#######################
+    ###########################advective acceleration#####################
     ######################################################################
-    overall_acceleration = tf.einsum('bvhwd, vk->bkhwd', momentum, tf.transpose(B)) # [B, 1, H, W, 2]
+    padded_v_sequence = tf.pad(velocity_sequence[:, 1:], [[0, 0], [0, 0], [1, 1], [1, 1], [0, 0]], mode = "REFLECT") # [B, V_M_STEPS+1, H+2, W+2, 2]
+
+    advective_acceleration = _compute_advective_acceleration(padded_v_sequence) # [B, V_M_STEPS+1, H, W, 2]
+
 
     ##########################Calculate momentum loss#####################
     ######################################################################
     ######################################################################
-    calculated_mid_velocity = velocity_0 + STEP_LENGTH * step_acceleration #[B, V_M_STEPS, H, W, 2]
-    calculated_next_velocity = velocity_0 + STEP_LENGTH * overall_acceleration # [B, 1, H, W, 2]
+    overall_loss = local_acceleration + advective_acceleration + (momentum[:, 1:]) # [B, V_M_STEPS+1, H, W, 2]
 
-    loss_mid_step = tf.abs(velocity_sequence[:, 1:-1] - calculated_mid_velocity) # [B, V_M_STEPS, H, W, 2]
-    loss_next_step = tf.abs(velocity_1 - calculated_next_velocity) # [B, 1, H, W, 2]
+    depth_mask = depth_sequence[:, 1:]
+    depth_mask = tf.cast(depth_mask>0, dtype=tf.float32) # [B, V_M_STEPS+1, H, W, 2]
+    overall_loss = overall_loss * depth_mask
+    overall_loss = overall_loss * Valid_Mask[:, tf.newaxis, ...]
 
-    mean_loss_mid_step = tf.reduce_mean(loss_mid_step)
-    mean_loss_next_step = tf.reduce_mean(loss_next_step)
-
-    total_mean = mean_loss_mid_step + mean_loss_next_step
-    # print(mean_loss_next_step)
-
+    total_mean = tf.reduce_mean(tf.abs(overall_loss))
     
-
     return total_mean
 
 def mass_loss(
@@ -122,11 +132,11 @@ def mass_loss(
     ):
     """
     punish flooding depth predictions under zero
+    Valid_Mask: [B, H, W, 1]
     """
     # [B, V_M_STEPS+1, H, W, 1]
-    vio_physical_prediction = tf.maximum(0.0, -1*depth_sequence)
-    mse = tf.reduce_mean(tf.square(vio_physical_prediction))
-    
+    vio_physical_prediction = tf.maximum(0.0, -1*depth_sequence[:, 1:])
+    mse = tf.reduce_mean(tf.square(vio_physical_prediction * Valid_Mask[:, tf.newaxis]))
     return mse
 
 def depth_loss(
@@ -179,16 +189,9 @@ def physical_loss(
 
     depth_l = depth_loss(depth_sequence[:, -1], label, Valid_Mask)
 
-    # if last_final_velocity is not None:
-    #     velocity_l = velocity_loss(last_final_velocity, velocity_sequence[:, 0], Valid_Mask)
-    # else:
-    #     velocity_l = 0
-    # tf.print("momentum loss is: ", momentum_l, "| depth loss is: ", depth_l, " | velocity loss is: ", velocity_l, " | mass loss is: ", mass_l)
+    # momentum_l = 0
 
-    # physical_l = momentum_l + mass_l + depth_l + velocity_l
-
-    # tf.print("momentum loss is: ", momentum_l, "| depth loss is: ", depth_l, " | mass loss is: ", mass_l)
-    physical_l = 100 * momentum_l + mass_l + 200 * depth_l
+    physical_l = momentum_l + mass_l + depth_l
 
     return physical_l, momentum_l, mass_l, depth_l
 

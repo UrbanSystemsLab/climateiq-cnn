@@ -810,19 +810,24 @@ class FloodPhysicConvLSTM(keras.Model):
         water_depth = spatiotemporal # current depth [B, T, H, W, 1]
         building = geospatial[..., 2:3] * 4 # Building mask [B, T, H, W, 1]
 
-        dem = geospatial[:, :, :, 0:1] - tf.reduce_min(geospatial[:, :, :, 0:1], axis=(1, 2, 3), keepdims=True)
+        # dem = geospatial[:, :, :, 0:1] - tf.reduce_min(geospatial[:, :, :, 0:1], axis=(1, 2, 3), keepdims=True)
 
-
+        dem = geospatial[:, :, :, 0:1] + building * 4
+        dem = tf.pad(dem, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
+        dem_u = dem[:, 1:-1, 2:, :] - dem[:, 1:-1, 1:-1, :]
+        dem_v = dem[:, 2:, 1:-1, :] - dem[:, 1:-1, 1:-1, :]
 
         friction_factor = geospatial[..., 3:4] * 0.015 + 0.02
         infiltration_factor = geospatial[..., 4:8]
 
-        dem = tf.tile(dem[:, tf.newaxis, ...], [1, T, 1, 1, 1])
-        building = tf.tile(building[:, tf.newaxis, ...], [1, T, 1, 1, 1])
+        dem_u = tf.tile(dem_u[:, tf.newaxis, ...], [1, T, 1, 1, 1])
+        dem_v = tf.tile(dem_v[:, tf.newaxis, ...], [1, T, 1, 1, 1])
+        # building = tf.tile(building[:, tf.newaxis, ...], [1, T, 1, 1, 1])
+
         friction_factor = tf.tile(friction_factor[:, tf.newaxis, ...], [1, T, 1, 1, 1])
         infiltration_factor = tf.tile(infiltration_factor[:, tf.newaxis, ...], [1, T, 1, 1, 1])
 
-        water_level_feature = tf.concat([water_depth, building, dem], axis=-1) # [B, T, H, W, 3]
+        water_level_feature = tf.concat([water_depth, dem_u, dem_v], axis=-1) # [B, T, H, W, 3]
         friction_feature = tf.concat([water_depth, friction_factor], axis=-1) # [B, T, H, W, 2]
         infiltration_feature = tf.concat([water_depth, infiltration_factor], axis=-1) # [B, T, H, W, 5]
         rainfall = temporal # [B, T, 6]
@@ -907,6 +912,9 @@ class FloodPhysicConvLSTM(keras.Model):
 
         # calculate outflow velocity for the other two directions
         adj_velocity = tf.pad(velocity_pred, [[0, 0], [0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
+        tf.print("predicted velocity ave is: ", tf.reduce_mean(adj_velocity))
+        tf.print("predicted velocity max is: ", tf.reduce_max(adj_velocity))
+        tf.print("predicted velocity min is: ", tf.reduce_min(adj_velocity))
         adj_velocity = self.v_core_layer(adj_velocity)
         adj_velocity = tf.nn.relu(-1 * adj_velocity)
 
@@ -932,7 +940,7 @@ class FloodPhysicConvLSTM(keras.Model):
 
             volume_change = tf.reduce_sum((inflow - outflow)*step_time, axis=-1, keepdims=True) + rain_volume - infiltration_volume # [B, H, W, 1]
 
-            current_depth = tf.nn.relu(current_depth + volume_change/(RESOLUTION**2)) # [B, H, W, 1]
+            current_depth = current_depth + volume_change/(RESOLUTION**2) # [B, H, W, 1]
 
             depth_list.append(current_depth[:, tf.newaxis, ...])
         
@@ -1115,7 +1123,7 @@ class FloodPhysicConvLSTM(keras.Model):
                     axis=1,
                 )
                 last_pred = pred[1][:, -1]
-                last_final_velocity = pred[0][:, -1]
+                last_final_velocity = tf.stop_gradient(pred[0][:, -1])
 
 
 
