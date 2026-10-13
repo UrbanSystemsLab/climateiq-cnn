@@ -50,10 +50,8 @@ from usl_models.flood_physical_ml.dataset import load_dataset_windowed_patches
 # =====================================================================
 # CONFIGURATION
 # =====================================================================
-print(os.getcwd())
-FILECACHE_DIR = pathlib.Path("../climateiq_filecache_us")
-
-OUTPUT_DIR = pathlib.Path("../climateiq_output")
+FILECACHE_DIR = pathlib.Path("../../climateiq_filecache_us")
+OUTPUT_DIR = pathlib.Path("../../climateiq_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 LOG_NAME = "10_12_newdataset_4_steps_no_velocity_relu"
 
