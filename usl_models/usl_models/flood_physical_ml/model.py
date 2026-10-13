@@ -890,6 +890,7 @@ class FloodPhysicConvLSTM(keras.Model):
 
         # infiltration prediction
         infil_pred = self.infiltration_pred_conv(spatiotemporal_embedding) # [B, H, W, 1] Unit: m/s
+        infil_pred = tf.minimum(infil_pred, most_recent_rain_rate[0])
 
         # u prediction
         u_pred = self.u_pred_conv(spatiotemporal_embedding) # [B, H, W, U_PRED_CONV2_OUTPUT_DIM]
@@ -898,6 +899,8 @@ class FloodPhysicConvLSTM(keras.Model):
         v_pred = self.v_pred_conv(spatiotemporal_embedding) # [B, H, W, V_PRED_CONV2_OUTPUT_DIM] Unit: m/s
         velocity_pred = tf.stack([u_pred, v_pred], axis=-1) # [B, H, W, U_PRED_CONV2_OUTPUT_DIM, 2], u to right, v to down. Unit: m/s
         velocity_pred = tf.transpose(velocity_pred, perm=[0, 3, 1, 2, 4]) # [B, U_PRED_CONV2_OUTPUT_DIM, H, W, 2]
+        velocity_pred = tf.minimum(velocity_pred, 4.0)
+        velocity_pred = tf.maximum(velocity_pred, -4.0)
         ##############################################################
         ###################### Calculate Depth #######################
         ##############################################################
@@ -908,13 +911,11 @@ class FloodPhysicConvLSTM(keras.Model):
         rain_volume = rain_volume[:, tf.newaxis, tf.newaxis, tf.newaxis] # (B, 1, 1, 1)
         rain_volume = tf.tile(rain_volume, [1, H, W, 1]) # (B, H, W, 1)
         # infiltration volume per middle time step
-        infiltration_volume = infil_pred * RESOLUTION**2 * step_time
+        infiltration_volume = tf.nn.relu(infil_pred) * RESOLUTION**2 * step_time
 
         # calculate outflow velocity for the other two directions
         adj_velocity = tf.pad(velocity_pred, [[0, 0], [0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
-        tf.print("predicted velocity ave is: ", tf.reduce_mean(adj_velocity))
-        tf.print("predicted velocity max is: ", tf.reduce_max(adj_velocity))
-        tf.print("predicted velocity min is: ", tf.reduce_min(adj_velocity))
+    
         adj_velocity = self.v_core_layer(adj_velocity)
         adj_velocity = tf.nn.relu(-1 * adj_velocity)
 
@@ -933,12 +934,14 @@ class FloodPhysicConvLSTM(keras.Model):
 
             average_speed = (last_time_speed + current_speed) / 2 # [B, H, W, 4]
 
-            outflow = average_speed * current_depth * RESOLUTION # [B, H, W, 4]
+            outvolume = average_speed * current_depth * RESOLUTION * step_time # [B, H, W, 4]
 
-            inflow = tf.pad(outflow, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
-            inflow = self.core_layer(inflow) # [B, H, W, 4]
+            outvolume = tf.clip_by_value((current_depth * RESOLUTION**2 + EPS) / (outvolume + EPS), 0, 1)
 
-            volume_change = tf.reduce_sum((inflow - outflow)*step_time, axis=-1, keepdims=True) + rain_volume - infiltration_volume # [B, H, W, 1]
+            involume = tf.pad(outvolume, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
+            involume = self.core_layer(involume) # [B, H, W, 4]
+
+            volume_change = tf.reduce_sum((involume - outvolume), axis=-1, keepdims=True) + rain_volume - infiltration_volume # [B, H, W, 1]
 
             current_depth = current_depth + volume_change/(RESOLUTION**2) # [B, H, W, 1]
 
