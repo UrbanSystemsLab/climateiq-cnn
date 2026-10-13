@@ -48,5 +48,15 @@
     "pytest": true,
     "deps": "usl_models/setup.py",
     "install": "pip install -e usl_models[dev]"
+  },
+  {
+    "service": "h3_cloud_functions",
+    "path": "usl_pipeline/h3_cloud_functions",
+    "runner": "ubuntu-22.04",
+    "gdal": true,
+    "emulator": false,
+    "pytest": true,
+    "deps": "requirements-dev.txt\nusl_pipeline/h3_cloud_functions/requirements.txt",
+    "install": "pip install -r requirements-dev.txt && cd usl_pipeline/h3_cloud_functions && pip install -r requirements.txt"
   }
 ]
