@@ -24,7 +24,6 @@ rsync -a --include='*/' --include='*.py' --exclude='*' --prune-empty-dirs \
   "$LIB/" "$OUT/usl_lib/"
 
 # H3 pipeline files
-cp "$SRC/h3_pipeline_main.py" "$OUT/"
 cp "$SRC/cli_unified_pipeline.py" "$OUT/"
 cp "$SRC/cli_add_admin_breadcrumbs.py" "$OUT/"
 cp "$SRC/cli_preprocess_tiff_to_h3csv.py" "$OUT/"
