@@ -72,14 +72,10 @@ jobs:
               - '.github/deploy/functions.json'
             usl_models:
               - 'usl_models/**'
-            h3_cloud_functions:
-              - 'usl_pipeline/h3_cloud_functions/**'
             deploy_functions:
               - 'usl_pipeline/usl_lib/**'
               - 'usl_pipeline/cloud_functions/**'
-              - 'usl_pipeline/h3_cloud_functions/**'
               - 'scripts/stage_cloud_functions.sh'
-              - 'scripts/stage_h3_functions.sh'
               - '.github/deploy/**'
               - '.github/workflows/_deploy.yml'
             deploy_add_area:

@@ -1643,3 +1643,11 @@ def rescale_feature_matrices(cloud_event: functions_framework.CloudEvent) -> Non
     _start_feature_rescaling_if_ready(
         storage.Client().bucket(cloud_event.data["bucket"]), cloud_event.data["name"]
     )
+
+
+# ---------------------------------------------------------------------------
+# H3 pipeline entry points (source: h3_pipeline_main.py)
+# ---------------------------------------------------------------------------
+
+from h3_pipeline_main import process_h3_pipeline  # noqa: E402, F401
+from h3_pipeline_main import process_h3_pipeline_on_tiff_upload  # noqa: E402, F401

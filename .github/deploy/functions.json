@@ -18,15 +18,7 @@
         "upload-wrf-study-area-chunk": {"entry_point": "build_and_upload_study_area_chunk"},
         "rescale-feature-matrix": {"entry_point": "rescale_feature_matrices"},
         "write-study-area-metadata": {"entry_point": "write_study_area_metadata"},
-        "write-wrf-heat-config-metadata": {"entry_point": "write_heat_scenario_config_metadata"}
-      }
-    },
-    "h3_pipeline": {
-      "description": "H3 admin hex post-processing Cloud Function (gen2). Infra is owned by climateiq-terraform; only code is deployed from here.",
-      "source": "usl_pipeline/h3_cloud_functions",
-      "stage": "scripts/stage_h3_functions.sh",
-      "runtime": "python311",
-      "functions": {
+        "write-wrf-heat-config-metadata": {"entry_point": "write_heat_scenario_config_metadata"},
         "h3-pipeline": {"entry_point": "process_h3_pipeline"},
         "h3-pipeline-tiff-trigger": {"entry_point": "process_h3_pipeline_on_tiff_upload"}
       }
