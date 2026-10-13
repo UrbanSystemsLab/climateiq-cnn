@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""
-cli_add_admin_breadcrumbs.py
+"""cli_add_admin_breadcrumbs.py.
 
 Adds parent breadcrumb fields to:
 - admin_level_8 GeoJSON (parent = admin_level_6)
 - admin_level_10 GeoJSON (parents = admin_level_8 + admin_level_6)
-- H3 GeoJSONs in a directory (parents = admin_level_10 + (via that) admin_level_8 + admin_level_6)
+- H3 GeoJSONs in a directory
+  (parents = admin_level_10 + (via that) admin_level_8 + admin_level_6)
 
 Expected fields (kept simple + consistent):
 - child keeps its own existing properties (incl. id / GEOID etc.)
@@ -14,18 +14,19 @@ Expected fields (kept simple + consistent):
   admin_level_{P}_parent_localname
 
 Notes:
-- We avoid centroid-in-geographic warnings by reprojecting to EPSG:3857 before centroids/joins.
-- We do point-in-polygon joins (using centroids) for consistent 1:1 parent assignment.
+- We avoid centroid-in-geographic warnings by reprojecting to
+  EPSG:3857 before centroids/joins.
+- We do point-in-polygon joins (using centroids) for consistent
+  1:1 parent assignment.
 """
 
 import argparse
 import glob
 import os
-from typing import Optional, Tuple, List
+from typing import Optional, List
 
 import geopandas as gpd
 import pandas as pd
-
 
 # -----------------------------
 # Helpers: columns + CRS
@@ -46,7 +47,8 @@ def resolve_id_col(df: pd.DataFrame) -> str:
     col = _pick_first_col(df, ID_CANDIDATES)
     if not col:
         raise ValueError(
-            f"Could not find an ID column. Tried {ID_CANDIDATES}. Available: {list(df.columns)}"
+            f"Could not find an ID column. Tried {ID_CANDIDATES}."
+            f" Available: {list(df.columns)}"
         )
     return col
 
@@ -81,20 +83,21 @@ def centroid_points_metric(gdf_wgs84: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 # Core: parent assignment
 # -----------------------------
 
+
 def add_parent_fields_point_within(
     child: gpd.GeoDataFrame,
     parent: gpd.GeoDataFrame,
     parent_level: int,
 ) -> gpd.GeoDataFrame:
-    """
-    Assign each child a single parent via point-within-polygon:
+    """Assign each child a single parent via point-within-polygon.
+
     - child point = centroid (in EPSG:3857)
     - parent polygons in EPSG:3857
     """
     child = ensure_wgs84(child)
     parent = ensure_wgs84(parent)
 
-    child_id = resolve_id_col(child)
+    resolve_id_col(child)  # validate child has an ID column
     parent_id = resolve_id_col(parent)
     parent_name = resolve_name_col(parent)  # may be None
 
@@ -116,18 +119,27 @@ def add_parent_fields_point_within(
             # should not happen for parent fields, but keep safe
             return f"{base}_left"
         raise ValueError(
-            f"Expected join column for '{base}' not found. Join cols: {list(joined.columns)}"
+            f"Expected join column for '{base}' not found."
+            f" Join cols: {list(joined.columns)}"
         )
 
     parent_id_join = _join_col(parent_id)
     parent_name_join = _join_col(parent_name) if parent_name else None
 
     out = child.copy()
-    pid_series = joined[parent_id_join].astype(object).where(pd.notna(joined[parent_id_join]), None)
+    pid_series = (
+        joined[parent_id_join]
+        .astype(object)
+        .where(pd.notna(joined[parent_id_join]), None)
+    )
     out[f"admin_level_{parent_level}_parent_boundary_id"] = pid_series.values
 
     if parent_name_join:
-        pname_series = joined[parent_name_join].astype(object).where(pd.notna(joined[parent_name_join]), None)
+        pname_series = (
+            joined[parent_name_join]
+            .astype(object)
+            .where(pd.notna(joined[parent_name_join]), None)
+        )
         out[f"admin_level_{parent_level}_parent_localname"] = pname_series.values
     else:
         out[f"admin_level_{parent_level}_parent_localname"] = [None] * len(out)
@@ -139,11 +151,13 @@ def add_h3_parents_from_admin10(
     h3_gdf: gpd.GeoDataFrame,
     admin10_gdf: gpd.GeoDataFrame,
 ) -> gpd.GeoDataFrame:
-    """
-    For H3 polygons:
-      - join H3 centroid point within admin10 polygons
-      - fall back to sjoin_nearest for cells whose centroid misses all tracts
-      - propagate ALL breadcrumb levels from admin10: 2 (country), 4 (state), 6, 8, 10
+    """Assign H3 polygons their parent admin hierarchy.
+
+    - join H3 centroid point within admin10 polygons
+    - fall back to sjoin_nearest for cells whose centroid
+      misses all tracts
+    - propagate ALL breadcrumb levels from admin10:
+      2 (country), 4 (state), 6, 8, 10
     """
     h3_gdf = ensure_wgs84(h3_gdf)
     admin10_gdf = ensure_wgs84(admin10_gdf)
@@ -209,6 +223,7 @@ def add_h3_parents_from_admin10(
 # IO / CLI
 # -----------------------------
 
+
 def load_geojson(path: str) -> gpd.GeoDataFrame:
     gdf = gpd.read_file(path)
     return ensure_wgs84(gdf)
@@ -220,7 +235,9 @@ def write_geojson(gdf: gpd.GeoDataFrame, path: str) -> None:
     gdf.to_file(path, driver="GeoJSON")
 
 
-def add_breadcrumbs(admin6_path: str, admin8_path: str, admin10_path: str, h3_dir: Optional[str]) -> None:
+def add_breadcrumbs(
+    admin6_path: str, admin8_path: str, admin10_path: str, h3_dir: Optional[str]
+) -> None:
     print("[breadcrumbs] Loading admin GeoJSONs…")
     g6 = load_geojson(admin6_path)
     g8 = load_geojson(admin8_path)
@@ -229,7 +246,9 @@ def add_breadcrumbs(admin6_path: str, admin8_path: str, admin10_path: str, h3_di
     print("[breadcrumbs] Adding admin_level_6 parents to admin_level_8…")
     g8 = add_parent_fields_point_within(g8, g6, parent_level=6)
 
-    print("[breadcrumbs] Adding admin_level_8 + admin_level_6 parents to admin_level_10…")
+    print(
+        "[breadcrumbs] Adding admin_level_8 + admin_level_6 parents to admin_level_10…"
+    )
     g10 = add_parent_fields_point_within(g10, g8, parent_level=8)
     # Add admin6 as well (directly from g6)
     g10 = add_parent_fields_point_within(g10, g6, parent_level=6)
@@ -259,7 +278,12 @@ def main():
     p.add_argument("--admin6", required=True, help="Path to admin level 6 GeoJSON")
     p.add_argument("--admin8", required=True, help="Path to admin level 8 GeoJSON")
     p.add_argument("--admin10", required=True, help="Path to admin level 10 GeoJSON")
-    p.add_argument("--h3_dir", required=False, default=None, help="Directory containing H3 GeoJSONs (admin_level_109..113...)")
+    p.add_argument(
+        "--h3_dir",
+        required=False,
+        default=None,
+        help="Directory containing H3 GeoJSONs (admin_level_109..113...)",
+    )
     args = p.parse_args()
 
     add_breadcrumbs(args.admin6, args.admin8, args.admin10, args.h3_dir)

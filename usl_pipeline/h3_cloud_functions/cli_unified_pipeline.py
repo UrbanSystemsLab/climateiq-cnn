@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Unified multi-city H3 pipeline.
+"""Unified multi-city H3 pipeline.
 
 Processes multiple cities in a single run and combines outputs into unified tilesets.
 This solves the scalability issue of running separate commands for each city.
@@ -17,8 +16,6 @@ import ctypes
 import gc
 import json
 import os
-import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 import geopandas as gpd
@@ -27,7 +24,6 @@ import yaml
 import h3
 
 from usl_h3_tools.admin_enrich import enrich_admin
-
 
 # Configuration for admin levels
 ADMIN_LEVELS = [
@@ -56,6 +52,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
 def build_filter_expr(city: Dict[str, Any], level: int) -> str:
     """Build pandas query filter for a specific city and admin level.
+
     Supports both single county_geoid and multi-county county_geoids list.
     """
     state = city["state_fips"]
@@ -77,14 +74,16 @@ def build_filter_expr(city: Dict[str, Any], level: int) -> str:
         # US FIPS: 2-digit numeric state code ("04", "36"). International: alpha ("ZA").
         is_us = state.isdigit() and len(state) == 2
         if is_us:
-            # Census tract level: filter by state and county code(s) (last 3 digits of GEOID)
+            # Census tract level: filter by state and
+            # county code(s) (last 3 digits of GEOID)
             county_codes = [g[-3:] for g in county_geoids]
             if len(county_codes) == 1:
                 return f"STATEFP == '{state}' and COUNTYFP == '{county_codes[0]}'"
             codes_str = ", ".join(f"'{c}'" for c in county_codes)
             return f"STATEFP == '{state}' and COUNTYFP in [{codes_str}]"
         else:
-            # International city: filter by STATEFP only (OSM wards all share the same state code)
+            # International city: filter by STATEFP only
+            # (OSM wards all share the same state code)
             return f"STATEFP == '{state}'"
     else:
         raise ValueError(f"Unsupported admin level: {level}")
@@ -108,13 +107,22 @@ def process_single_city_level(
         return None
 
     # Skip admin level processing when required config is missing
-    county_geoids = city.get("county_geoids") or ([city["county_geoid"]] if "county_geoid" in city else [])
+    county_geoids = city.get("county_geoids") or (
+        [city["county_geoid"]] if "county_geoid" in city else []
+    )
     place_name = city.get("place_name", "")
     if not county_geoids and not place_name:
-        print(f"[unified] Skipping admin level {level} for {city_name} — no boundary config (international city)")
+        print(
+            f"[unified] Skipping admin level {level} for"
+            f" {city_name} — no boundary config"
+            " (international city)"
+        )
         return None
     if level == 8 and not place_name:
-        print(f"[unified] Skipping admin level 8 for {city_name} — no place_name configured")
+        print(
+            f"[unified] Skipping admin level 8 for"
+            f" {city_name} — no place_name configured"
+        )
         return None
 
     filter_expr = build_filter_expr(city, level)
@@ -142,11 +150,14 @@ def process_single_city_level(
             filter_expr=filter_expr,
             geoid_col=geoid_col,
             clip_bbox=clip_bbox,
-            h3_resolution=9,  # Use res 9 only — avoids 4x over-counting from multi-res CSV
+            # Use res 9 only — avoids 4x
+            # over-counting from multi-res CSV
+            h3_resolution=9,
             water_polygon_path=water_polygon_path,
         )
         # Inject city field so merge_and_upload_outputs can filter by city
         import json as _json
+
         with open(output_path) as _f:
             _fc = _json.load(_f)
         for _feat in _fc.get("features", []):
@@ -160,7 +171,9 @@ def process_single_city_level(
         return None
 
 
-def combine_geojson_files(file_paths: List[str], output_path: str, admin_level: int) -> None:
+def combine_geojson_files(
+    file_paths: List[str], output_path: str, admin_level: int
+) -> None:
     """Combine multiple GeoJSON files into a single unified tileset."""
     import shutil
 
@@ -190,7 +203,7 @@ def combine_geojson_files(file_paths: List[str], output_path: str, admin_level: 
             print(f"[unified]   Warning: Could not read {fp}: {e}")
 
     if not gdfs:
-        print(f"[unified]   No valid data to combine")
+        print("[unified]   No valid data to combine")
         return
 
     combined = pd.concat(gdfs, ignore_index=True)
@@ -204,7 +217,10 @@ def combine_geojson_files(file_paths: List[str], output_path: str, admin_level: 
 
     feature_count = len(combined)
     file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    print(f"[unified]   ✓ Combined tileset: {feature_count} features, {file_size_mb:.2f} MB")
+    print(
+        f"[unified]   ✓ Combined tileset:"
+        f" {feature_count} features, {file_size_mb:.2f} MB"
+    )
 
 
 def process_admin_levels(config: Dict[str, Any]) -> Dict[int, str]:
@@ -244,7 +260,9 @@ def process_admin_levels(config: Dict[str, Any]) -> Dict[int, str]:
                 temp_files.append(temp_file)
 
         # Combine all cities into single tileset
-        combined_output = os.path.join(output_dir, f"admin_level_{level}_all_cities.geojson")
+        combined_output = os.path.join(
+            output_dir, f"admin_level_{level}_all_cities.geojson"
+        )
         combine_geojson_files(temp_files, combined_output, level)
         combined_outputs[level] = combined_output
 
@@ -278,7 +296,11 @@ def process_h3_tile_for_city(args_tuple):
             return None
 
         admin_level = 100 + resolution
-        print(f"[unified] Processing {city_name} - H3 Resolution {resolution} ({len(sub)} cells)")
+        print(
+            f"[unified] Processing {city_name}"
+            f" - H3 Resolution {resolution}"
+            f" ({len(sub)} cells)"
+        )
 
         # Build GeoJSON features
         features = []
@@ -303,22 +325,26 @@ def process_h3_tile_for_city(args_tuple):
             }
 
             # Add value columns
-            for col in (value_cols or []):
+            for col in value_cols or []:
                 if col in row:
                     v = row[col]
                     props[col] = None if pd.isna(v) else float(v)
 
-            features.append({
-                "type": "Feature",
-                "properties": props,
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [ring],
-                },
-            })
+            features.append(
+                {
+                    "type": "Feature",
+                    "properties": props,
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [ring],
+                    },
+                }
+            )
 
         # Write temporary file for this city/resolution
-        temp_file = os.path.join(temp_dir, f"temp_{city_name}_h3_res_{resolution}.geojson")
+        temp_file = os.path.join(
+            temp_dir, f"temp_{city_name}_h3_res_{resolution}.geojson"
+        )
         fc = {
             "type": "FeatureCollection",
             "name": f"temp_{city_name}_admin_level_{admin_level}",
@@ -340,15 +366,22 @@ def process_h3_tile_for_city(args_tuple):
         return None
 
 
-def process_h3_tilesets(config: Dict[str, Any], max_workers: int = 4, on_resolution_done=None) -> Dict[int, str]:
+def process_h3_tilesets(
+    config: Dict[str, Any], max_workers: int = 4, on_resolution_done=None
+) -> Dict[int, str]:
     """Generate H3 hexagon tilesets for all cities.
 
-    Loads each city's CSV once and processes all resolutions from it to avoid
-    loading a multi-GB CSV repeatedly.
+    Loads each city's CSV once and processes all
+    resolutions from it to avoid loading a multi-GB CSV
+    repeatedly.
 
     Args:
-        on_resolution_done: optional callback(resolution, output_path) called immediately
-                            after each resolution's combined output is written to disk.
+        config: Pipeline configuration dictionary.
+        max_workers: Number of parallel workers.
+        on_resolution_done: Optional callback
+            (resolution, output_path) called immediately
+            after each resolution's combined output is
+            written to disk.
     """
     output_dir = config["output_dir"]
     temp_dir = os.path.join(output_dir, "_temp")
@@ -391,21 +424,37 @@ def process_h3_tilesets(config: Dict[str, Any], max_workers: int = 4, on_resolut
                 continue
 
             admin_level = 100 + resolution
-            print(f"[unified] Processing {city_name} res {resolution}: {len(sub)} cells")
+            print(
+                f"[unified] Processing {city_name} res {resolution}: {len(sub)} cells"
+            )
 
-            temp_file = os.path.join(temp_dir, f"temp_{city_name}_h3_res_{resolution}.geojson")
+            temp_file = os.path.join(
+                temp_dir, f"temp_{city_name}_h3_res_{resolution}.geojson"
+            )
 
             # Pre-build column index list for fast access via itertuples
             all_cols = list(sub.columns)
             h3_col_idx = all_cols.index(h3_col)
-            val_col_indices = {col: all_cols.index(col) for col in (value_cols or []) if col in all_cols}
+            val_col_indices = {
+                col: all_cols.index(col)
+                for col in (value_cols or [])
+                if col in all_cols
+            }
 
-            # Stream features directly to file using itertuples (much less memory than iterrows)
-            GC_INTERVAL = 50_000  # call gc.collect() every N features to release Python allocator memory
+            # Stream features directly to file using
+            # itertuples (much less memory than iterrows)
+            # gc.collect() every N features to release
+            # Python allocator memory
+            GC_INTERVAL = 50_000
             with open(temp_file, "w") as f:
-                f.write('{"type":"FeatureCollection","name":"temp_%s_admin_level_%d",'
-                        '"crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:OGC:1.3:CRS84"}},'
-                        '"features":[' % (city_name, admin_level))
+                f.write(
+                    '{"type":"FeatureCollection",'
+                    '"name":"temp_%s_admin_level_%d",'
+                    '"crs":{"type":"name",'
+                    '"properties":{"name":'
+                    '"urn:ogc:def:crs:OGC:1.3:CRS84"}},'
+                    '"features":[' % (city_name, admin_level)
+                )
                 first = True
                 count = 0
                 for row_tuple in sub.itertuples(index=False, name=None):
@@ -432,7 +481,9 @@ def process_h3_tilesets(config: Dict[str, Any], max_workers: int = 4, on_resolut
                     }
                     for col, idx in val_col_indices.items():
                         v = row_tuple[idx]
-                        props[col] = None if (v != v) else float(v)  # NaN check without pd.isna
+                        props[col] = (
+                            None if (v != v) else float(v)
+                        )  # NaN check without pd.isna
 
                     feature = {
                         "type": "Feature",
@@ -479,12 +530,18 @@ def process_h3_tilesets(config: Dict[str, Any], max_workers: int = 4, on_resolut
             print(f"[unified] No H3 data for resolution {resolution}")
             continue
 
-        combined_output = os.path.join(output_dir, f"admin_level_{admin_level}_all_cities.geojson")
-        print(f"\n[unified] Combining H3 resolution {resolution} from {len(temp_files)} cities")
+        combined_output = os.path.join(
+            output_dir, f"admin_level_{admin_level}_all_cities.geojson"
+        )
+        print(
+            f"\n[unified] Combining H3 resolution"
+            f" {resolution} from {len(temp_files)} cities"
+        )
         combine_geojson_files(temp_files, combined_output, admin_level)
         combined_outputs[resolution] = combined_output
 
-        # Upload immediately after each resolution finishes — don't wait for all resolutions
+        # Upload immediately after each resolution
+        # finishes — don't wait for all resolutions
         if on_resolution_done:
             on_resolution_done(resolution, combined_output)
 
@@ -553,14 +610,14 @@ def main():
         if os.path.exists(fp)
     )
 
-    print(f"\n[unified] ===== PIPELINE COMPLETE =====")
+    print("\n[unified] ===== PIPELINE COMPLETE =====")
     print(f"[unified] Total tilesets created: {len(all_outputs)}")
     print(f"[unified] Total size: {total_size_mb:.2f} MB")
     print(f"[unified] Output directory: {output_dir}")
 
     if total_size_mb > 20 * 1024:  # 20 GB
-        print(f"[unified] ⚠️  WARNING: Total size exceeds Mapbox 20GB limit!")
-        print(f"[unified]    Consider reducing H3 resolutions or filtering cities")
+        print("[unified] ⚠️  WARNING: Total size exceeds Mapbox 20GB limit!")
+        print("[unified]    Consider reducing H3 resolutions or filtering cities")
 
 
 if __name__ == "__main__":

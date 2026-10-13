@@ -1,5 +1,4 @@
-"""
-cli_preprocess_tiff_to_h3csv.py
+"""cli_preprocess_tiff_to_h3csv.py.
 
 Preprocessing pipeline: per-city, per-scenario GeoTIFF -> merged multi-scenario H3 CSV.
 
@@ -12,15 +11,18 @@ Steps:
      Columns: cell_code, h3_res, flood_depth_1y, flood_depth_5y, ... flood_depth_1000y
 
 GCS path expected:
-  flood_predictions/{city_folder}/{config_prefix}/{scenario_file}/{mosaic_filename}
-  e.g. flood_predictions/Atlanta_Prediction/Atlanta_config/Rainfall_Data_1.txt/Atlanta_Prediction_mosaic_peak_wgs84.tif
+  flood_predictions/{city_folder}/{config_prefix}/{scenario_file}/
+  {mosaic_filename}
+  e.g. flood_predictions/Atlanta_Prediction/Atlanta_config/
+  Rainfall_Data_1.txt/
+  Atlanta_Prediction_mosaic_peak_wgs84.tif
 """
 
 import gc
 import os
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -38,14 +40,15 @@ import h3
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-WINDOW_SIZE = 1024       # pixels per processing tile
-JITTER_SAMPLES = 3       # jitter grid size for res-12 (3×3 = 9 samples)
+WINDOW_SIZE = 1024  # pixels per processing tile
+JITTER_SAMPLES = 3  # jitter grid size for res-12 (3×3 = 9 samples)
 H3_FAST_RES = [6, 7, 8, 9, 10, 11]
 H3_JITTER_RES = 12
-RESAMPLE_FACTOR = 5.0    # 2m -> 10m
+RESAMPLE_FACTOR = 5.0  # 2m -> 10m
 
 
 # ── Step 1: Resample 2m -> 10m ────────────────────────────────────────────────
+
 
 def resample_to_10m(src_path: str, dst_path: str) -> None:
     """Downsample a 2m GeoTIFF to ~10m using average resampling."""
@@ -54,23 +57,27 @@ def resample_to_10m(src_path: str, dst_path: str) -> None:
         new_h = max(1, int(src.height / RESAMPLE_FACTOR))
 
         dst_transform, width, height = calculate_default_transform(
-            src.crs, src.crs,
-            src.width, src.height,
+            src.crs,
+            src.crs,
+            src.width,
+            src.height,
             *src.bounds,
             dst_width=new_w,
             dst_height=new_h,
         )
 
         meta = src.meta.copy()
-        meta.update({
-            "transform": dst_transform,
-            "width": width,
-            "height": height,
-            "compress": "deflate",
-            "tiled": True,
-            "blockxsize": 256,
-            "blockysize": 256,
-        })
+        meta.update(
+            {
+                "transform": dst_transform,
+                "width": width,
+                "height": height,
+                "compress": "deflate",
+                "tiled": True,
+                "blockxsize": 256,
+                "blockysize": 256,
+            }
+        )
 
         with rasterio.open(dst_path, "w", **meta) as dst:
             reproject(
@@ -86,10 +93,12 @@ def resample_to_10m(src_path: str, dst_path: str) -> None:
 
 # ── Step 2: Tiff -> H3 (worker) ───────────────────────────────────────────────
 
+
 def _process_window(args: Tuple) -> Optional[Tuple[dict, dict]]:
-    """
-    Worker: aggregate pixel values within a raster window into H3 cells.
-    Returns (h3_sum, h3_count) dicts keyed by (cell_code, res), or None if empty.
+    """Worker: aggregate pixel values within a raster window into H3 cells.
+
+    Returns (h3_sum, h3_count) dicts keyed by
+    (cell_code, res), or None if empty.
     """
     tiff_path, window = args
     h3_sum = defaultdict(float)
@@ -141,11 +150,15 @@ def _process_window(args: Tuple) -> Optional[Tuple[dict, dict]]:
 
 
 def tiff_to_h3_dataframe(tiff_10m_path: str, n_workers: int = 4) -> pd.DataFrame:
-    """Convert a 10m GeoTIFF to an H3 DataFrame with columns: cell_code, h3_res, value."""
+    """Convert a 10m GeoTIFF to an H3 DataFrame.
+
+    Columns: cell_code, h3_res, value.
+    """
     with rasterio.open(tiff_10m_path) as src:
         windows = [
             Window(
-                col, row,
+                col,
+                row,
                 min(WINDOW_SIZE, src.width - col),
                 min(WINDOW_SIZE, src.height - row),
             )
@@ -169,13 +182,18 @@ def tiff_to_h3_dataframe(tiff_10m_path: str, n_workers: int = 4) -> pd.DataFrame
                 global_count[k] += h3_count[k]
 
     rows = [
-        {"cell_code": cell, "h3_res": res, "value": global_sum[(cell, res)] / global_count[(cell, res)]}
+        {
+            "cell_code": cell,
+            "h3_res": res,
+            "value": global_sum[(cell, res)] / global_count[(cell, res)],
+        }
         for (cell, res) in global_sum
     ]
     return pd.DataFrame(rows)
 
 
 # ── Step 3: Process all scenarios for one city ────────────────────────────────
+
 
 def get_tiff_bbox_wgs84(tiff_path: str) -> Tuple[float, float, float, float]:
     """Return (minx, miny, maxx, maxy) bounding box in WGS84 for a GeoTIFF."""
@@ -199,29 +217,36 @@ def preprocess_city(
     intermediates_bucket: Optional[str] = None,
     intermediates_prefix: str = "intermediates",
 ) -> Tuple[str, Optional[Tuple[float, float, float, float]]]:
-    """
-    Download all scenario tiffs for a city, convert to H3, merge into one CSV.
+    """Download all scenario tiffs for a city, convert to H3, merge into one CSV.
 
     Args:
-        city_config:           city entry from cities_config.yaml (must have 'predictions' key)
-        scenario_mapping:      ordered dict mapping scenario filename -> column name
-                               e.g. {"Rainfall_Data_1.txt": "flood_depth_1y", ...}
-        work_dir:              local temp directory
-        n_workers:             parallel workers for window processing within each scenario
-        intermediates_bucket:  if set, upload 10m TIFFs and per-scenario CSVs to this GCS bucket
-        intermediates_prefix:  GCS prefix for intermediate files (default: "intermediates")
+        city_config: City entry from cities_config.yaml
+            (must have 'predictions' key).
+        scenario_mapping: Ordered dict mapping scenario
+            filename -> column name, e.g.
+            {"Rainfall_Data_1.txt": "flood_depth_1y", ...}
+        work_dir: Local temp directory.
+        n_workers: Parallel workers for window processing
+            within each scenario.
+        intermediates_bucket: If set, upload 10m TIFFs and
+            per-scenario CSVs to this GCS bucket.
+        intermediates_prefix: GCS prefix for intermediate
+            files (default: "intermediates").
 
     Returns:
-        (csv_path, bbox) where bbox is (minx, miny, maxx, maxy) in WGS84,
-        captured from the first scenario tiff to use for spatial clipping.
+        (csv_path, bbox) where bbox is
+        (minx, miny, maxx, maxy) in WGS84, captured from
+        the first scenario tiff to use for spatial clipping.
     """
     from google.cloud import storage
 
     pred = city_config["predictions"]
     src_bucket_name = pred["bucket"]
-    city_folder     = pred["city_folder"]      # e.g. "Atlanta_Prediction"
-    config_prefix   = pred["config_prefix"]    # e.g. "Atlanta_config"
-    mosaic_filename = pred["mosaic_filename"]  # e.g. "Atlanta_Prediction_mosaic_peak_wgs84.tif"
+    city_folder = pred["city_folder"]  # e.g. "Atlanta_Prediction"
+    config_prefix = pred["config_prefix"]  # e.g. "Atlanta_config"
+    mosaic_filename = pred[
+        "mosaic_filename"
+    ]  # e.g. "Atlanta_Prediction_mosaic_peak_wgs84.tif"
     city_name = city_config["name"]
 
     gcs_client = storage.Client()
@@ -240,9 +265,12 @@ def preprocess_city(
             f"flood_predictions/{city_folder}/"
             f"{config_prefix}%2F{scenario_file}/{mosaic_filename}"
         )
-        print(f"  [preprocess] {city_name} | {col_name} <- gs://{src_bucket_name}/{blob_path}")
+        print(
+            f"  [preprocess] {city_name} | {col_name}"
+            f" <- gs://{src_bucket_name}/{blob_path}"
+        )
 
-        local_2m  = os.path.join(work_dir, f"_raw_{col_name}.tif")
+        local_2m = os.path.join(work_dir, f"_raw_{col_name}.tif")
         local_10m = os.path.join(work_dir, f"_10m_{col_name}.tif")
 
         # Download
@@ -258,14 +286,18 @@ def preprocess_city(
             print(f"    Tiff bbox (WGS84): {tiff_bbox}")
 
         # Resample 2m -> 10m
-        print(f"    Resampling to 10m...")
+        print("    Resampling to 10m...")
         resample_to_10m(local_2m, local_10m)
         os.remove(local_2m)
 
         # Upload 10m TIFF to GCS intermediates if requested
         if int_bucket is not None:
-            tiff_gcs_path = f"{intermediates_prefix}/{city_name}/tiffs/{col_name}_10m.tif"
-            print(f"    Uploading 10m TIFF -> gs://{intermediates_bucket}/{tiff_gcs_path}")
+            tiff_gcs_path = (
+                f"{intermediates_prefix}/{city_name}/tiffs/{col_name}_10m.tif"
+            )
+            print(
+                f"    Uploading 10m TIFF -> gs://{intermediates_bucket}/{tiff_gcs_path}"
+            )
             int_bucket.blob(tiff_gcs_path).upload_from_filename(local_10m)
 
         # Convert to H3
@@ -279,7 +311,10 @@ def preprocess_city(
             local_scenario_csv = os.path.join(work_dir, f"_scenario_{col_name}.csv")
             df.to_csv(local_scenario_csv, index=False)
             csv_gcs_path = f"{intermediates_prefix}/{city_name}/csvs/{col_name}.csv"
-            print(f"    Uploading scenario CSV -> gs://{intermediates_bucket}/{csv_gcs_path}")
+            print(
+                f"    Uploading scenario CSV -> "
+                f"gs://{intermediates_bucket}/{csv_gcs_path}"
+            )
             int_bucket.blob(csv_gcs_path).upload_from_filename(local_scenario_csv)
             os.remove(local_scenario_csv)
 
@@ -287,7 +322,9 @@ def preprocess_city(
         gc.collect()
 
     if not scenario_dfs:
-        raise ValueError(f"[preprocess] No scenarios processed successfully for {city_name}")
+        raise ValueError(
+            f"[preprocess] No scenarios processed successfully for {city_name}"
+        )
 
     # Merge all scenarios on (cell_code, h3_res)
     print(f"  [preprocess] Merging {len(scenario_dfs)} scenarios...")

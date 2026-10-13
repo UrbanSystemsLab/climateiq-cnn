@@ -1,6 +1,5 @@
 import datetime
 import functools
-import json
 import logging
 import os
 import re
@@ -15,16 +14,16 @@ from google.cloud import storage
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from cli_unified_pipeline import (
+from cli_unified_pipeline import (  # noqa: E402
     process_admin_levels,
     process_h3_tilesets,
 )
-from cli_add_admin_breadcrumbs import (
+from cli_add_admin_breadcrumbs import (  # noqa: E402
     add_parent_fields_point_within,
     add_h3_parents_from_admin10,
     ensure_wgs84,
 )
-from cli_preprocess_tiff_to_h3csv import preprocess_city
+from cli_preprocess_tiff_to_h3csv import preprocess_city  # noqa: E402
 
 _MAX_RETRY_SECONDS = 60 * 60
 
@@ -56,7 +55,10 @@ FILTER_THRESHOLD = 0.001
 EXPECTED_SCENARIO_COUNT = 9
 
 WATER_POLYGONS_PREFIX = "water_polygons"
-JRC_TILE_URL = "https://storage.googleapis.com/global-surface-water/downloads2021/occurrence/occurrence_{tile}v1_4_2021.tif"
+JRC_TILE_URL = (
+    "https://storage.googleapis.com/global-surface-water"
+    "/downloads2021/occurrence/occurrence_{tile}v1_4_2021.tif"
+)
 JRC_OCCURRENCE_THRESHOLD = 80
 
 
@@ -103,6 +105,7 @@ def _retry_and_report_errors():
                 raise
 
         return wrapper
+
     return decorator
 
 
@@ -113,12 +116,14 @@ def _error_to_response(f):
             return f(*args, **kwargs)
         except Exception:
             return flask.make_response(traceback.format_exc(limit=10), 500)
+
     return decorated
 
 
 # ---------------------------------------------------------------------------
 # GCS helpers
 # ---------------------------------------------------------------------------
+
 
 def _download_from_gcs(bucket_name, source_blob, dest_path):
     client = storage.Client()
@@ -144,7 +149,7 @@ def _download_directory_from_gcs(bucket_name, prefix, dest_dir):
     os.makedirs(dest_dir, exist_ok=True)
     for blob in blobs:
         if not blob.name.endswith("/"):
-            relative_path = blob.name[len(prefix):].lstrip("/")
+            relative_path = blob.name[len(prefix) :].lstrip("/")
             dest_path = os.path.join(dest_dir, relative_path)
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             blob.download_to_filename(dest_path)
@@ -154,6 +159,7 @@ def _download_directory_from_gcs(bucket_name, prefix, dest_dir):
 # ---------------------------------------------------------------------------
 # Derive city info from the predictions bucket path
 # ---------------------------------------------------------------------------
+
 
 def _parse_city_folder(city_folder):
     """Derive city name and config prefix from folder name.
@@ -212,7 +218,9 @@ def _derive_admin_fields(city_config, tiff_bbox, admin_boundaries):
             county_geoids = sorted(hits["GEOID"].unique().tolist())
             city_config["state_fips"] = state_fips
             city_config["county_geoids"] = county_geoids
-            logging.info("Derived state_fips=%s, county_geoids=%s", state_fips, county_geoids)
+            logging.info(
+                "Derived state_fips=%s, county_geoids=%s", state_fips, county_geoids
+            )
 
     places_path = admin_boundaries.get("level_8")
     if places_path and os.path.exists(places_path):
@@ -253,7 +261,21 @@ def _build_pipeline_config(work_dir, pipeline_bucket, cities):
 # Breadcrumbs, title-casing, and post-processing
 # ---------------------------------------------------------------------------
 
-_SMALL_WORDS = {"of", "the", "and", "in", "on", "at", "to", "for", "de", "del", "la", "las", "los"}
+_SMALL_WORDS = {
+    "of",
+    "the",
+    "and",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "de",
+    "del",
+    "la",
+    "las",
+    "los",
+}
 _NAME_CORRECTIONS = {
     "Dekalb": "DeKalb",
     "Mcdonald": "McDonald",
@@ -425,16 +447,29 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
                 "STATEFP": "36",
             }
             numeric_cols = [
-                c for c in nyc_counties.columns
-                if c not in ("geometry", id_col, "name", "city", "STATEFP",
-                             "COUNTYFP", "GEOID", "admin_level", "is_city")
+                c
+                for c in nyc_counties.columns
+                if c
+                not in (
+                    "geometry",
+                    id_col,
+                    "name",
+                    "city",
+                    "STATEFP",
+                    "COUNTYFP",
+                    "GEOID",
+                    "admin_level",
+                    "is_city",
+                )
                 and nyc_counties[c].dtype in ("float64", "int64", "float32")
             ]
             for col in numeric_cols:
                 vals = nyc_counties[col].dropna().values
                 rec[col] = round(float(np.mean(vals)), 6) if len(vals) > 0 else 0.0
 
-            level_4_gdf = gpd.GeoDataFrame([rec], geometry=[merged_geom], crs="EPSG:4326")
+            level_4_gdf = gpd.GeoDataFrame(
+                [rec], geometry=[merged_geom], crs="EPSG:4326"
+            )
             level_4_path = os.path.join(output_dir, "admin_level_4_all_cities.geojson")
             level_4_gdf.to_file(level_4_path, driver="GeoJSON")
             logging.info("Created admin_level_4 (NYC aggregation)")
@@ -452,7 +487,12 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
                 for suffix in ("_parent_boundary_id", "_parent_localname"):
                     key = f"admin_level_{lvl}{suffix}"
                     val = row.get(key)
-                    if pd.notna(val) and str(val) not in ("<NA>", "<Na>", "None", "nan"):
+                    if pd.notna(val) and str(val) not in (
+                        "<NA>",
+                        "<Na>",
+                        "None",
+                        "nan",
+                    ):
                         candidate[key] = val
                         score += 1
             if score > city_best_score.get(city, -1):
@@ -481,11 +521,13 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
                         if not is_null.any():
                             continue
                         lookup_pname = {
-                            c: v.get(pname_key) for c, v in city_breadcrumbs.items()
+                            c: v.get(pname_key)
+                            for c, v in city_breadcrumbs.items()
                             if v.get(pname_key)
                         }
                         lookup_pid = {
-                            c: v.get(pid_key) for c, v in city_breadcrumbs.items()
+                            c: v.get(pid_key)
+                            for c, v in city_breadcrumbs.items()
                             if v.get(pid_key)
                         }
                         fallback_pname = h3_gdf["city"].map(lookup_pname)
@@ -497,16 +539,22 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
                             h3_gdf.loc[fill_mask, pid_key] = fallback_pid[fill_mask]
                             filled += cnt
                     if filled:
-                        logging.info("City fallback filled %d null breadcrumbs in %s",
-                                     filled, os.path.basename(h3_path))
+                        logging.info(
+                            "City fallback filled %d null breadcrumbs in %s",
+                            filled,
+                            os.path.basename(h3_path),
+                        )
 
                 _title_case_gdf(h3_gdf)
                 h3_gdf = ensure_wgs84(h3_gdf)
                 h3_gdf.to_file(h3_path, driver="GeoJSON")
-                logging.info("Updated %s with admin breadcrumbs", os.path.basename(h3_path))
+                logging.info(
+                    "Updated %s with admin breadcrumbs", os.path.basename(h3_path)
+                )
             except Exception as e:
-                logging.error("Failed to add breadcrumbs to %s: %s",
-                              os.path.basename(h3_path), e)
+                logging.error(
+                    "Failed to add breadcrumbs to %s: %s", os.path.basename(h3_path), e
+                )
 
     logging.info("Breadcrumbs added successfully")
 
@@ -514,6 +562,7 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
 # ---------------------------------------------------------------------------
 # Upload per-city + rebuild all_cities from per-city parts
 # ---------------------------------------------------------------------------
+
 
 def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_run):
     """Upload per-city files, then compose all_cities via GCS server-side compose.
@@ -568,7 +617,9 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
         if raw_blob.exists():
             return raw_blob
 
-        pc_path = f"{output_prefix}by_city/{city}/admin_level_{level_str}_all_cities.geojson"
+        pc_path = (
+            f"{output_prefix}by_city/{city}/admin_level_{level_str}_all_cities.geojson"
+        )
         pc_blob = bucket_o.blob(pc_path)
         if not pc_blob.exists():
             return None
@@ -628,14 +679,18 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
             raw_path = f"{FEATURES_RAW_PREFIX}/{city_name}/level_{level_str}.bin"
             raw_blob = bucket_obj.blob(raw_path)
             raw_blob.upload_from_string(features_raw)
-            logging.info("Uploaded features_raw for %s level %s (%d bytes)",
-                         city_name, level_str, len(features_raw))
+            logging.info(
+                "Uploaded features_raw for %s level %s (%d bytes)",
+                city_name,
+                level_str,
+                len(features_raw),
+            )
 
             by_city_prefix = f"{output_prefix}by_city/"
             city_dirs = set()
-            blobs_iter = client.list_blobs(bucket_name,
-                                           prefix=by_city_prefix,
-                                           delimiter="/")
+            blobs_iter = client.list_blobs(
+                bucket_name, prefix=by_city_prefix, delimiter="/"
+            )
             for _ in blobs_iter:
                 pass
             for prefix_str in blobs_iter.prefixes:
@@ -643,8 +698,12 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
                 if c:
                     city_dirs.add(c)
 
-            logging.info("Found %d cities for level %s compose: %s",
-                         len(city_dirs), level_str, sorted(city_dirs))
+            logging.info(
+                "Found %d cities for level %s compose: %s",
+                len(city_dirs),
+                level_str,
+                sorted(city_dirs),
+            )
 
             city_raw_blobs = []
             for c in sorted(city_dirs):
@@ -656,13 +715,11 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
                     city_raw_blobs.append((c, rb))
 
             if not city_raw_blobs:
-                logging.warning("No features_raw blobs found for level %s",
-                                level_str)
+                logging.warning("No features_raw blobs found for level %s", level_str)
                 continue
 
             header_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_header.bin")
-            header_blob.upload_from_string(
-                b'{"type":"FeatureCollection","features":[')
+            header_blob.upload_from_string(b'{"type":"FeatureCollection","features":[')
 
             comma_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_comma.bin")
             comma_blob.upload_from_string(b",")
@@ -677,8 +734,12 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
                 sources.append(rb)
             sources.append(footer_blob)
 
-            logging.info("Composing %s from %d sources (%d cities)",
-                         fname, len(sources), len(city_raw_blobs))
+            logging.info(
+                "Composing %s from %d sources (%d cities)",
+                fname,
+                len(sources),
+                len(city_raw_blobs),
+            )
 
             dest_blob = bucket_obj.blob(all_cities_path)
             dest_blob.compose(sources)
@@ -693,12 +754,16 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
 # Pipeline runner
 # ---------------------------------------------------------------------------
 
+
 def _run_pipeline(config_dict, work_dir, run_mode="full"):
     config_dict["output_dir"] = os.path.join(work_dir, "output")
     os.makedirs(config_dict["output_dir"], exist_ok=True)
 
-    logging.info("Starting pipeline with %d cities, mode=%s",
-                 len(config_dict["cities"]), run_mode)
+    logging.info(
+        "Starting pipeline with %d cities, mode=%s",
+        len(config_dict["cities"]),
+        run_mode,
+    )
 
     admin_outputs = {}
     h3_outputs = {}
@@ -731,6 +796,7 @@ def _run_pipeline(config_dict, work_dir, run_mode="full"):
 # JRC water polygon: auto-generate at pipeline time
 # ---------------------------------------------------------------------------
 
+
 def _get_jrc_tile_name(left_lon, top_lat):
     lon_dir = "E" if left_lon >= 0 else "W"
     lat_dir = "N" if top_lat >= 0 else "S"
@@ -739,6 +805,7 @@ def _get_jrc_tile_name(left_lon, top_lat):
 
 def _get_jrc_tiles_for_bbox(bbox):
     import math
+
     min_lon, min_lat, max_lon, max_lat = bbox
     start_lon = int(math.floor(min_lon / 10) * 10)
     end_lon = int(math.floor(max_lon / 10) * 10)
@@ -752,7 +819,6 @@ def _get_jrc_tiles_for_bbox(bbox):
 
 
 def _generate_water_polygon(tiff_bbox, work_dir):
-    import pickle
     import requests
     import rasterio
     from rasterio.features import shapes as rasterio_shapes
@@ -764,8 +830,12 @@ def _generate_water_polygon(tiff_bbox, work_dir):
     from shapely.validation import make_valid
 
     buffer = 0.05
-    bbox = (tiff_bbox[0] - buffer, tiff_bbox[1] - buffer,
-            tiff_bbox[2] + buffer, tiff_bbox[3] + buffer)
+    bbox = (
+        tiff_bbox[0] - buffer,
+        tiff_bbox[1] - buffer,
+        tiff_bbox[2] + buffer,
+        tiff_bbox[3] + buffer,
+    )
 
     tiles = _get_jrc_tiles_for_bbox(bbox)
     logging.info("JRC tiles needed: %s", tiles)
@@ -784,8 +854,11 @@ def _generate_water_polygon(tiff_bbox, work_dir):
             for chunk in resp.iter_content(chunk_size=65536):
                 f.write(chunk)
         tile_paths.append(local_path)
-        logging.info("Downloaded JRC tile %s (%.1f MB)",
-                     tile_name, os.path.getsize(local_path) / 1e6)
+        logging.info(
+            "Downloaded JRC tile %s (%.1f MB)",
+            tile_name,
+            os.path.getsize(local_path) / 1e6,
+        )
 
     if not tile_paths:
         logging.warning("No JRC tiles found — skipping water polygon")
@@ -808,10 +881,15 @@ def _generate_water_polygon(tiff_bbox, work_dir):
     bbox_geom = box(*bbox)
     merged_path = os.path.join(work_dir, "jrc_merged.tif")
     with rasterio.open(
-        merged_path, "w", driver="GTiff",
-        height=merged_shape[0], width=merged_shape[1],
-        count=1, dtype=merged_data.dtype,
-        crs=merged_crs, transform=merged_transform,
+        merged_path,
+        "w",
+        driver="GTiff",
+        height=merged_shape[0],
+        width=merged_shape[1],
+        count=1,
+        dtype=merged_data.dtype,
+        crs=merged_crs,
+        transform=merged_transform,
     ) as dst:
         dst.write(merged_data, 1)
     del merged_data
@@ -823,7 +901,11 @@ def _generate_water_polygon(tiff_bbox, work_dir):
 
     water_mask = (cropped >= JRC_OCCURRENCE_THRESHOLD).astype(np.uint8)
     water_count = int(water_mask.sum())
-    logging.info("JRC water pixels (>=%d%% occurrence): %d", JRC_OCCURRENCE_THRESHOLD, water_count)
+    logging.info(
+        "JRC water pixels (>=%d%% occurrence): %d",
+        JRC_OCCURRENCE_THRESHOLD,
+        water_count,
+    )
     del cropped
 
     if water_count == 0:
@@ -849,8 +931,9 @@ def _generate_water_polygon(tiff_bbox, work_dir):
     if water_union.geom_type == "Polygon":
         water_union = MultiPolygon([water_union])
     elif water_union.geom_type == "GeometryCollection":
-        poly_parts = [g for g in water_union.geoms
-                      if isinstance(g, (Polygon, MultiPolygon))]
+        poly_parts = [
+            g for g in water_union.geoms if isinstance(g, (Polygon, MultiPolygon))
+        ]
         water_union = unary_union(poly_parts) if poly_parts else None
         if water_union and water_union.geom_type == "Polygon":
             water_union = MultiPolygon([water_union])
@@ -862,7 +945,9 @@ def _generate_water_polygon(tiff_bbox, work_dir):
         if os.path.exists(p):
             os.unlink(p)
 
-    logging.info("Water polygon: %s, bounds=%s", water_union.geom_type, water_union.bounds)
+    logging.info(
+        "Water polygon: %s, bounds=%s", water_union.geom_type, water_union.bounds
+    )
     return water_union
 
 
@@ -903,15 +988,22 @@ def _ensure_water_polygon(city_name, tiff_bbox, pipeline_bucket, work_dir):
 # Core processing: takes a city_folder name and runs end to end
 # ---------------------------------------------------------------------------
 
-def _process_city_from_predictions(pipeline_bucket, predictions_bucket, city_folder, work_dir):
+
+def _process_city_from_predictions(
+    pipeline_bucket, predictions_bucket, city_folder, work_dir
+):
     """Fully automatic: derive everything from the city_folder name."""
     city_name, config_prefix, mosaic_filename = _parse_city_folder(city_folder)
 
     city_config = _build_city_config(city_name, city_folder, predictions_bucket)
     config_dict = _build_pipeline_config(work_dir, pipeline_bucket, [city_config])
 
-    logging.info("Processing %s (folder=%s, predictions=%s)",
-                 city_name, city_folder, predictions_bucket)
+    logging.info(
+        "Processing %s (folder=%s, predictions=%s)",
+        city_name,
+        city_folder,
+        predictions_bucket,
+    )
 
     csv_cache_prefix = "h3_csv_cache"
     cache_blob = f"{csv_cache_prefix}/{city_name}_max.csv"
@@ -975,31 +1067,45 @@ def _process_city_from_predictions(pipeline_bucket, predictions_bucket, city_fol
 # HTTP entry point
 # ---------------------------------------------------------------------------
 
+
 @functions_framework.http
 @_error_to_response
 def process_h3_pipeline(request: flask.Request) -> flask.Response:
     """Process a city. Requires 'city_folder' and 'predictions_bucket' in JSON body.
 
-    Example: {"city_folder": "NYC_Predictions", "predictions_bucket": "test-climateiq-predictions"}
+    Example: {"city_folder": "NYC_Predictions",
+    "predictions_bucket": "test-climateiq-predictions"}
     """
     request_json = request.get_json(silent=True) or {}
 
     pipeline_bucket = request_json.get("bucket") or os.environ.get("GCS_BUCKET")
     if not pipeline_bucket:
-        return flask.jsonify(
-            {"error": "GCS_BUCKET environment variable or 'bucket' parameter required"}
-        ), 400
+        return (
+            flask.jsonify(
+                {
+                    "error": "GCS_BUCKET environment variable"
+                    " or 'bucket' parameter required"
+                }
+            ),
+            400,
+        )
 
     city_folder = request_json.get("city_folder")
     predictions_bucket = request_json.get("predictions_bucket")
 
     if not city_folder or not predictions_bucket:
-        return flask.jsonify(
-            {"error": "'city_folder' and 'predictions_bucket' are required"}
-        ), 400
+        return (
+            flask.jsonify(
+                {"error": "'city_folder' and 'predictions_bucket' are required"}
+            ),
+            400,
+        )
 
-    logging.info("Starting H3 pipeline — city_folder=%s predictions=%s",
-                 city_folder, predictions_bucket)
+    logging.info(
+        "Starting H3 pipeline — city_folder=%s predictions=%s",
+        city_folder,
+        predictions_bucket,
+    )
 
     with tempfile.TemporaryDirectory() as work_dir:
         results = _process_city_from_predictions(
@@ -1012,6 +1118,7 @@ def process_h3_pipeline(request: flask.Request) -> flask.Response:
 # ---------------------------------------------------------------------------
 # Cloud Storage event trigger entry point
 # ---------------------------------------------------------------------------
+
 
 @functions_framework.cloud_event
 @_retry_and_report_errors()
@@ -1069,7 +1176,9 @@ def process_h3_pipeline_on_tiff_upload(
         else:
             missing.append(scenario_file)
 
-    logging.info("%s: %d/%d scenarios ready", city_name, len(present), EXPECTED_SCENARIO_COUNT)
+    logging.info(
+        "%s: %d/%d scenarios ready", city_name, len(present), EXPECTED_SCENARIO_COUNT
+    )
     if missing:
         logging.info("Still waiting for: %s", missing)
         return
@@ -1080,7 +1189,11 @@ def process_h3_pipeline_on_tiff_upload(
         logging.info("%s: CSV cache already exists — skipping", city_name)
         return
 
-    logging.info("%s: All %d scenarios ready — starting pipeline!", city_name, EXPECTED_SCENARIO_COUNT)
+    logging.info(
+        "%s: All %d scenarios ready — starting pipeline!",
+        city_name,
+        EXPECTED_SCENARIO_COUNT,
+    )
 
     with tempfile.TemporaryDirectory() as work_dir:
         results = _process_city_from_predictions(
