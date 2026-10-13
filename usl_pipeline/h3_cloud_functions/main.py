@@ -1070,7 +1070,7 @@ def _process_city_from_predictions(
 
 @functions_framework.http
 @_error_to_response
-def process_h3_pipeline(request: flask.Request) -> flask.Response:
+def process_h3_pipeline(request: flask.Request):  # type: ignore[return]
     """Process a city. Requires 'city_folder' and 'predictions_bucket' in JSON body.
 
     Example: {"city_folder": "NYC_Predictions",

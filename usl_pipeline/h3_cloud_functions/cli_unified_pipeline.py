@@ -26,7 +26,7 @@ import h3
 from usl_h3_tools.admin_enrich import enrich_admin
 
 # Configuration for admin levels
-ADMIN_LEVELS = [
+ADMIN_LEVELS: List[Dict[str, Any]] = [
     {"level": 6, "key": "level_6", "geoid_col": "GEOID"},
     {"level": 8, "key": "level_8", "geoid_col": "GEOID"},
     {"level": 10, "key": "level_10", "geoid_col": "GEOID"},
@@ -97,7 +97,7 @@ def process_single_city_level(
     value_cols: Optional[List[str]],
     geoid_col: str,
     temp_dir: str,
-) -> str:
+) -> Optional[str]:
     """Process one city at one admin level, return path to temp output file."""
     city_name = city["name"]
     h3_csv = city["h3_csv"]
@@ -234,13 +234,13 @@ def process_admin_levels(config: Dict[str, Any]) -> Dict[int, str]:
     cities = config["cities"]
     admin_boundaries = config["admin_boundaries"]
 
-    combined_outputs = {}
+    combined_outputs: Dict[int, str] = {}
 
     # Process each admin level
     for level_config in ADMIN_LEVELS:
-        level = level_config["level"]
+        level: int = level_config["level"]
         admin_path = admin_boundaries[level_config["key"]]
-        geoid_col = level_config["geoid_col"]
+        geoid_col: str = level_config["geoid_col"]
 
         print(f"\n[unified] === Processing Admin Level {level} ===")
 
@@ -398,7 +398,7 @@ def process_h3_tilesets(
 
     print(f"\n[unified] === Generating H3 Tilesets (Resolutions: {h3_resolutions}) ===")
 
-    temp_files_by_resolution = {res: [] for res in h3_resolutions}
+    temp_files_by_resolution: Dict[int, list] = {res: [] for res in h3_resolutions}
 
     for city in cities:
         city_name = city["name"]

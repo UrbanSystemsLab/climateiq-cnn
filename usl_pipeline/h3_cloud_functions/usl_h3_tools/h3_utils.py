@@ -26,7 +26,7 @@ def build_hex_gdf_from_csv(df: pd.DataFrame, h3_col: str, has_geometry: bool = F
 
     if has_geometry and "geometry" in df.columns:
         # geometry may be WKT or GeoJSON string
-        geoms = []
+        geoms: list = []
         for val in df["geometry"]:
             if val is None or (isinstance(val, float) and pd.isna(val)):
                 geoms.append(None)

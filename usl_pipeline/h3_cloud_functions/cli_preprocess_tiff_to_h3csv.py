@@ -101,8 +101,8 @@ def _process_window(args: Tuple) -> Optional[Tuple[dict, dict]]:
     (cell_code, res), or None if empty.
     """
     tiff_path, window = args
-    h3_sum = defaultdict(float)
-    h3_count = defaultdict(int)
+    h3_sum: dict = defaultdict(float)
+    h3_count: dict = defaultdict(int)
     offsets = np.linspace(-0.4, 0.4, JITTER_SAMPLES)
 
     with rasterio.open(tiff_path) as src:
@@ -340,6 +340,7 @@ def preprocess_city(
             )
 
     output_path = os.path.join(work_dir, f"{city_name}_max.csv")
-    merged.to_csv(output_path, index=False)
-    print(f"  [preprocess] Saved {len(merged):,} rows -> {output_path}")
+    merged.to_csv(output_path, index=False)  # type: ignore[union-attr]
+    row_count = len(merged)  # type: ignore[arg-type]
+    print(f"  [preprocess] Saved {row_count:,} rows -> {output_path}")
     return output_path, tiff_bbox

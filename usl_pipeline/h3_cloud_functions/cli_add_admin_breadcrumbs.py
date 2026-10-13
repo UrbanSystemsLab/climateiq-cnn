@@ -183,7 +183,7 @@ def add_h3_parents_from_admin10(
 
     joined = joined.reindex(h3_gdf.index)
 
-    def _join_col(base: str) -> Optional[str]:
+    def _join_col(base: Optional[str]) -> Optional[str]:
         if base is None:
             return None
         if f"{base}_right" in joined.columns:
@@ -192,8 +192,8 @@ def add_h3_parents_from_admin10(
             return base
         return None
 
-    a10_id_join = _join_col(a10_id)
-    a10_name_join = _join_col(a10_name)
+    a10_id_join: Optional[str] = _join_col(a10_id)
+    a10_name_join: Optional[str] = _join_col(a10_name)
 
     out = h3_gdf.copy()
 
