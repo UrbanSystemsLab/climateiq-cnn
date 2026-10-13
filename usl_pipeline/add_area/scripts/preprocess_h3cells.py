@@ -37,6 +37,8 @@ DEFAULT_STATE_FIELD = "State"
 DEFAULT_STATE_ABBR_FIELD = "State_Abbr"
 DEFAULT_ISO_FIELD = "ISO"
 DEFAULT_SMOD_FIELD = "SMOD_LEVEL"
+# GHSL urban centres. "any" disables the filter.
+DEFAULT_SMOD_LEVEL = "30"
 DEFAULT_AREA_FIELD = "AREA_SQKM"
 
 GCS_PREFIX = "gs://"
@@ -235,6 +237,11 @@ def validate_target_crs(target_crs):
             f"TARGET_CRS must be EPSG:4326 or EPSG:3395. Received: {target_crs}"
         )
     return target_crs
+
+
+def parse_smod_level(value):
+    """Parses a --smod-level argument, mapping "any" to no filter."""
+    return None if value.strip().casefold() == "any" else value
 
 
 def _casefold_match(series, value):
@@ -1127,8 +1134,10 @@ def main(argv=None):
     )
     parser.add_argument(
         "--smod-level",
-        default=None,
-        help=f"Filter candidates by the '{DEFAULT_SMOD_FIELD}' column.",
+        type=parse_smod_level,
+        default=DEFAULT_SMOD_LEVEL,
+        help=f"Filter candidates by the '{DEFAULT_SMOD_FIELD}' column; 'any' "
+        "disables the filter. (default: %(default)s)",
     )
     parser.add_argument(
         "--allow-multiple-features",

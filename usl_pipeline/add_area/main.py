@@ -435,7 +435,10 @@ def _get_args_parser() -> argparse.ArgumentParser:
         "--target-crs", default="EPSG:3395", help="CRS to reproject outputs to."
     )
     source.add_argument(
-        "--smod-level", default=None, help="Filter candidates by GHSL SMOD_LEVEL."
+        "--smod-level",
+        type=preprocess_h3cells.parse_smod_level,
+        default=preprocess_h3cells.DEFAULT_SMOD_LEVEL,
+        help="Filter candidates by GHSL SMOD_LEVEL; 'any' disables the filter.",
     )
     source.add_argument(
         "--allow-multiple-features",
