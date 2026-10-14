@@ -86,7 +86,8 @@ def momentum_loss(
     velocity_norm = tf.reduce_sum(tf.square(velocity_sequence), axis=-1, keepdims=True)
     velocity_norm = tf.sqrt(velocity_norm + EPS) #[B, V_M_STEPS+2, H, W, 1]
 
-    friction = N**2*GRAVITY/depth_sequence**(4/3)*velocity_norm*velocity_sequence #[B, V_M_STEPS+2, H, W, 2]
+    safe_depth = tf.where(depth_sequence>EPS_WATER, depth_sequence, EPS_WATER)
+    friction = N**2*GRAVITY/safe_depth**(4/3)*velocity_norm*velocity_sequence #[B, V_M_STEPS+2, H, W, 2]
     friction = tf.where(depth_sequence > EPS_WATER, friction, 0.0) #[B, V_M_STEPS+2, H, W, 2]
     #################################total momentum#######################
     momentum = -1 * (water_surface_momentum + friction) #[B, V_M_STEPS+2, H, W, 2]
@@ -95,14 +96,14 @@ def momentum_loss(
     ########################Local Acceleration####################
     ######################################################################
     #steps
-    acceleration = (velocity_sequence[:, 1:-1] - velocity_sequence[:, 0:-2])/STEP_LENGTH # [B, V_M_STEPS, H, W, 2]
-    step_acceleration = tf.einsum('bvhwd, vk->bkhwd', acceleration, tf.transpose(A)) # [B, V_M_STEPS, H, W, 2]
+    local_acceleration = (velocity_sequence[:, 1:] - velocity_sequence[:, 0:-1])/(STEP_LENGTH/(MID_STEPS+1)) # [B, V_M_STEPS, H, W, 2]
+    # step_acceleration = tf.einsum('bvhwd, vk->bkhwd', acceleration, tf.transpose(A)) # [B, V_M_STEPS, H, W, 2]
 
-    # final
-    final_acceleration = tf.einsum('bvhwd, vk->bkhwd', acceleration, tf.transpose(B)) # [B, 1, H, W, 2]
+    # # final
+    # final_acceleration = tf.einsum('bvhwd, vk->bkhwd', acceleration, tf.transpose(B)) # [B, 1, H, W, 2]
 
-    # all
-    local_acceleration = tf.concat([step_acceleration, final_acceleration], axis=1) # [B, V_M_STEPS+1, H, W, 2]
+    # # all
+    # local_acceleration = tf.concat([step_acceleration, final_acceleration], axis=1) # [B, V_M_STEPS+1, H, W, 2]
 
     ######################################################################
     ###########################advective acceleration#####################
@@ -118,7 +119,7 @@ def momentum_loss(
     overall_loss = local_acceleration + advective_acceleration - (momentum[:, 1:]) # [B, V_M_STEPS+1, H, W, 2]
 
     depth_mask = depth_sequence[:, 1:]
-    depth_mask = tf.cast(depth_mask>0, dtype=tf.float32) # [B, V_M_STEPS+1, H, W, 2]
+    depth_mask = tf.cast(depth_mask>EPS_WATER, dtype=tf.float32) # [B, V_M_STEPS+1, H, W, 2]
     overall_loss = overall_loss * depth_mask
     overall_loss = overall_loss * Valid_Mask[:, tf.newaxis, ...]
 

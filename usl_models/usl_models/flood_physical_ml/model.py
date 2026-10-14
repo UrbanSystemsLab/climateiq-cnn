@@ -812,7 +812,7 @@ class FloodPhysicConvLSTM(keras.Model):
 
         # dem = geospatial[:, :, :, 0:1] - tf.reduce_min(geospatial[:, :, :, 0:1], axis=(1, 2, 3), keepdims=True)
 
-        dem = geospatial[:, :, :, 0:1] + building * 4
+        dem = geospatial[:, :, :, 0:1] + building
         dem = tf.pad(dem, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
         dem_u = dem[:, 1:-1, 2:, :] - dem[:, 1:-1, 1:-1, :]
         dem_v = dem[:, 2:, 1:-1, :] - dem[:, 1:-1, 1:-1, :]
@@ -831,7 +831,7 @@ class FloodPhysicConvLSTM(keras.Model):
         friction_feature = tf.concat([water_depth, friction_factor], axis=-1) # [B, T, H, W, 2]
         infiltration_feature = tf.concat([water_depth, infiltration_factor], axis=-1) # [B, T, H, W, 5]
         rainfall = temporal # [B, T, 6]
-        most_recent_rain_rate = rainfall[:, -1, -1] # [B, ]
+        most_recent_rain_rate = rainfall[:, -1, 0] # [B, ]
 
         ##############################################################
         ################ initial features encoding ###################
@@ -912,6 +912,7 @@ class FloodPhysicConvLSTM(keras.Model):
         rain_volume = tf.tile(rain_volume, [1, H, W, 1]) # (B, H, W, 1)
         # infiltration volume per middle time step
         infiltration_volume = tf.nn.relu(infil_pred) * RESOLUTION**2 * step_time
+        
 
         # calculate outflow velocity for the other two directions
         adj_velocity = tf.pad(velocity_pred, [[0, 0], [0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
@@ -936,12 +937,13 @@ class FloodPhysicConvLSTM(keras.Model):
 
             outvolume = average_speed * current_depth * RESOLUTION * step_time # [B, H, W, 4]
 
-            outvolume = tf.clip_by_value((current_depth * RESOLUTION**2 + EPS) / (outvolume + EPS), 0, 1)
+            outvolume = tf.clip_by_value((current_depth * RESOLUTION**2 + EPS) / (outvolume + EPS), 0, 1) * outvolume
 
             involume = tf.pad(outvolume, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
             involume = self.core_layer(involume) # [B, H, W, 4]
 
-            volume_change = tf.reduce_sum((involume - outvolume), axis=-1, keepdims=True) + rain_volume - infiltration_volume # [B, H, W, 1]
+            volume_change = tf.reduce_sum((involume - outvolume), axis=-1, keepdims=True) + rain_volume - tf.minimum(infiltration_volume, tf.nn.relu(current_depth * RESOLUTION**2))
+             # [B, H, W, 1]
 
             current_depth = current_depth + volume_change/(RESOLUTION**2) # [B, H, W, 1]
 
@@ -1052,7 +1054,7 @@ class FloodPhysicConvLSTM(keras.Model):
         #     varied_future_steps = np.random.randint(1, len(y_step_list))
         #     y_step_list = y_step_list[0:varied_future_steps]
         K = len(y_step_list)
-        print(K)
+
         has_temporal_per_step = len(temporal.shape) == 4
 
         with tf.GradientTape() as tape:
