@@ -9,8 +9,7 @@ import geopandas as gpd
 def read_admin_geojson_preserve(
     path: str, name: Optional[str] = None
 ) -> Tuple[dict, gpd.GeoDataFrame]:
-    """
-    Load an admin boundary file (GeoJSON or Parquet) and return:
+    """Load an admin boundary file (GeoJSON or Parquet) and return.
 
       - template_dict: a minimal GeoJSON-like header with 'type', 'name', and 'crs'
       - gdf: GeoDataFrame of admin polygons in EPSG:4326
@@ -31,9 +30,7 @@ def read_admin_geojson_preserve(
         )
         fc_name = data.get("name", name or "admin_boundaries")
 
-        gdf = gpd.GeoDataFrame.from_features(
-            data.get("features", []), crs="EPSG:4326"
-        )
+        gdf = gpd.GeoDataFrame.from_features(data.get("features", []), crs="EPSG:4326")
 
         template = {"type": "FeatureCollection", "name": fc_name, "crs": crs}
         return template, gdf
@@ -59,8 +56,7 @@ def read_admin_geojson_preserve(
 
 
 def filter_admin_gdf(gdf: gpd.GeoDataFrame, expr: Optional[str]) -> gpd.GeoDataFrame:
-    """
-    Apply a pandas.query filter expression to the GeoDataFrame, if provided.
+    """Apply a pandas.query filter expression to the GeoDataFrame, if provided.
 
     We add a small safety wrapper so that if the expression references columns that
     don't exist, we raise a clear error message listing available columns.
@@ -91,10 +87,9 @@ def filter_admin_gdf(gdf: gpd.GeoDataFrame, expr: Optional[str]) -> gpd.GeoDataF
 
 
 def write_geojson_like(template: dict, gdf: gpd.GeoDataFrame, path: str) -> None:
-    """
-    Write a GeoDataFrame to a GeoJSON file, preserving a template header
-    (type/name/crs) from an input file.
+    """Write a GeoDataFrame to a GeoJSON file, preserving a template header.
 
+    The header (type/name/crs) comes from an input file.
     The resulting file has the form:
 
     {

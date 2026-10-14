@@ -18,7 +18,9 @@
         "upload-wrf-study-area-chunk": {"entry_point": "build_and_upload_study_area_chunk"},
         "rescale-feature-matrix": {"entry_point": "rescale_feature_matrices"},
         "write-study-area-metadata": {"entry_point": "write_study_area_metadata"},
-        "write-wrf-heat-config-metadata": {"entry_point": "write_heat_scenario_config_metadata"}
+        "write-wrf-heat-config-metadata": {"entry_point": "write_heat_scenario_config_metadata"},
+        "h3-pipeline": {"entry_point": "process_h3_pipeline"},
+        "h3-pipeline-tiff-trigger": {"entry_point": "process_h3_pipeline_on_tiff_upload"}
       }
     }
   }

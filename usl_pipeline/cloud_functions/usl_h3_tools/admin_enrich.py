@@ -20,8 +20,7 @@ from .util_io import (
 
 
 def h3_to_polygon(h: str) -> Polygon:
-    """
-    Return a Shapely Polygon for an H3 cell, with GeoJSON coord order [lon, lat].
+    """Return a Shapely Polygon for an H3 cell, with GeoJSON coord order.
 
     Supports both:
       - h3-py v4: h3.cell_to_boundary(h) -> [(lat, lon), ...]
@@ -40,8 +39,8 @@ def h3_to_polygon(h: str) -> Polygon:
 
 
 def h3_resolution(h: str) -> int:
-    """
-    Return the H3 resolution of a cell, compatible with h3 v3 and v4.
+    """Return the H3 resolution of a cell, compatible with h3 v3 and v4.
+
     Used by cli_h3_csv_to_hexjson.py.
     """
     if hasattr(h3, "get_resolution"):
@@ -54,9 +53,7 @@ def h3_resolution(h: str) -> int:
 
 
 def df_with_geom_from_h3(csv_path: str, h3_col: str) -> gpd.GeoDataFrame:
-    """
-    Read a CSV with an H3 column and return a GeoDataFrame with polygons.
-    """
+    """Read a CSV with an H3 column and return a GeoDataFrame with polygons."""
     print(f"[admin_enrich] Loading H3 CSV: {csv_path}")
     df = pd.read_csv(csv_path)
     if h3_col not in df.columns:
@@ -77,9 +74,7 @@ def df_with_geom_from_h3(csv_path: str, h3_col: str) -> gpd.GeoDataFrame:
 
 
 def _numeric_value_cols(df: pd.DataFrame, exclude: List[str]) -> List[str]:
-    """
-    Auto-detect numeric columns to aggregate, excluding any in 'exclude'.
-    """
+    """Auto-detect numeric columns to aggregate, excluding any in 'exclude'."""
     return [
         c
         for c in df.columns
@@ -88,9 +83,7 @@ def _numeric_value_cols(df: pd.DataFrame, exclude: List[str]) -> List[str]:
 
 
 def _summarize(series: pd.Series) -> dict:
-    """
-    Compute summary stats for a numeric series.
-    """
+    """Compute summary stats for a numeric series."""
     arr = series.to_numpy(dtype=float)
     if arr.size == 0:
         return {
@@ -134,33 +127,46 @@ def enrich_admin(
     water_polygon_path: Optional[str] = None,
     filter_threshold: float = 0.001,
 ) -> str:
-    """
-    Spatially aggregate H3 CSV metrics into admin polygons and write a GeoJSON-like file.
+    """Spatially aggregate H3 CSV metrics into admin polygons.
 
-    - admin_path:    path to admin boundaries (GeoJSON or parquet).
-    - h3_csv:        path to H3 metrics CSV.
-    - value_cols:    list of metric columns in the H3 CSV (e.g. ['flood_depth_1000y']).
-                     If None/empty, numeric columns will be auto-detected.
-    - out_path:      output GeoJSON path.
-    - name:          FeatureCollection name (e.g. 'admin_level_6_climateiq_v1').
-    - h3_col:        column in CSV holding H3 cell IDs (e.g. 'cell_code').
-    - level:         admin_level to stamp onto the features (6/8/10/etc).
-    - filter_expr:   pandas query string to subset the admin GeoDataFrame.
-    - id_col:        preferred ID column name (default 'id').
-    - geoid_col:     preferred GEOID column name (overrides id_col if present).
-    - h3_resolution: if set, filter the H3 CSV to only this resolution before enrichment.
-                     Use when the CSV contains multiple resolutions (e.g. 9-12 from
-                     preprocessing) to avoid double-counting and improve performance.
-    - water_polygon_path: path to a pickle file containing a Shapely geometry of coastal
-                     water bodies (from JRC Global Surface Water). If provided, water
-                     is subtracted from admin polygons instead of using the H3 data
-                     footprint clip. Only waterfront polygons are modified; interior
-                     polygons keep their exact original geometry.
+    Writes a GeoJSON-like file.
+
+    Args:
+        admin_path: path to admin boundaries (GeoJSON or parquet).
+        h3_csv: path to H3 metrics CSV.
+        value_cols: list of metric columns in the H3 CSV
+            (e.g. ['flood_depth_1000y']). If None/empty, numeric
+            columns will be auto-detected.
+        out_path: output GeoJSON path.
+        name: FeatureCollection name
+            (e.g. 'admin_level_6_climateiq_v1').
+        h3_col: column in CSV holding H3 cell IDs
+            (e.g. 'cell_code').
+        level: admin_level to stamp onto the features
+            (6/8/10/etc).
+        filter_expr: pandas query string to subset the admin
+            GeoDataFrame.
+        id_col: preferred ID column name (default 'id').
+        geoid_col: preferred GEOID column name (overrides id_col
+            if present).
+        h3_resolution: if set, filter the H3 CSV to only this
+            resolution before enrichment. Use when the CSV
+            contains multiple resolutions (e.g. 9-12 from
+            preprocessing) to avoid double-counting and improve
+            performance.
+        water_polygon_path: path to a pickle file containing a
+            Shapely geometry of coastal water bodies (from JRC
+            Global Surface Water). If provided, water is
+            subtracted from admin polygons instead of using the
+            H3 data footprint clip. Only waterfront polygons are
+            modified; interior polygons keep their exact original
+            geometry.
+        filter_threshold: minimum absolute value threshold for
+            filtering sparse H3 cells.
 
     Returns:
         out_path
     """
-
     print("[admin_enrich] --------------------------------------------------")
     print(f"[admin_enrich] Admin path      : {admin_path}")
     print(f"[admin_enrich] H3 CSV          : {h3_csv}")
@@ -212,7 +218,9 @@ def enrich_admin(
                 break
     if level == 10 and _geoid_col_for_water is not None:
         before_water_tract = len(admin_gdf)
-        water_tract_mask = admin_gdf[_geoid_col_for_water].astype(str).str[-6:].str.startswith("99")
+        water_tract_mask = (
+            admin_gdf[_geoid_col_for_water].astype(str).str[-6:].str.startswith("99")
+        )
         if water_tract_mask.any():
             admin_gdf = admin_gdf[~water_tract_mask].reset_index(drop=True)
             print(
@@ -229,13 +237,18 @@ def enrich_admin(
     #       expensive spatial join.
     if clip_bbox is not None:
         from shapely.geometry import box as shapely_box
+
         minx, miny, maxx, maxy = clip_bbox
         bbox_poly = shapely_box(minx, miny, maxx, maxy)
         admin_gdf = admin_gdf.copy()
         admin_gdf["geometry"] = admin_gdf.geometry.intersection(bbox_poly)
         # Drop any polygons that ended up empty after clipping (outside tiff extent)
         admin_gdf = admin_gdf[~admin_gdf.geometry.is_empty].reset_index(drop=True)
-        print(f"[admin_enrich] Pre-filtered to tiff bbox {clip_bbox} -> {len(admin_gdf)} admin polygons remain")
+        print(
+            f"[admin_enrich] Pre-filtered to tiff bbox "
+            f"{clip_bbox} -> "
+            f"{len(admin_gdf)} admin polygons remain"
+        )
 
         # ------------------------------------------------------------------
         # Remove detached polygon parts for level 6 (counties)
@@ -245,6 +258,7 @@ def enrich_admin(
         # centroid is >0.3° from the largest part's centroid.
         if level == 6:
             from shapely.geometry import MultiPolygon as _MP
+
             detached_removed = 0
             new_geoms = []
             for geom in admin_gdf.geometry:
@@ -264,7 +278,11 @@ def enrich_admin(
                     new_geoms.append(geom)
             admin_gdf["geometry"] = new_geoms
             if detached_removed > 0:
-                print(f"[admin_enrich] Removed {detached_removed} detached polygon parts (level 6)")
+                print(
+                    f"[admin_enrich] Removed "
+                    f"{detached_removed} detached "
+                    f"polygon parts (level 6)"
+                )
 
         # ------------------------------------------------------------------
         # Fill interior holes for level 8 (places)
@@ -273,6 +291,7 @@ def enrich_admin(
         # bases, unincorporated areas). Fill them so the polygon is solid.
         if level == 8:
             from shapely.geometry import Polygon as _Poly, MultiPolygon as _MPoly
+
             holes_filled = 0
             new_geoms = []
             for geom in admin_gdf.geometry:
@@ -349,7 +368,10 @@ def enrich_admin(
         available = [c for c in value_cols if c in h3_gdf.columns]
         missing = [c for c in value_cols if c not in h3_gdf.columns]
         if missing:
-            print(f"[admin_enrich] Skipping {len(missing)} missing value columns: {missing}")
+            print(
+                f"[admin_enrich] Skipping {len(missing)} "
+                f"missing value columns: {missing}"
+            )
         value_cols = available
         print(f"[admin_enrich] Using value columns: {value_cols}")
 
@@ -360,12 +382,20 @@ def enrich_admin(
         mask = pd.Series([True] * len(h3_gdf), index=h3_gdf.index)
         for col in value_cols:
             if col in h3_gdf.columns:
-                # Keep if value is >= threshold OR is exactly 0 OR is NaN (missing scenario data)
-                mask = mask & ((h3_gdf[col].abs() >= filter_threshold) | (h3_gdf[col] == 0) | h3_gdf[col].isna())
+                # Keep if value >= threshold, exactly 0, or NaN
+                mask = mask & (
+                    (h3_gdf[col].abs() >= filter_threshold)
+                    | (h3_gdf[col] == 0)
+                    | h3_gdf[col].isna()
+                )
         h3_gdf = h3_gdf[mask]
         filtered_count = initial_count - len(h3_gdf)
         if filtered_count > 0:
-            print(f"[admin_enrich] Filtered {filtered_count} H3 cells with values < {filter_threshold} (sparse grid removal)")
+            print(
+                f"[admin_enrich] Filtered {filtered_count} "
+                f"H3 cells with values < "
+                f"{filter_threshold} (sparse grid removal)"
+            )
 
     # ------------------------------------------------------------------
     # 2b. Clip water bodies from admin polygons
@@ -376,7 +406,8 @@ def enrich_admin(
     if water_polygon_path is not None:
         import pickle as _pickle
         from shapely import set_precision as _set_precision
-        from shapely.geometry import Polygon as _Polygon, MultiPolygon as _MultiPolygon
+        from shapely.geometry import Polygon as _Polygon
+        from shapely.geometry import MultiPolygon as _MultiPolygon
 
         _GRID = 0.0000001
 
@@ -402,8 +433,11 @@ def enrich_admin(
                 waterfront_count += 1
 
                 if clipped.geom_type == "GeometryCollection":
-                    poly_parts = [g for g in clipped.geoms
-                                  if isinstance(g, (_Polygon, _MultiPolygon))]
+                    poly_parts = [
+                        g
+                        for g in clipped.geoms
+                        if isinstance(g, (_Polygon, _MultiPolygon))
+                    ]
                     clipped = _unary_union(poly_parts) if poly_parts else geom
 
                 if clipped.is_empty or clipped.area < geom.area * 0.01:
@@ -418,9 +452,12 @@ def enrich_admin(
         before_clip = len(admin_gdf)
         admin_gdf = admin_gdf[~admin_gdf.geometry.is_empty].reset_index(drop=True)
         print(
-            f"[admin_enrich] JRC water clip -> {waterfront_count} waterfront polygons clipped, "
-            f"{kept_original} kept original (too small), "
-            f"{before_clip - len(admin_gdf)} removed (entirely water)"
+            f"[admin_enrich] JRC water clip -> "
+            f"{waterfront_count} waterfront polygons "
+            f"clipped, {kept_original} kept original "
+            f"(too small), "
+            f"{before_clip - len(admin_gdf)} removed "
+            f"(entirely water)"
         )
 
     # Filter admin polygons to those overlapping the H3 data footprint (study area).
@@ -429,24 +466,36 @@ def enrich_admin(
     h3_data_footprint = _unary_union(h3_gdf.geometry)
 
     before_filter = len(admin_gdf)
-    admin_gdf = admin_gdf[admin_gdf.intersects(h3_data_footprint)].reset_index(drop=True)
+    admin_gdf = admin_gdf[admin_gdf.intersects(h3_data_footprint)].reset_index(
+        drop=True
+    )
     print(
         f"[admin_enrich] Filtered to data footprint -> "
-        f"{len(admin_gdf)} admin polygons remain (removed {before_filter - len(admin_gdf)} outside study area)"
+        f"{len(admin_gdf)} admin polygons remain "
+        f"(removed {before_filter - len(admin_gdf)} "
+        f"outside study area)"
     )
 
     # ------------------------------------------------------------------
     # 3. Spatial join via polygon intersection
     # ------------------------------------------------------------------
-    print("[admin_enrich] Performing spatial join (H3 polygons intersecting admin polygons)…")
+    print(
+        "[admin_enrich] Performing spatial join "
+        "(H3 polygons intersecting admin polygons)…"
+    )
     joined = gpd.sjoin(h3_gdf, admin_gdf, how="inner", predicate="intersects")
 
-    matched_admin_indices = set(joined["index_right"].unique()) if not joined.empty else set()
+    matched_admin_indices = (
+        set(joined["index_right"].unique()) if not joined.empty else set()
+    )
 
+    unmatched = len(admin_gdf) - len(matched_admin_indices)
     print(
-        f"[admin_enrich] Spatial join produced {len(joined)} H3–admin matches "
-        f"over {len(admin_gdf)} admin polygons "
-        f"({len(matched_admin_indices)} matched, {len(admin_gdf) - len(matched_admin_indices)} with no H3 overlap)."
+        f"[admin_enrich] Spatial join produced "
+        f"{len(joined)} H3-admin matches over "
+        f"{len(admin_gdf)} admin polygons "
+        f"({len(matched_admin_indices)} matched, "
+        f"{unmatched} with no H3 overlap)."
     )
 
     # ------------------------------------------------------------------
@@ -459,9 +508,9 @@ def enrich_admin(
         rec = {}
         for k in admin_gdf.columns:
             if k != admin_gdf.geometry.name:
-                if k == 'NAME':
+                if k == "NAME":
                     value = admin_row[k]
-                    rec['name'] = value.title() if isinstance(value, str) else value
+                    rec["name"] = value.title() if isinstance(value, str) else value
                 else:
                     rec[k] = admin_row[k]
         rec["admin_level"] = level
