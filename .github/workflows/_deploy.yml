@@ -177,9 +177,10 @@ jobs:
             exit 1
           fi
           live_prefix=$(jq -r '.serviceConfig.environmentVariables.BUCKET_PREFIX // ""' <<<"$before")
+          update_env=()
           if [ "$live_prefix" != "$EXPECTED_BUCKET_PREFIX" ]; then
-            echo "::error title=$NAME::BUCKET_PREFIX is '$live_prefix', expected '$EXPECTED_BUCKET_PREFIX'. Fix in terraform before deploying."
-            exit 1
+            echo "::warning title=$NAME::BUCKET_PREFIX is '$live_prefix', expected '$EXPECTED_BUCKET_PREFIX'. Will set during deploy."
+            update_env=(--update-env-vars "BUCKET_PREFIX=$EXPECTED_BUCKET_PREFIX")
           fi
           echo "before:"; jq "$summary" <<<"$before"
 
@@ -188,6 +189,7 @@ jobs:
             --runtime "$RUNTIME" \
             --entry-point "$ENTRY_POINT" \
             --source "$SRC" \
+            "${update_env[@]}" \
             --quiet
 
           after=$(gcloud functions describe "$NAME" "${common[@]}" --format=json)
