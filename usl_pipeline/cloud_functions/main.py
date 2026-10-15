@@ -1654,16 +1654,19 @@ def rescale_feature_matrices(cloud_event: functions_framework.CloudEvent) -> Non
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from cli_unified_pipeline import (  # noqa: E402
-    process_admin_levels,
-    process_h3_tilesets,
-)
-from cli_add_admin_breadcrumbs import (  # noqa: E402
-    add_parent_fields_point_within,
-    add_h3_parents_from_admin10,
-    ensure_wgs84,
-)
-from cli_preprocess_tiff_to_h3csv import preprocess_city  # noqa: E402
+try:
+    from cli_unified_pipeline import (  # noqa: E402
+        process_admin_levels,
+        process_h3_tilesets,
+    )
+    from cli_add_admin_breadcrumbs import (  # noqa: E402
+        add_parent_fields_point_within,
+        add_h3_parents_from_admin10,
+        ensure_wgs84,
+    )
+    from cli_preprocess_tiff_to_h3csv import preprocess_city  # noqa: E402
+except ImportError:
+    pass
 
 _MAX_RETRY_SECONDS = 60 * 60
 
