@@ -76,7 +76,8 @@ jobs:
             .groups | to_entries[] | .key as $group | .value as $g
             | $g.functions | to_entries[]
             | {group: $group, name: .key, entry_point: .value.entry_point,
-               runtime: $g.runtime, stage: $g.stage}
+               runtime: $g.runtime, stage: $g.stage,
+               memory: (.value.memory // null), timeout: (.value.timeout // null)}
           ' .github/deploy/functions.json | jq -sc '.')
 
           case "$FUNCTIONS" in
@@ -145,6 +146,8 @@ jobs:
           RUNTIME: ${{ matrix.runtime }}
           SRC: ${{ steps.stage.outputs.dir }}
           EXPECTED_BUCKET_PREFIX: ${{ needs.plan.outputs.bucket_prefix }}
+          MEMORY: ${{ matrix.memory }}
+          TIMEOUT: ${{ matrix.timeout }}
         run: |
           set -euo pipefail
           common=(--gen2 --region "$REGION" --project "$PROJECT")
@@ -184,12 +187,16 @@ jobs:
           fi
           echo "before:"; jq "$summary" <<<"$before"
 
-          # Only code-bearing flags; gcloud keeps the rest on update.
+          # Code flags + resource config from the manifest.
+          infra=()
+          [ -n "$MEMORY" ] && [ "$MEMORY" != "null" ] && infra+=(--memory "$MEMORY")
+          [ -n "$TIMEOUT" ] && [ "$TIMEOUT" != "null" ] && infra+=(--timeout "${TIMEOUT}s")
           gcloud functions deploy "$NAME" "${common[@]}" \
             --runtime "$RUNTIME" \
             --entry-point "$ENTRY_POINT" \
             --source "$SRC" \
             "${update_env[@]}" \
+            "${infra[@]}" \
             --quiet
 
           after=$(gcloud functions describe "$NAME" "${common[@]}" --format=json)
