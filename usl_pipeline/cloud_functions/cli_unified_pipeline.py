@@ -223,7 +223,7 @@ def combine_geojson_files(
     )
 
 
-def process_admin_levels(config: Dict[str, Any]) -> Dict[int, str]:
+def process_admin_levels(config: Dict[str, Any], on_level_done=None) -> Dict[int, str]:
     """Process all admin levels for all cities and combine into unified tilesets."""
     output_dir = config["output_dir"]
     temp_dir = os.path.join(output_dir, "_temp")
@@ -265,6 +265,9 @@ def process_admin_levels(config: Dict[str, Any]) -> Dict[int, str]:
         )
         combine_geojson_files(temp_files, combined_output, level)
         combined_outputs[level] = combined_output
+
+        if on_level_done:
+            on_level_done(level, combined_output)
 
     return combined_outputs
 

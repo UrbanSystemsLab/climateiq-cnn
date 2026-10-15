@@ -2543,7 +2543,7 @@ def _publish_to_output_bucket(
 # ---------------------------------------------------------------------------
 
 
-def _run_pipeline(config_dict, work_dir, run_mode="full"):
+def _run_pipeline(config_dict, work_dir, run_mode="full", on_level_done=None):
     config_dict["output_dir"] = os.path.join(work_dir, "output")
     os.makedirs(config_dict["output_dir"], exist_ok=True)
 
@@ -2557,11 +2557,13 @@ def _run_pipeline(config_dict, work_dir, run_mode="full"):
     h3_outputs = {}
 
     if run_mode in ("full", "admin_only"):
-        admin_outputs = process_admin_levels(config_dict)
+        admin_outputs = process_admin_levels(config_dict, on_level_done=on_level_done)
         logging.info("Admin boundary tilesets created: %d", len(admin_outputs))
 
     if run_mode in ("full", "h3_only"):
-        h3_outputs = process_h3_tilesets(config_dict, max_workers=4)
+        h3_outputs = process_h3_tilesets(
+            config_dict, max_workers=4, on_resolution_done=on_level_done
+        )
         logging.info("H3 tilesets created: %d", len(h3_outputs))
 
     all_outputs = {**admin_outputs, **h3_outputs}
@@ -2839,10 +2841,37 @@ def _process_city_from_predictions(
 
     os.makedirs(config_dict["output_dir"], exist_ok=True)
 
-    results = _run_pipeline(config_dict, work_dir, run_mode="full")
-
     output_dir = os.path.join(work_dir, "output")
-    _add_breadcrumbs_to_outputs(output_dir, config_dict=config_dict)
+    uploaded_levels = []
+
+    def _on_level_done(level, output_path):
+        """Upload each level immediately after it finishes."""
+        try:
+            _add_breadcrumbs_to_outputs(
+                os.path.dirname(output_path), config_dict=config_dict
+            )
+            fname = os.path.basename(output_path)
+            per_city_dest = f"output/by_city/{city_name}/{fname}"
+            _upload_to_gcs(pipeline_bucket, output_path, per_city_dest)
+            logging.info("Uploaded per-city: %s", per_city_dest)
+
+            level_str = str(level if level < 100 else level)
+            rel_path = _level_to_path(level_str)
+            out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
+            client = storage.Client()
+            bucket_obj = client.bucket(out_bucket)
+            city_lower = city_name.lower().replace(" ", "_")
+            dest_path = f"us/{city_lower}/{rel_path}.geojson"
+            bucket_obj.blob(dest_path).upload_from_filename(output_path)
+            logging.info("Published: gs://%s/%s", out_bucket, dest_path)
+
+            uploaded_levels.append(level_str)
+        except Exception as e:
+            logging.error("Failed to upload level %s: %s", level, e)
+
+    results = _run_pipeline(
+        config_dict, work_dir, run_mode="full", on_level_done=_on_level_done
+    )
 
     _merge_and_upload_outputs(pipeline_bucket, "output/", output_dir, {city_name})
 
@@ -2851,6 +2880,7 @@ def _process_city_from_predictions(
     results["city"] = city_name
     results["gcs_output"] = f"gs://{pipeline_bucket}/output/"
     results["output_bucket"] = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
+    results["uploaded_levels"] = uploaded_levels
     return results
 
 
