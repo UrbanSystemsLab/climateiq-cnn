@@ -1697,6 +1697,22 @@ FILTER_THRESHOLD = 0.001
 
 EXPECTED_SCENARIO_COUNT = 9
 
+OUTPUT_BUCKET = "climateiq-h3-tiles"
+MAX_COMBINED_BYTES = 20 * 1024 * 1024 * 1024
+
+LEVEL_PATH_MAP = {
+    "6": "admin/counties",
+    "8": "admin/places",
+    "10": "admin/tracts",
+    "106": "hex/res06",
+    "107": "hex/res07",
+    "108": "hex/res08",
+    "109": "hex/res09",
+    "110": "hex/res10",
+    "111": "hex/res11",
+    "112": "hex/res12",
+}
+
 WATER_POLYGONS_PREFIX = "water_polygons"
 JRC_TILE_URL = (
     "https://storage.googleapis.com/global-surface-water"
@@ -2336,6 +2352,193 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
 
 
 # ---------------------------------------------------------------------------
+# Publish clean-named output to the public tile bucket
+# ---------------------------------------------------------------------------
+
+
+def _level_to_path(level_str):
+    path = LEVEL_PATH_MAP.get(level_str)
+    if path:
+        return path
+    lvl = int(level_str)
+    if lvl > 100:
+        return f"hex/res{lvl - 100:02d}"
+    return f"admin/level{lvl}"
+
+
+def _gcs_compose(dest_blob, sources):
+    """Compose with cascading to handle the 32-source GCS limit."""
+    MAX_COMPOSE = 32
+    while len(sources) > MAX_COMPOSE:
+        batches = [
+            sources[i : i + MAX_COMPOSE] for i in range(0, len(sources), MAX_COMPOSE)
+        ]
+        intermediate = []
+        for bi, batch in enumerate(batches):
+            if len(batch) == 1:
+                intermediate.append(batch[0])
+                continue
+            tmp = dest_blob.bucket.blob(f"{dest_blob.name}__tmp{bi}")
+            tmp.compose(batch)
+            intermediate.append(tmp)
+        sources = intermediate
+    dest_blob.compose(sources)
+
+
+def _publish_to_output_bucket(
+    pipeline_bucket_name, output_dir, city_name, output_bucket=None
+):
+    """Copy per-city and combined files to the output bucket with clean names.
+
+    Per-city:  us/{city}/admin/counties.geojson
+    Combined:  us/combined/hex/res12.geojson  (split if >20 GB)
+    """
+    import glob as _glob
+    import re as _re
+
+    output_bucket = output_bucket or os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
+
+    output_files = _glob.glob(os.path.join(output_dir, "*.geojson"))
+    if not output_files:
+        return
+
+    client = storage.Client()
+    out_bucket = client.bucket(output_bucket)
+    pipe_bucket = client.bucket(pipeline_bucket_name)
+    city_lower = city_name.lower().replace(" ", "_")
+
+    for local_path in output_files:
+        fname = os.path.basename(local_path)
+        m = _re.search(r"admin_level_(\d+)_", fname)
+        if not m:
+            continue
+        level_str = m.group(1)
+        rel_path = _level_to_path(level_str)
+
+        dest_path = f"us/{city_lower}/{rel_path}.geojson"
+        blob = out_bucket.blob(dest_path)
+        blob.upload_from_filename(local_path)
+        logging.info("Published per-city: gs://%s/%s", output_bucket, dest_path)
+
+    pipe_prefix = "output/features_raw"
+    by_city_prefix = "output/by_city/"
+
+    city_dirs = set()
+    blobs_iter = client.list_blobs(
+        pipeline_bucket_name, prefix=by_city_prefix, delimiter="/"
+    )
+    for _ in blobs_iter:
+        pass
+    for prefix_str in blobs_iter.prefixes:
+        c = prefix_str.replace(by_city_prefix, "").rstrip("/")
+        if c:
+            city_dirs.add(c)
+
+    if not city_dirs:
+        return
+
+    header_blob = out_bucket.blob("_compose/header.bin")
+    header_blob.upload_from_string(b'{"type":"FeatureCollection","features":[')
+    comma_blob = out_bucket.blob("_compose/comma.bin")
+    comma_blob.upload_from_string(b",")
+    footer_blob = out_bucket.blob("_compose/footer.bin")
+    footer_blob.upload_from_string(b"]}")
+
+    for local_path in output_files:
+        fname = os.path.basename(local_path)
+        m = _re.search(r"admin_level_(\d+)_", fname)
+        if not m:
+            continue
+        level_str = m.group(1)
+        rel_path = _level_to_path(level_str)
+
+        try:
+            city_raw_entries = []
+            for c in sorted(city_dirs):
+                raw_src = f"{pipe_prefix}/{c}/level_{level_str}.bin"
+                src_blob = pipe_bucket.blob(raw_src)
+                if not src_blob.exists():
+                    continue
+                src_blob.reload()
+                size = src_blob.size or 0
+                dest_raw = f"_compose/{c}/level_{level_str}.bin"
+                pipe_bucket.copy_blob(src_blob, out_bucket, dest_raw)
+                city_raw_entries.append((c, out_bucket.blob(dest_raw), size))
+
+            if not city_raw_entries:
+                logging.warning("No raw blobs for level %s to publish", level_str)
+                continue
+
+            total_raw = sum(s for _, _, s in city_raw_entries)
+
+            if total_raw <= MAX_COMBINED_BYTES:
+                sources = [header_blob]
+                for i, (c, rb, _) in enumerate(city_raw_entries):
+                    if i > 0:
+                        sources.append(comma_blob)
+                    sources.append(rb)
+                sources.append(footer_blob)
+
+                dest = f"us/combined/{rel_path}.geojson"
+                dest_blob = out_bucket.blob(dest)
+                _gcs_compose(dest_blob, sources)
+                logging.info(
+                    "Published combined: gs://%s/%s (%d cities, %.1f GB)",
+                    output_bucket,
+                    dest,
+                    len(city_raw_entries),
+                    total_raw / (1024 ** 3),
+                )
+            else:
+                parts = []
+                current_part = []
+                current_size = 0
+                for entry in city_raw_entries:
+                    c, rb, size = entry
+                    if current_part and current_size + size > MAX_COMBINED_BYTES:
+                        parts.append(current_part)
+                        current_part = []
+                        current_size = 0
+                    current_part.append(entry)
+                    current_size += size
+                if current_part:
+                    parts.append(current_part)
+
+                for pi, part_entries in enumerate(parts, 1):
+                    sources = [header_blob]
+                    for i, (c, rb, _) in enumerate(part_entries):
+                        if i > 0:
+                            sources.append(comma_blob)
+                        sources.append(rb)
+                    sources.append(footer_blob)
+
+                    dest = f"us/combined/{rel_path}_part{pi}.geojson"
+                    dest_blob = out_bucket.blob(dest)
+                    _gcs_compose(dest_blob, sources)
+                    part_cities = [c for c, _, _ in part_entries]
+                    logging.info(
+                        "Published combined part %d/%d: gs://%s/%s (cities: %s)",
+                        pi,
+                        len(parts),
+                        output_bucket,
+                        dest,
+                        part_cities,
+                    )
+
+        except Exception as e:
+            logging.error("Failed to publish level %s: %s", level_str, e)
+
+    try:
+        for blob in client.list_blobs(output_bucket, prefix="_compose/"):
+            blob.delete()
+        for blob in client.list_blobs(output_bucket, prefix="us/combined/"):
+            if "__tmp" in blob.name:
+                blob.delete()
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Pipeline runner
 # ---------------------------------------------------------------------------
 
@@ -2643,8 +2846,11 @@ def _process_city_from_predictions(
 
     _merge_and_upload_outputs(pipeline_bucket, "output/", output_dir, {city_name})
 
+    _publish_to_output_bucket(pipeline_bucket, output_dir, city_name)
+
     results["city"] = city_name
     results["gcs_output"] = f"gs://{pipeline_bucket}/output/"
+    results["output_bucket"] = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
     return results
 
 
