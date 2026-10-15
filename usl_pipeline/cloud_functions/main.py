@@ -2487,7 +2487,7 @@ def _publish_to_output_bucket(
                     output_bucket,
                     dest,
                     len(city_raw_entries),
-                    total_raw / (1024 ** 3),
+                    total_raw / (1024**3),
                 )
             else:
                 parts = []
