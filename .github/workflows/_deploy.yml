@@ -156,7 +156,9 @@ jobs:
                     env: .serviceConfig.environmentVariables}'
 
           # Terraform creates functions; we only update code. Skip if absent.
-          if ! before=$(gcloud functions describe "$NAME" "${common[@]}" --format=json 2>&1); then
+          _err=$(mktemp)
+          if ! before=$(gcloud functions describe "$NAME" "${common[@]}" --format=json 2>"$_err"); then
+            before=$(cat "$_err")
             if grep -qiE 'status=\[404\]|NOT_FOUND|not found|does not exist' <<<"$before"; then
               echo "::warning title=Skipped $NAME::$NAME does not exist in $PROJECT. Create it with terraform first."
               exit 0
@@ -165,6 +167,7 @@ jobs:
             echo "::error title=$NAME::describe failed"
             exit 1
           fi
+          [ -s "$_err" ] && cat "$_err" >&2
 
           # Preflight: the manifest must match the live function, and the
           # terraform-owned BUCKET_PREFIX must already be right.
