@@ -1661,8 +1661,6 @@ try:
     )
     from cli_add_admin_breadcrumbs import (  # noqa: E402
         add_parent_fields_point_within,
-        add_h3_parents_from_admin10,
-        ensure_wgs84,
     )
     from cli_preprocess_tiff_to_h3csv import preprocess_city  # noqa: E402
 except ImportError:
@@ -1948,9 +1946,28 @@ USA_BOUNDARY_ID = "148838"
 USA_NAME = "United States of America"
 
 
+def _build_city_breadcrumbs(city_config):
+    """Build breadcrumb dict for a city from its config.
+
+    Returns dict with admin_level_N_parent_boundary_id/localname keys.
+    """
+    crumbs = {
+        "admin_level_2_parent_boundary_id": USA_BOUNDARY_ID,
+        "admin_level_2_parent_localname": USA_NAME,
+    }
+    state_fips = city_config.get("state_fips")
+    if state_fips:
+        info = STATE_FIPS_TO_INFO.get(str(state_fips), {})
+        crumbs["admin_level_4_parent_boundary_id"] = info.get("osm_id", str(state_fips))
+        crumbs["admin_level_4_parent_localname"] = info.get("name", "")
+    place_name = city_config.get("place_name")
+    if place_name:
+        crumbs["admin_level_8_parent_localname"] = place_name
+    return crumbs
+
+
 def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
     import geopandas as gpd
-    import glob as _glob
     import numpy as np
     import pandas as pd
     from shapely.ops import unary_union
@@ -2100,62 +2117,9 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
                 city_breadcrumbs[city] = candidate
                 city_best_score[city] = score
 
-        h3_pattern = os.path.join(output_dir, "admin_level_1??_all_cities.geojson")
-        h3_files = sorted(_glob.glob(h3_pattern))
-        for h3_path in h3_files:
-            try:
-                h3_gdf = gpd.read_file(h3_path)
-                h3_gdf = add_h3_parents_from_admin10(h3_gdf, gdfs[10])
-
-                filled = 0
-                if "city" in h3_gdf.columns:
-                    for lvl in (2, 4, 6, 8):
-                        pid_key = f"admin_level_{lvl}_parent_boundary_id"
-                        pname_key = f"admin_level_{lvl}_parent_localname"
-                        if pname_key not in h3_gdf.columns:
-                            h3_gdf[pname_key] = None
-                        if pid_key not in h3_gdf.columns:
-                            h3_gdf[pid_key] = None
-                        is_null = h3_gdf[pname_key].isna() | h3_gdf[pname_key].isin(
-                            ["", "<NA>", "<Na>", "None"]
-                        )
-                        if not is_null.any():
-                            continue
-                        lookup_pname = {
-                            c: v.get(pname_key)
-                            for c, v in city_breadcrumbs.items()
-                            if v.get(pname_key)
-                        }
-                        lookup_pid = {
-                            c: v.get(pid_key)
-                            for c, v in city_breadcrumbs.items()
-                            if v.get(pid_key)
-                        }
-                        fallback_pname = h3_gdf["city"].map(lookup_pname)
-                        fallback_pid = h3_gdf["city"].map(lookup_pid)
-                        fill_mask = is_null & fallback_pname.notna()
-                        cnt = fill_mask.sum()
-                        if cnt > 0:
-                            h3_gdf.loc[fill_mask, pname_key] = fallback_pname[fill_mask]
-                            h3_gdf.loc[fill_mask, pid_key] = fallback_pid[fill_mask]
-                            filled += cnt
-                    if filled:
-                        logging.info(
-                            "City fallback filled %d null breadcrumbs in %s",
-                            filled,
-                            os.path.basename(h3_path),
-                        )
-
-                _title_case_gdf(h3_gdf)
-                h3_gdf = ensure_wgs84(h3_gdf)
-                h3_gdf.to_file(h3_path, driver="GeoJSON")
-                logging.info(
-                    "Updated %s with admin breadcrumbs", os.path.basename(h3_path)
-                )
-            except Exception as e:
-                logging.error(
-                    "Failed to add breadcrumbs to %s: %s", os.path.basename(h3_path), e
-                )
+        # H3 hex files get breadcrumbs injected at write time via
+        # h3_breadcrumbs passed to process_h3_tilesets — no need to
+        # re-read multi-GB files here.
 
     logging.info("Breadcrumbs added successfully")
 
@@ -2543,7 +2507,9 @@ def _publish_to_output_bucket(
 # ---------------------------------------------------------------------------
 
 
-def _run_pipeline(config_dict, work_dir, run_mode="full"):
+def _run_pipeline(
+    config_dict, work_dir, run_mode="full", on_level_done=None, h3_breadcrumbs=None
+):
     config_dict["output_dir"] = os.path.join(work_dir, "output")
     os.makedirs(config_dict["output_dir"], exist_ok=True)
 
@@ -2557,11 +2523,16 @@ def _run_pipeline(config_dict, work_dir, run_mode="full"):
     h3_outputs = {}
 
     if run_mode in ("full", "admin_only"):
-        admin_outputs = process_admin_levels(config_dict)
+        admin_outputs = process_admin_levels(config_dict, on_level_done=on_level_done)
         logging.info("Admin boundary tilesets created: %d", len(admin_outputs))
 
     if run_mode in ("full", "h3_only"):
-        h3_outputs = process_h3_tilesets(config_dict, max_workers=4)
+        h3_outputs = process_h3_tilesets(
+            config_dict,
+            max_workers=4,
+            on_resolution_done=on_level_done,
+            h3_breadcrumbs=h3_breadcrumbs,
+        )
         logging.info("H3 tilesets created: %d", len(h3_outputs))
 
     all_outputs = {**admin_outputs, **h3_outputs}
@@ -2839,10 +2810,43 @@ def _process_city_from_predictions(
 
     os.makedirs(config_dict["output_dir"], exist_ok=True)
 
-    results = _run_pipeline(config_dict, work_dir, run_mode="full")
-
     output_dir = os.path.join(work_dir, "output")
-    _add_breadcrumbs_to_outputs(output_dir, config_dict=config_dict)
+    uploaded_levels = []
+
+    def _on_level_done(level, output_path):
+        """Upload each level immediately after it finishes."""
+        try:
+            _add_breadcrumbs_to_outputs(
+                os.path.dirname(output_path), config_dict=config_dict
+            )
+            fname = os.path.basename(output_path)
+            per_city_dest = f"output/by_city/{city_name}/{fname}"
+            _upload_to_gcs(pipeline_bucket, output_path, per_city_dest)
+            logging.info("Uploaded per-city: %s", per_city_dest)
+
+            level_str = str(level if level < 100 else level)
+            rel_path = _level_to_path(level_str)
+            out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
+            client = storage.Client()
+            bucket_obj = client.bucket(out_bucket)
+            city_lower = city_name.lower().replace(" ", "_")
+            dest_path = f"us/{city_lower}/{rel_path}.geojson"
+            bucket_obj.blob(dest_path).upload_from_filename(output_path)
+            logging.info("Published: gs://%s/%s", out_bucket, dest_path)
+
+            uploaded_levels.append(level_str)
+        except Exception as e:
+            logging.error("Failed to upload level %s: %s", level, e)
+
+    h3_breadcrumbs = {city_name: _build_city_breadcrumbs(city_config)}
+
+    results = _run_pipeline(
+        config_dict,
+        work_dir,
+        run_mode="full",
+        on_level_done=_on_level_done,
+        h3_breadcrumbs=h3_breadcrumbs,
+    )
 
     _merge_and_upload_outputs(pipeline_bucket, "output/", output_dir, {city_name})
 

@@ -223,7 +223,7 @@ def combine_geojson_files(
     )
 
 
-def process_admin_levels(config: Dict[str, Any]) -> Dict[int, str]:
+def process_admin_levels(config: Dict[str, Any], on_level_done=None) -> Dict[int, str]:
     """Process all admin levels for all cities and combine into unified tilesets."""
     output_dir = config["output_dir"]
     temp_dir = os.path.join(output_dir, "_temp")
@@ -265,6 +265,8 @@ def process_admin_levels(config: Dict[str, Any]) -> Dict[int, str]:
         )
         combine_geojson_files(temp_files, combined_output, level)
         combined_outputs[level] = combined_output
+        if on_level_done:
+            on_level_done(level, combined_output)
 
     return combined_outputs
 
@@ -367,7 +369,10 @@ def process_h3_tile_for_city(args_tuple):
 
 
 def process_h3_tilesets(
-    config: Dict[str, Any], max_workers: int = 4, on_resolution_done=None
+    config: Dict[str, Any],
+    max_workers: int = 4,
+    on_resolution_done=None,
+    h3_breadcrumbs=None,
 ) -> Dict[int, str]:
     """Generate H3 hexagon tilesets for all cities.
 
@@ -382,6 +387,8 @@ def process_h3_tilesets(
             (resolution, output_path) called immediately
             after each resolution's combined output is
             written to disk.
+        h3_breadcrumbs: Optional dict {city_name: {breadcrumb_key: value}}
+            injected into every feature's properties at write time.
     """
     output_dir = config["output_dir"]
     temp_dir = os.path.join(output_dir, "_temp")
@@ -479,6 +486,8 @@ def process_h3_tilesets(
                         "city": city_name,
                         "bbox": feat_bbox,
                     }
+                    if h3_breadcrumbs and city_name in h3_breadcrumbs:
+                        props.update(h3_breadcrumbs[city_name])
                     for col, idx in val_col_indices.items():
                         v = row_tuple[idx]
                         props[col] = (
