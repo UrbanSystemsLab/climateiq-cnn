@@ -1661,8 +1661,6 @@ try:
     )
     from cli_add_admin_breadcrumbs import (  # noqa: E402
         add_parent_fields_point_within,
-        add_h3_parents_from_admin10,
-        ensure_wgs84,
     )
     from cli_preprocess_tiff_to_h3csv import preprocess_city  # noqa: E402
 except ImportError:
@@ -1970,7 +1968,6 @@ def _build_city_breadcrumbs(city_config):
 
 def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
     import geopandas as gpd
-    import glob as _glob
     import numpy as np
     import pandas as pd
     from shapely.ops import unary_union
