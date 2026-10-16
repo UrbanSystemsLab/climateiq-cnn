@@ -53,7 +53,7 @@ from usl_models.flood_ml.dataset_improved import load_dataset_windowed_patches
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
 OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LOG_NAME = "semi_physical_test"
+LOG_NAME = "semi_physical_test_6_step_300_mid_check_part_grad_2"
 
 PATCH_SIZE = 256
 PATCH_STRIDE = 128
@@ -234,10 +234,10 @@ PRETRAINED_WEIGHTS_V3R3 = PRETRAINED_WEIGHTS
 with strategy.scope():
     # Same LR schedule as V1 — we're fine-tuning not training from scratch
     cosine_lr = keras.optimizers.schedules.CosineDecay(
-        initial_learning_rate=1e-6,
+        initial_learning_rate=1e-4,
         decay_steps=STEPS_PER_EPOCH * EPOCHS,
         alpha=1e-6,
-        warmup_target=2e-5,                         # ROUND 6: V3 R3 baseline LR (back to proven)
+        warmup_target=6e-5,                         # ROUND 6: V3 R3 baseline LR (back to proven)
         warmup_steps=500,
     )
     params = FloodModel.Params(
@@ -256,6 +256,13 @@ with strategy.scope():
         optimizer=keras.optimizers.Adam(learning_rate=cosine_lr, global_clipnorm=1.0),
     )
     model = FloodModel(params=params, spatial_dims=(PATCH_SIZE, PATCH_SIZE))
+    _dummy = {
+    "geospatial":     tf.zeros((1, PATCH_SIZE, PATCH_SIZE, 12)),
+    "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, PATCH_SIZE, PATCH_SIZE, 1)),
+    "temporal":       tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
+    }
+    _ = model._model(_dummy)                                      # 先创建模型变量
+    model._model.optimizer.build(model._model.trainable_variables)  # 再创建 Adam 的 m/v 变量
 
     if WARM_START:
         _dummy = {

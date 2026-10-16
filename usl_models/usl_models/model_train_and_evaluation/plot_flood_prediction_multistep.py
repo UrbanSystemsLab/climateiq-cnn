@@ -28,20 +28,21 @@ for gpu in tf.config.list_physical_devices("GPU"):
 
 from usl_models.flood_ml.model import FloodModel
 from usl_models.flood_ml.model import SpatialAttention
-from usl_models.flood_physical_ml.dataset import load_dataset_windowed_patches
+# from usl_models.flood_physical_ml.dataset import load_dataset_windowed_patches
+from usl_models.flood_ml.dataset import load_dataset_windowed_patches
 
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
 
 # Defaults; both can be overridden from the command line (see parse_args()).
 DEFAULT_OUTPUT_DIR = pathlib.Path(
-    "/scratch/hw4402/climateiq_output/semi_physical_test/examples_test"
+    "/scratch/hw4402/climateiq_output/semi_physical_test_6_step_300_mid_check_part_grad/examples_test"
 )
 DEFAULT_GT_MAX_DEPTH_RANGE = (0, 100)
 
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 
 CHECKPOINT_PATH = pathlib.Path(
-    "/scratch/hw4402/climateiq_output/semi_physical_test/weights_ordered.npz"
+    "/scratch/hw4402/climateiq_output/semi_physical_test_6_step_300_mid_check_part_grad/weights_ordered.npz"
 )
 
 PATCH_SIZE   = 1000
