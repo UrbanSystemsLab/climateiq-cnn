@@ -2,6 +2,7 @@ import dataclasses
 import datetime
 import functools
 import io
+import json
 import logging
 import os
 import pathlib
@@ -1665,6 +1666,8 @@ try:
         ensure_wgs84,
     )
     from cli_preprocess_tiff_to_h3csv import preprocess_city  # noqa: E402
+    from usl_h3_tools import util_io  # noqa: E402
+    from usl_h3_tools import publish as tile_publish  # noqa: E402
 except ImportError:
     pass
 
@@ -2991,3 +2994,143 @@ def process_h3_pipeline_on_tiff_upload(
             pipeline_bucket, src_bucket_name, city_folder, work_dir
         )
         logging.info("Pipeline result for %s: %s", city_name, results.get("status"))
+
+
+# ---------------------------------------------------------------------------
+# Tile publishing
+# ---------------------------------------------------------------------------
+
+_TILE_PUBLISH_ACTIONS = ("plan", "convert", "upload", "publish")
+
+
+@functions_framework.http
+@_error_to_response
+def publish_tiles(request: flask.Request):  # type: ignore[return]
+    """Publishes an object in the H3 tiles bucket as a tileset, one step per call.
+
+    The h3-tile-publish workflow calls this when a city's
+    <ISO3>_<STATE>_<City>/h3_<ISO3>_<STATE>_<City>.geojson or
+    USA_Combined/admin.geojson is uploaded: "plan", "convert", "upload", then
+    "publish".
+
+    JSON body:
+        action: "plan", "convert", "upload" or "publish".
+        name: Uploaded object, e.g. "USA_MO_KansasCity/h3_USA_MO_KansasCity.geojson".
+        bucket: Defaults to the GCS_BUCKET environment variable.
+        force: "plan" only. Publish even if this generation already was.
+
+    Every action returns {"status": "skipped", "reason"} when the object feeds
+    no tileset or TILE_TARGETS is unset. "plan" also skips a generation that
+    is already published, and otherwise returns {"status": "ready", "tileset"}.
+    "convert" stages the object as line-delimited GeoJSON, "upload" sends it to
+    each tile server target, and "publish" publishes the tileset there and
+    records the results in tile_sources/<tileset>/publish.json.
+    """
+    request_json = request.get_json(silent=True) or {}
+
+    bucket_name = request_json.get("bucket") or os.environ.get("GCS_BUCKET")
+    if not bucket_name:
+        return _bad_request("GCS_BUCKET environment variable or 'bucket' required")
+
+    action = request_json.get("action")
+    if action not in _TILE_PUBLISH_ACTIONS:
+        return _bad_request(f"'action' must be one of {_TILE_PUBLISH_ACTIONS}")
+
+    object_name = request_json.get("name")
+    if not object_name or not isinstance(object_name, str):
+        return _bad_request("'name' must name an object in the bucket")
+
+    tileset = tile_publish.tileset_for_object(bucket_name, object_name)
+    if tileset is None:
+        city_source = tile_publish.CITY_H3_SOURCE.format(area="<ISO3>_<STATE>_<City>")
+        return _skip_tiles(
+            object_name, f"not {city_source} or {tile_publish.NATIONAL_ADMIN_SOURCE}"
+        )
+
+    client = storage.Client()
+    targets = tile_publish.make_targets(os.environ, client)
+    if not targets:
+        return _skip_tiles(object_name, f"{tile_publish.TILE_TARGETS_ENV} is not set")
+
+    bucket = client.bucket(bucket_name)
+    source = bucket.get_blob(object_name)
+    if source is None:
+        return (
+            flask.jsonify({"error": f"gs://{bucket_name}/{object_name} not found"}),
+            404,
+        )
+
+    if action == "plan":
+        published = _read_publish_status(bucket, tileset)
+        if published.get(
+            "source_generation"
+        ) == source.generation and not request_json.get("force"):
+            return _skip_tiles(
+                object_name, f"generation {source.generation} is already published"
+            )
+        return flask.jsonify({"status": "ready", "tileset": tileset.name})
+
+    if action == "convert":
+        written = util_io.convert_blob(bucket, tileset.source_blob, tileset.staged_blob)
+        return flask.jsonify(
+            {
+                "status": "converted" if written else "up_to_date",
+                "tileset": tileset.name,
+                "staged": tileset.staged_blob,
+            }
+        )
+
+    if action == "upload":
+        for target in targets:
+            target.upload_source(tileset)
+        return flask.jsonify(
+            {
+                "status": "uploaded",
+                "tileset": tileset.name,
+                "targets": [target.name for target in targets],
+            }
+        )
+
+    staged = bucket.get_blob(tileset.staged_blob)
+    if staged is None:
+        return (
+            flask.jsonify(
+                {
+                    "error": f"gs://{bucket_name}/{tileset.staged_blob} not found; "
+                    "run convert and upload first"
+                }
+            ),
+            409,
+        )
+    staged_generation = (staged.metadata or {}).get(util_io.SOURCE_GENERATION_KEY)
+
+    results = [dataclasses.asdict(target.publish(tileset)) for target in targets]
+    status = {
+        "tileset": tileset.name,
+        "source": tileset.source_blob,
+        "source_generation": int(staged_generation) if staged_generation else None,
+        "published_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "results": results,
+    }
+    bucket.blob(tileset.status_blob).upload_from_string(
+        json.dumps(status, indent=2), content_type="application/json"
+    )
+    return flask.jsonify({"status": "published", **status})
+
+
+def _bad_request(message: str) -> tuple[flask.Response, int]:
+    return flask.jsonify({"error": message}), 400
+
+
+def _skip_tiles(object_name: str, reason: str) -> flask.Response:
+    logging.warning("Not publishing tiles for %s: %s", object_name, reason)
+    return flask.jsonify({"status": "skipped", "reason": reason})
+
+
+def _read_publish_status(
+    bucket: storage.Bucket, tileset: "tile_publish.Tileset"
+) -> dict:
+    blob = bucket.get_blob(tileset.status_blob)
+    if blob is None:
+        return {}
+    return json.loads(blob.download_as_text())

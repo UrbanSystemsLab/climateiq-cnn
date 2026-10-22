@@ -29,6 +29,7 @@ os.environ.setdefault("BUCKET_PREFIX", "test-")
 from google.cloud import firestore  # noqa: E402
 from google.cloud import storage  # noqa: E402
 
+from usl_lib.shared.area_names import canonical_area_name  # noqa: E402
 from usl_lib.storage import cloud_storage  # noqa: E402
 from usl_lib.storage import metastore  # noqa: E402
 
@@ -42,29 +43,10 @@ DEFAULT_WAIT_TIMEOUT_SECONDS = 3600
 _NO_STATE = "XX"
 _POLL_INTERVAL_SECONDS = 30
 
-AREA_NAME_RE = re.compile(r"^[A-Z]{3}_[A-Z]{2}_[A-Za-z0-9]+$")
-
-# Word separators within a city name. Other punctuation is dropped, so
-# "St. Louis" becomes "StLouis" and "O'Fallon" becomes "OFallon".
-_CITY_WORD_SEPARATORS = re.compile(r"[\s\-‐-―_/]+")
-_NON_ALPHANUMERIC = re.compile(r"[^A-Za-z0-9]")
-
 _UNSAFE_IN_AREA_NAME = re.compile(r"[/\s-]")
 _RESERVED_AREA_NAMES = re.compile(r"^\.{1,2}$|^__.*__$")
 
 logger = logging.getLogger(__name__)
-
-
-def pascal_case_city(city: str) -> str:
-    words = []
-    for word in _CITY_WORD_SEPARATORS.split(city.strip()):
-        kept = _NON_ALPHANUMERIC.sub("", word)
-        if kept:
-            words.append(kept[0].upper() + kept[1:])
-    if not words:
-        raise ValueError(f"City name {city!r} contains no letters or digits.")
-
-    return "".join(words)
 
 
 def validate_area_name_override(area_name: str) -> str:
@@ -86,22 +68,6 @@ def validate_area_name_override(area_name: str) -> str:
         )
 
     return area_name
-
-
-def canonical_area_name(country_iso: str, state: str, city: str) -> str:
-    country_iso = country_iso.strip().upper()
-    state = state.strip().upper()
-    name = f"{country_iso}_{state}_{pascal_case_city(city)}"
-
-    if not AREA_NAME_RE.match(name):
-        raise ValueError(
-            f"Derived study area name {name!r} is not valid. Expected "
-            "<ISO3>_<STATE>_<City> with a three letter country code, a two "
-            "letter state code and a PascalCase city of letters and digits "
-            f"(pattern {AREA_NAME_RE.pattern})."
-        )
-
-    return name
 
 
 def derive_centroid_lat_lon(boundary_file: pathlib.Path) -> Tuple[float, float]:
