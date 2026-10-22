@@ -200,6 +200,10 @@ def make_hybrid_loss(y_true, y_pred):
     #     log_squared_error * effective_mask
     # ) / (tf.reduce_sum(effective_mask) + 1e-8)
 
+    # weighted_log_mse = tf.reduce_sum(
+    #     log_squared_error * effective_mask
+    # ) / (tf.reduce_sum(effective_mask) + 1e-8)
+
     # ── peak-depth penalty (log space, weight 2.0) ───────────────────
     # valid_f = tf.cast(valid, tf.float32)
     # log_pred_max = tf.reduce_max(log_pred * valid_f, axis=[1, 2])
