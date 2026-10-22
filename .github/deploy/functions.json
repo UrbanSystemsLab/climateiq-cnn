@@ -20,7 +20,8 @@
         "write-study-area-metadata": {"entry_point": "write_study_area_metadata", "memory": "512Mi", "timeout": 60},
         "write-wrf-heat-config-metadata": {"entry_point": "write_heat_scenario_config_metadata", "memory": "512Mi", "timeout": 60},
         "h3-pipeline": {"entry_point": "process_h3_pipeline", "memory": "32Gi", "timeout": 3600},
-        "h3-pipeline-tiff-trigger": {"entry_point": "process_h3_pipeline_on_tiff_upload", "memory": "32Gi", "timeout": 3600}
+        "h3-pipeline-tiff-trigger": {"entry_point": "process_h3_pipeline_on_tiff_upload", "memory": "32Gi", "timeout": 3600},
+        "h3-tile-publish": {"entry_point": "publish_tiles", "memory": "4Gi", "timeout": 3600}
       }
     }
   }
