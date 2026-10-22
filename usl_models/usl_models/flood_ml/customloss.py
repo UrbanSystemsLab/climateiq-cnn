@@ -163,6 +163,7 @@ def _abedice_loss(
         boundary_weight: Extra weight multiplier on boundary pixels.
         fp_weight:   FP weight in the Dice denominator.
         fn_weight:   FN weight in the Dice denominator.
+        eps:         Numerical-stability epsilon added to the Dice denominator.
 
     Reference: https://www.sciencedirect.com/science/article/pii/S1746809425002526
     """
@@ -410,6 +411,7 @@ def _soft_band_csi_loss(y_true, y_pred, bands, sharpness=40.0):
     y_true/y_pred must already be same-shape, NaN-free, and depth (not
     logits) -- caller's job, so this stays a pure, reusable building block.
     """
+
     def soft_band(depth, lo, hi):
         lower = tf.sigmoid(sharpness * (depth - lo))
         return lower if hi is None else lower * tf.sigmoid(sharpness * (hi - depth))
@@ -428,20 +430,26 @@ def _soft_band_csi_loss(y_true, y_pred, bands, sharpness=40.0):
 
 @register_keras_serializable(package="Custom", name="make_hybrid_loss_v12_bandcsi")
 def make_hybrid_loss_v12_bandcsi(y_true, y_pred):
-    """v11_fa2 base + an explicit soft-CSI surrogate for the low (0.15-0.30m)
-    and med (0.30-0.60m) depth bands -- the two evaluation metrics v11_fa2's
-    depth_weight term doesn't specifically target (it upweights ANY flooded
-    pixel and >1m pixels, but nothing rewards correct band classification in
-    between). Added 2026-10-21 after diagnosing that low_csi/med_csi (7-17%
-    across every model tried on this project) are bottlenecked by depth
-    PRECISION, not training amount: typical MAE (0.1-0.26m) is comparable to
-    or larger than these bands' own width (0.15m, 0.30m), so a close-but-
-    imprecise prediction lands in the wrong bin and scores as a miss on both
-    sides. This is an UNTESTED hypothesis -- smoke-test the actual training
-    effect before trusting it changes anything real.
+    """v11_fa2 base plus a soft-CSI surrogate for the low/med depth bands.
+
+    Targets the low (0.15-0.30m) and med (0.30-0.60m) depth bands -- the two
+    evaluation metrics v11_fa2's depth_weight term doesn't specifically
+    target (it upweights ANY flooded pixel and >1m pixels, but nothing
+    rewards correct band classification in between). Added 2026-10-21 after
+    diagnosing that low_csi/med_csi (7-17% across every model tried on this
+    project) are bottlenecked by depth PRECISION, not training amount:
+    typical MAE (0.1-0.26m) is comparable to or larger than these bands' own
+    width (0.15m, 0.30m), so a close-but-imprecise prediction lands in the
+    wrong bin and scores as a miss on both sides. This is an UNTESTED
+    hypothesis -- smoke-test the actual training effect before trusting it
+    changes anything real.
     """
-    y_true_sq = y_true[..., 0] if y_true.shape.ndims == 4 and y_true.shape[-1] == 1 else y_true
-    y_pred_sq = y_pred[..., 0] if y_pred.shape.ndims == 4 and y_pred.shape[-1] == 1 else y_pred
+    y_true_sq = (
+        y_true[..., 0] if y_true.shape.ndims == 4 and y_true.shape[-1] == 1 else y_true
+    )
+    y_pred_sq = (
+        y_pred[..., 0] if y_pred.shape.ndims == 4 and y_pred.shape[-1] == 1 else y_pred
+    )
 
     valid = tf.math.logical_not(tf.math.is_nan(y_true_sq))
     y_true_safe = tf.where(valid, y_true_sq, tf.zeros_like(y_true_sq))
@@ -490,12 +498,13 @@ def gravity_consistency_loss(pred: tf.Tensor, geospatial: tf.Tensor) -> tf.Tenso
         padded = tf.pad(t, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="SYMMETRIC")
         h = tf.shape(t)[1]
         w = tf.shape(t)[2]
-        return padded[:, 1 + dy:1 + dy + h, 1 + dx:1 + dx + w, :]
+        return padded[:, 1 + dy : 1 + dy + h, 1 + dx : 1 + dx + w, :]
 
     offsets = [(-1, 0), (1, 0), (0, 1), (0, -1), (-1, 1), (-1, -1), (1, 1), (1, -1)]
     neighbor_wse_max = tf.reduce_max(
         tf.concat([_shift(wse, dy, dx) for dy, dx in offsets], axis=-1),
-        axis=-1, keepdims=True,
+        axis=-1,
+        keepdims=True,
     )
 
     # Isolated peak: this pixel's water surface sits above every neighbour's.

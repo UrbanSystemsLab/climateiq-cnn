@@ -538,17 +538,17 @@ class FlowRoutingGate(keras.layers.Layer):
     not silently approximated as if it were already exact.
     """
 
-    DT_S = 300.0        # 5-minute timestep, matches GreenAmptGate
-    CELL_SIZE_M = 2.0   # matches _compute_all_geo_features default
+    DT_S = 300.0  # 5-minute timestep, matches GreenAmptGate
+    CELL_SIZE_M = 2.0  # matches _compute_all_geo_features default
     MANNING_N_IMPERVIOUS = 0.02
     MANNING_N_PERVIOUS = 0.06
 
     # 8-neighbour offsets (dy, dx): N, S, E, W, NE, NW, SE, SW
-    _OFFSETS = [(-1, 0), (1, 0), (0, 1), (0, -1),
-                (-1, 1), (-1, -1), (1, 1), (1, -1)]
+    _OFFSETS = [(-1, 0), (1, 0), (0, 1), (0, -1), (-1, 1), (-1, -1), (1, 1), (1, -1)]
 
     def __init__(self, max_fraction: float = 0.5, **kwargs):
-        """
+        """Builds the gate.
+
         Args:
             max_fraction: CFL-like cap -- never move more than this fraction
                 of a cell's depth to one neighbour in a single timestep.
@@ -564,6 +564,7 @@ class FlowRoutingGate(keras.layers.Layer):
         self.max_fraction = max_fraction
 
     def get_config(self):
+        """Returns this layer's constructor kwargs for serialization."""
         config = super().get_config()
         config.update({"max_fraction": self.max_fraction})
         return config
@@ -589,7 +590,7 @@ class FlowRoutingGate(keras.layers.Layer):
         padded = tf.pad(t, [[0, 0], [1, 1], [1, 1], [0, 0]], mode=mode)
         h = tf.shape(t)[1]
         w = tf.shape(t)[2]
-        return padded[:, 1 + dy:1 + dy + h, 1 + dx:1 + dx + w, :]
+        return padded[:, 1 + dy : 1 + dy + h, 1 + dx : 1 + dx + w, :]
 
     def call(self, pred: tf.Tensor, geospatial: tf.Tensor) -> tf.Tensor:
         """Apply one step of steepest-descent flow routing.
@@ -601,13 +602,15 @@ class FlowRoutingGate(keras.layers.Layer):
         Returns:
             (B, H, W, 1) routed flood depth.
         """
-        elev = geospatial[:, :, :, 0:1]   # normalised [0,1] per study area
+        elev = geospatial[:, :, :, 0:1]  # normalised [0,1] per study area
         valid = geospatial[:, :, :, 1:2]
-        k_s = geospatial[:, :, :, 4:5]    # 0 = impervious
+        k_s = geospatial[:, :, :, 4:5]  # 0 = impervious
 
         pervious = tf.cast(k_s > 0, tf.float32)
-        manning_n = (self.MANNING_N_IMPERVIOUS
-                     + (self.MANNING_N_PERVIOUS - self.MANNING_N_IMPERVIOUS) * pervious)
+        manning_n = (
+            self.MANNING_N_IMPERVIOUS
+            + (self.MANNING_N_PERVIOUS - self.MANNING_N_IMPERVIOUS) * pervious
+        )
 
         depth = tf.nn.relu(pred)
 
@@ -632,7 +635,9 @@ class FlowRoutingGate(keras.layers.Layer):
         # dependent (impervious sheds faster than pervious) -- NOT slope-
         # dependent, see class docstring for why.
         speed = (1.0 / manning_n) * tf.pow(depth + 1e-6, 2.0 / 3.0)
-        frac = tf.clip_by_value(speed * self.DT_S / self.CELL_SIZE_M, 0.0, self.max_fraction)
+        frac = tf.clip_by_value(
+            speed * self.DT_S / self.CELL_SIZE_M, 0.0, self.max_fraction
+        )
         frac = frac * has_downhill * valid
 
         outflow = depth * frac
@@ -645,7 +650,7 @@ class FlowRoutingGate(keras.layers.Layer):
         one_hot = tf.one_hot(argmax_idx, depth=8, axis=-1)  # (B, H, W, 8)
         inflow = tf.zeros_like(depth)
         for i, (dy, dx) in enumerate(self._OFFSETS):
-            contrib = outflow * one_hot[:, :, :, i:i + 1]
+            contrib = outflow * one_hot[:, :, :, i : i + 1]
             inflow += self._shift(contrib, -dy, -dx, mode="CONSTANT")
 
         routed = depth - outflow + inflow
@@ -690,14 +695,27 @@ class LearnedFlowRoutingGate(keras.layers.Layer):
     _shift = staticmethod(FlowRoutingGate._shift)
 
     def __init__(self, retain_bias_init: float = 5.0, **kwargs):
+        """Builds the gate.
+
+        Args:
+            retain_bias_init: Initial bias on the "retain" logit -- higher
+                values start the layer closer to a no-op (see class
+                docstring).
+            **kwargs: Forwarded to keras.layers.Layer.
+        """
         super().__init__(**kwargs)
         self.retain_bias_init = retain_bias_init
 
     def build(self, input_shape):
+        """Creates the 1x1 conv that predicts per-direction routing logits."""
+
         def _bias_init(shape, dtype=None):
             # 8 direction logits at 0, retain logit at retain_bias_init.
             return tf.concat(
-                [tf.zeros((8,), dtype=dtype), tf.constant([self.retain_bias_init], dtype=dtype)],
+                [
+                    tf.zeros((8,), dtype=dtype),
+                    tf.constant([self.retain_bias_init], dtype=dtype),
+                ],
                 axis=0,
             )
 
@@ -711,11 +729,17 @@ class LearnedFlowRoutingGate(keras.layers.Layer):
         super().build(input_shape)
 
     def get_config(self):
+        """Returns this layer's constructor kwargs for serialization."""
         config = super().get_config()
         config.update({"retain_bias_init": self.retain_bias_init})
         return config
 
-    def call(self, pred: tf.Tensor, geospatial: tf.Tensor, elevation_range_m: tf.Tensor = None) -> tf.Tensor:
+    def call(
+        self,
+        pred: tf.Tensor,
+        geospatial: tf.Tensor,
+        elevation_range_m: tf.Tensor = None,
+    ) -> tf.Tensor:
         """Apply one learned, mass-conservative routing step.
 
         Args:
@@ -760,7 +784,7 @@ class LearnedFlowRoutingGate(keras.layers.Layer):
         features = tf.concat([drops_stack, depth, pervious], axis=-1)  # (B, H, W, 10)
         logits = self.route_conv(features)  # (B, H, W, 9)
         probs = tf.nn.softmax(logits, axis=-1)
-        frac_dirs = probs[:, :, :, :8]     # (B, H, W, 8)
+        frac_dirs = probs[:, :, :, :8]  # (B, H, W, 8)
         frac_retain = probs[:, :, :, 8:9]  # (B, H, W, 1)
 
         outflow_per_dir = depth * frac_dirs
@@ -768,7 +792,9 @@ class LearnedFlowRoutingGate(keras.layers.Layer):
 
         inflow = tf.zeros_like(depth)
         for i, (dy, dx) in enumerate(self._OFFSETS):
-            inflow += self._shift(outflow_per_dir[:, :, :, i:i + 1], -dy, -dx, mode="CONSTANT")
+            inflow += self._shift(
+                outflow_per_dir[:, :, :, i : i + 1], -dy, -dx, mode="CONSTANT"
+            )
 
         routed = retained + inflow
         routed = tf.nn.relu(routed) * valid + depth * (1.0 - valid)
@@ -777,10 +803,10 @@ class LearnedFlowRoutingGate(keras.layers.Layer):
 
 @register_keras_serializable()
 class FloodRoutingCNN(keras.Model):
-    """A structurally different model: mass conservation IS the recurrence,
-    not a correction applied to it.
+    """A structurally different model: mass conservation IS the recurrence.
 
-    FloodConvLSTM predicts depth directly via an opaque ConvLSTM hidden
+    Not a correction applied to it. FloodConvLSTM predicts depth directly
+    via an opaque ConvLSTM hidden
     state, then patches the result with GreenAmptGate/FlowRoutingGate/
     LearnedFlowRoutingGate afterward. Those patches are real and help, but
     the network's PRIMARY mechanism for "where does water go" is still
@@ -821,11 +847,19 @@ class FloodRoutingCNN(keras.Model):
         params: FloodModel.Params,
         spatial_dims: tuple[int, int] = (constants.MAP_HEIGHT, constants.MAP_WIDTH),
     ):
+        """Builds the encoder and routing/source heads.
+
+        Args:
+            params: Shared FloodModel.Params (loss_version, optimizer, etc.).
+            spatial_dims: (height, width) of the patches this model runs on.
+        """
         super().__init__()
         self._params = params
         self._spatial_height, self._spatial_width = spatial_dims
 
-        in_ch = constants.GEO_FEATURES + 1 + 2 + 8  # geospatial + depth + rain_rate + rain_cum + 8 true-slope drops
+        in_ch = (
+            constants.GEO_FEATURES + 1 + 2 + 8
+        )  # geospatial + depth + rain_rate + rain_cum + 8 true-slope drops
         # 8 extra channels: true-metre elevation drop toward each of the 8
         # neighbours (raw ch0 * elevation_range_m), not just the normalised-
         # per-study-area value -- same fix already validated for
@@ -847,15 +881,25 @@ class FloodRoutingCNN(keras.Model):
         self.encoder = keras.Sequential(
             [
                 layers.InputLayer((self._spatial_height, self._spatial_width, in_ch)),
-                layers.Conv2D(32, 3, padding="same", dilation_rate=1, activation="relu"),
+                layers.Conv2D(
+                    32, 3, padding="same", dilation_rate=1, activation="relu"
+                ),
                 layers.GroupNormalization(groups=8),
-                layers.Conv2D(32, 3, padding="same", dilation_rate=2, activation="relu"),
+                layers.Conv2D(
+                    32, 3, padding="same", dilation_rate=2, activation="relu"
+                ),
                 layers.GroupNormalization(groups=8),
-                layers.Conv2D(32, 3, padding="same", dilation_rate=4, activation="relu"),
+                layers.Conv2D(
+                    32, 3, padding="same", dilation_rate=4, activation="relu"
+                ),
                 layers.GroupNormalization(groups=8),
-                layers.Conv2D(32, 3, padding="same", dilation_rate=8, activation="relu"),
+                layers.Conv2D(
+                    32, 3, padding="same", dilation_rate=8, activation="relu"
+                ),
                 layers.GroupNormalization(groups=8),
-                layers.Conv2D(32, 3, padding="same", dilation_rate=16, activation="relu"),
+                layers.Conv2D(
+                    32, 3, padding="same", dilation_rate=16, activation="relu"
+                ),
                 layers.GroupNormalization(groups=8),
             ],
             name="routing_encoder",
@@ -867,13 +911,16 @@ class FloodRoutingCNN(keras.Model):
             )
 
         self.route_head = layers.Conv2D(
-            9, 1,
+            9,
+            1,
             kernel_initializer=keras.initializers.RandomNormal(stddev=0.01),
             bias_initializer=_retain_bias_init,
             name="route_head",
         )
         self.source_head = layers.Conv2D(
-            1, 1, activation="sigmoid",
+            1,
+            1,
+            activation="sigmoid",
             kernel_initializer=keras.initializers.RandomNormal(stddev=0.01),
             name="source_gain",
         )
@@ -896,10 +943,15 @@ class FloodRoutingCNN(keras.Model):
         self.green_ampt_gate = GreenAmptGate(name="green_ampt_gate")
 
     def get_config(self):
-        return {"params": self._params.to_dict(),
-                "spatial_dims": (self._spatial_height, self._spatial_width)}
+        """Returns this model's constructor kwargs for serialization."""
+        return {
+            "params": self._params.to_dict(),
+            "spatial_dims": (self._spatial_height, self._spatial_width),
+        }
 
-    def _route_step(self, depth, geospatial, rain_rate, rain_cum, cumul_F, elevation_range_m=None):
+    def _route_step(
+        self, depth, geospatial, rain_rate, rain_cum, cumul_F, elevation_range_m=None
+    ):
         """One physically-updated timestep. depth/cumul_F are (B,H,W,1).
 
         elevation_range_m: optional (B,) or (B,1) tensor, real per-study-
@@ -954,13 +1006,17 @@ class FloodRoutingCNN(keras.Model):
         frac_retain = probs[:, :, :, 8:9]
 
         depth_relu = tf.nn.relu(depth)
-        depth_after_infil, cumul_F_new = self.green_ampt_gate(depth_relu, geospatial, cumul_F)
+        depth_after_infil, cumul_F_new = self.green_ampt_gate(
+            depth_relu, geospatial, cumul_F
+        )
 
         outflow_per_dir = depth_after_infil * frac_dirs
         retained = depth_after_infil * frac_retain
         inflow = tf.zeros_like(depth_after_infil)
         for i, (dy, dx) in enumerate(self._OFFSETS):
-            inflow += self._shift(outflow_per_dir[:, :, :, i:i + 1], -dy, -dx, mode="CONSTANT")
+            inflow += self._shift(
+                outflow_per_dir[:, :, :, i : i + 1], -dy, -dx, mode="CONSTANT"
+            )
         routed = retained + inflow
 
         valid = geospatial[:, :, :, 1:2]
@@ -991,7 +1047,9 @@ class FloodRoutingCNN(keras.Model):
         for t in range(n):
             rain_rate = temporal[:, t, 0]
             rain_cum = temporal[:, t, 1]
-            depth, cumul_F = self._route_step(depth, geospatial, rain_rate, rain_cum, cumul_F, elevation_range_m)
+            depth, cumul_F = self._route_step(
+                depth, geospatial, rain_rate, rain_cum, cumul_F, elevation_range_m
+            )
             predictions = predictions.write(t, depth)
         predictions = tf.stack(tf.unstack(predictions.stack()), axis=1)
         return tf.squeeze(predictions, axis=-1)
@@ -1243,10 +1301,16 @@ class FloodConvLSTM(keras.Model):
         # alone until the head is actually trained -- a true no-op, not an
         # approximate one.
         if self._params.use_full_res_residual_head:
-            self.full_res_head_conv1 = layers.Conv2D(16, 3, padding="same", activation="relu")
+            self.full_res_head_conv1 = layers.Conv2D(
+                16, 3, padding="same", activation="relu"
+            )
             self.full_res_head_conv2 = layers.Conv2D(
-                1, 3, padding="same", activation="linear",
-                kernel_initializer="zeros", bias_initializer="zeros",
+                1,
+                3,
+                padding="same",
+                activation="linear",
+                kernel_initializer="zeros",
+                bias_initializer="zeros",
             )
         else:
             self.full_res_head_conv1 = None
@@ -1256,12 +1320,16 @@ class FloodConvLSTM(keras.Model):
         self.green_ampt_gate = GreenAmptGate(name="green_ampt_gate")
         self.flow_routing_gate = (
             FlowRoutingGate(
-                max_fraction=self._params.flow_routing_max_fraction, name="flow_routing_gate"
-            ) if self._params.use_flow_routing else None
+                max_fraction=self._params.flow_routing_max_fraction,
+                name="flow_routing_gate",
+            )
+            if self._params.use_flow_routing
+            else None
         )
         self.learned_routing_gate = (
             LearnedFlowRoutingGate(name="learned_routing_gate")
-            if self._params.use_learned_routing else None
+            if self._params.use_learned_routing
+            else None
         )
 
     def call(self, input: FloodModel.Input) -> tf.Tensor:
@@ -1430,7 +1498,9 @@ class FloodConvLSTM(keras.Model):
             if self.flow_routing_gate is not None:
                 prediction = self.flow_routing_gate(prediction, geospatial)
             if self.learned_routing_gate is not None:
-                prediction = self.learned_routing_gate(prediction, geospatial, elevation_range_m)
+                prediction = self.learned_routing_gate(
+                    prediction, geospatial, elevation_range_m
+                )
 
             predictions = predictions.write(t - 1, prediction)
 
@@ -1616,7 +1686,9 @@ class FloodConvLSTM(keras.Model):
                 if self.flow_routing_gate is not None:
                     pred = self.flow_routing_gate(pred, geospatial)
                 if self.learned_routing_gate is not None:
-                    pred = self.learned_routing_gate(pred, geospatial, elevation_range_m)
+                    pred = self.learned_routing_gate(
+                        pred, geospatial, elevation_range_m
+                    )
 
                 step_loss = self.compute_loss(y=yk, y_pred=pred)
 
@@ -1645,7 +1717,8 @@ class FloodConvLSTM(keras.Model):
                 time_weight = 1.0 + 0.3 * k
 
                 total_loss += time_weight * (
-                    step_loss + 0.2 * mass_loss
+                    step_loss
+                    + 0.2 * mass_loss
                     + self._params.gravity_loss_weight * gravity_loss
                     + self._params.infiltration_loss_weight * infiltration_loss
                 )
@@ -1751,7 +1824,8 @@ class FloodConvLSTM(keras.Model):
 
             time_weight = 1.0 + 0.3 * k
             total_loss += time_weight * (
-                step_loss + 0.2 * mass_loss
+                step_loss
+                + 0.2 * mass_loss
                 + self._params.gravity_loss_weight * gravity_loss
                 + self._params.infiltration_loss_weight * infiltration_loss
             )

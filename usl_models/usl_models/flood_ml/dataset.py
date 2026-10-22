@@ -135,8 +135,9 @@ def compute_flow_features(geo_np: np.ndarray, cell_size: float = 2.0) -> np.ndar
 
                 if not fdir_tif.exists() or not facc_tif.exists():
                     raise FileNotFoundError(
-                        f"whitebox subprocess did not produce output "
-                        f"(fdir exists={fdir_tif.exists()}, facc exists={facc_tif.exists()})"
+                        f"whitebox subprocess did not produce output (fdir "
+                        f"exists={fdir_tif.exists()}, facc exists="
+                        f"{facc_tif.exists()})"
                     )
 
                 with rasterio.open(fdir_tif) as f:
@@ -153,12 +154,16 @@ def compute_flow_features(geo_np: np.ndarray, cell_size: float = 2.0) -> np.ndar
 
     # All retries exhausted — log and fall back to zero-filled features
     # rather than crashing the whole training/inference job over one chunk.
-    print(f"⚠ compute_flow_features: whitebox failed after 3 attempts ({last_err}); "
-          f"falling back to zero-filled ch10-11 for this chunk")
+    print(
+        f"⚠ compute_flow_features: whitebox failed after 3 attempts ({last_err}); "
+        f"falling back to zero-filled ch10-11 for this chunk"
+    )
     return np.zeros((H, W, 2), dtype=np.float32)
 
 
-def compute_twi_channel(geo_np: np.ndarray, flow_acc_ch: np.ndarray, cell_size: float = 2.0) -> np.ndarray:
+def compute_twi_channel(
+    geo_np: np.ndarray, flow_acc_ch: np.ndarray, cell_size: float = 2.0
+) -> np.ndarray:
     """Topographic Wetness Index (TWI) as ch12.
 
     TWI = ln(A / tan(beta)) where A = upslope contributing area (cells) and
@@ -175,12 +180,14 @@ def compute_twi_channel(geo_np: np.ndarray, flow_acc_ch: np.ndarray, cell_size: 
     # Recover upslope cell count from log1p-normalised flow accumulation
     acc_norm = flow_acc_ch[:, :, 0].astype(np.float64)
     # acc_norm is log1p(raw_acc) / log1p(max_acc) — invert to get approximate raw scale
-    acc = np.expm1(acc_norm * 10.0)  # approximate inversion; relative ordering preserved
+    acc = np.expm1(
+        acc_norm * 10.0
+    )  # approximate inversion; relative ordering preserved
 
     # Slope in radians from DEM gradient
     dzdx = np.gradient(elev * valid, axis=1) / cell_size
     dzdy = np.gradient(elev * valid, axis=0) / cell_size
-    slope_rad = np.arctan(np.sqrt(dzdx ** 2 + dzdy ** 2))
+    slope_rad = np.arctan(np.sqrt(dzdx**2 + dzdy**2))
     slope_rad = np.maximum(slope_rad, 0.001)  # avoid log(0) on flat terrain
 
     twi = np.log((acc + 1.0) / np.tan(slope_rad)) * valid
@@ -1392,12 +1399,15 @@ def load_dataset_windowed_patches(
                         label_step = labels_tensor[t]  # (H, W) — current timestep
                         is_dry = float(label_step.numpy().max()) < min_label_max_depth
                         is_coldstart = t < n_flood_maps
-                        if is_dry and not (always_include_coldstart_dry and is_coldstart):
+                        if is_dry and not (
+                            always_include_coldstart_dry and is_coldstart
+                        ):
                             if dry_timestep_fraction <= 0.0:
                                 continue
-                            if _deterministic_unit_interval(
-                                sim_dir, stem, y0, x0, t
-                            ) >= dry_timestep_fraction:
+                            if (
+                                _deterministic_unit_interval(sim_dir, stem, y0, x0, t)
+                                >= dry_timestep_fraction
+                            ):
                                 continue
 
                     if n_future_steps == 1:
