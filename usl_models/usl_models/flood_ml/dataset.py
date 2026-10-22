@@ -1,5 +1,6 @@
 """tf.data.Datasets for training FloodML model on CityCAT data."""
 
+import hashlib
 import logging
 import random
 import pathlib
@@ -80,6 +81,7 @@ def compute_flow_features(geo_np: np.ndarray, cell_size: float = 2.0) -> np.ndar
     H, W = geo_np.shape[:2]
     try:
         import tempfile
+        import time
         import rasterio
         import whitebox
         from rasterio.transform import Affine
@@ -89,48 +91,107 @@ def compute_flow_features(geo_np: np.ndarray, cell_size: float = 2.0) -> np.ndar
     valid = geo_np[:, :, 1].astype(np.float32)
     elev = geo_np[:, :, 0].astype(np.float32) * valid  # zero-fill nodata
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = pathlib.Path(tmp)
-        dem_tif = tmp_path / "dem.tif"
-        tr = Affine(cell_size, 0, 0, 0, -cell_size, H * cell_size)
-        with rasterio.open(
-            dem_tif,
-            "w",
-            driver="GTiff",
-            height=H,
-            width=W,
-            count=1,
-            dtype="float32",
-            transform=tr,
-            crs="EPSG:3857",
-        ) as f:
-            f.write(elev[np.newaxis])
+    # WhiteboxTools runs as an external subprocess. Under heavy concurrent
+    # load (multiple training/inference jobs sharing CPUs and TMPDIR), the
+    # subprocess can fail silently and leave fdir.tif/facc.tif missing.
+    # Retry a few times before giving up — a single flaky chunk should not
+    # crash an entire multi-hour training run.
+    last_err = None
+    for attempt in range(3):
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = pathlib.Path(tmp)
+                dem_tif = tmp_path / "dem.tif"
+                tr = Affine(cell_size, 0, 0, 0, -cell_size, H * cell_size)
+                with rasterio.open(
+                    dem_tif,
+                    "w",
+                    driver="GTiff",
+                    height=H,
+                    width=W,
+                    count=1,
+                    dtype="float32",
+                    transform=tr,
+                    crs="EPSG:3857",
+                ) as f:
+                    f.write(elev[np.newaxis])
 
-        wbt = whitebox.WhiteboxTools()
-        wbt.set_working_dir(str(tmp_path))
-        wbt.set_verbose_mode(False)
+                wbt = whitebox.WhiteboxTools()
+                wbt.set_working_dir(str(tmp_path))
+                wbt.set_verbose_mode(False)
 
-        fdir_tif = tmp_path / "fdir.tif"
-        facc_tif = tmp_path / "facc.tif"
-        wbt.d8_pointer(dem=str(dem_tif), output=str(fdir_tif), esri_pntr=False)
-        wbt.d8_flow_accumulation(
-            i=str(fdir_tif),
-            output=str(facc_tif),
-            out_type="cells",
-            log=False,
-            clip=False,
-            pntr=True,
-            esri_pntr=False,
-        )
+                fdir_tif = tmp_path / "fdir.tif"
+                facc_tif = tmp_path / "facc.tif"
+                wbt.d8_pointer(dem=str(dem_tif), output=str(fdir_tif), esri_pntr=False)
+                wbt.d8_flow_accumulation(
+                    i=str(fdir_tif),
+                    output=str(facc_tif),
+                    out_type="cells",
+                    log=False,
+                    clip=False,
+                    pntr=True,
+                    esri_pntr=False,
+                )
 
-        with rasterio.open(fdir_tif) as f:
-            fdir = f.read(1).astype(np.float32) / 255.0
-        with rasterio.open(facc_tif) as f:
-            facc_raw = f.read(1).astype(np.float32)
-            facc_log = np.log1p(np.maximum(facc_raw, 0.0))
-            facc = facc_log / max(float(facc_log.max()), 1e-9)
+                if not fdir_tif.exists() or not facc_tif.exists():
+                    raise FileNotFoundError(
+                        f"whitebox subprocess did not produce output "
+                        f"(fdir exists={fdir_tif.exists()}, facc exists={facc_tif.exists()})"
+                    )
 
-    return np.stack([fdir * valid, facc * valid], axis=-1).astype(np.float32)
+                with rasterio.open(fdir_tif) as f:
+                    fdir = f.read(1).astype(np.float32) / 255.0
+                with rasterio.open(facc_tif) as f:
+                    facc_raw = f.read(1).astype(np.float32)
+                    facc_log = np.log1p(np.maximum(facc_raw, 0.0))
+                    facc = facc_log / max(float(facc_log.max()), 1e-9)
+
+            return np.stack([fdir * valid, facc * valid], axis=-1).astype(np.float32)
+        except Exception as e:  # noqa: BLE001 — broad on purpose, see retry below
+            last_err = e
+            time.sleep(0.5 * (attempt + 1))  # brief backoff before retry
+
+    # All retries exhausted — log and fall back to zero-filled features
+    # rather than crashing the whole training/inference job over one chunk.
+    print(f"⚠ compute_flow_features: whitebox failed after 3 attempts ({last_err}); "
+          f"falling back to zero-filled ch10-11 for this chunk")
+    return np.zeros((H, W, 2), dtype=np.float32)
+
+
+def compute_twi_channel(geo_np: np.ndarray, flow_acc_ch: np.ndarray, cell_size: float = 2.0) -> np.ndarray:
+    """Topographic Wetness Index (TWI) as ch12.
+
+    TWI = ln(A / tan(beta)) where A = upslope contributing area (cells) and
+    beta = local slope angle. High TWI = flat terrain with large upstream area =
+    flood-prone. Directly predicts where water accumulates beyond what flow
+    accumulation or slope alone captures.
+
+    flow_acc_ch: (H, W, 1) log1p-normalised flow accumulation (ch11 before norm).
+    Returns: (H, W, 1) float32, normalised [0, 1].
+    """
+    valid = geo_np[:, :, 1].astype(np.float64)
+    elev = geo_np[:, :, 0].astype(np.float64)
+
+    # Recover upslope cell count from log1p-normalised flow accumulation
+    acc_norm = flow_acc_ch[:, :, 0].astype(np.float64)
+    # acc_norm is log1p(raw_acc) / log1p(max_acc) — invert to get approximate raw scale
+    acc = np.expm1(acc_norm * 10.0)  # approximate inversion; relative ordering preserved
+
+    # Slope in radians from DEM gradient
+    dzdx = np.gradient(elev * valid, axis=1) / cell_size
+    dzdy = np.gradient(elev * valid, axis=0) / cell_size
+    slope_rad = np.arctan(np.sqrt(dzdx ** 2 + dzdy ** 2))
+    slope_rad = np.maximum(slope_rad, 0.001)  # avoid log(0) on flat terrain
+
+    twi = np.log((acc + 1.0) / np.tan(slope_rad)) * valid
+    twi = np.clip(twi, 0.0, None)
+
+    max_twi = float(twi.max())
+    if max_twi > 1e-9:
+        twi = (twi / max_twi).astype(np.float32)
+    else:
+        twi = np.zeros(geo_np.shape[:2], dtype=np.float32)
+    return twi[:, :, np.newaxis]  # (H, W, 1)
 
 
 def _compute_all_geo_features(geo_np: np.ndarray, cell_size: float = 2.0) -> np.ndarray:
@@ -154,6 +215,25 @@ def _append_dem_sink(geo_tensor: tf.Tensor, cell_size: float = 2.0) -> tf.Tensor
     geo_np = geo_tensor.numpy().astype(np.float32)
     geo12 = _compute_all_geo_features(geo_np, cell_size)
     return tf.constant(geo12, dtype=tf.float32)
+
+
+def _deterministic_unit_interval(*parts: object) -> float:
+    """A stable pseudo-random value in [0, 1) that depends only on `parts`.
+
+    Used in place of `random.random()` for the dry_timestep_fraction filter
+    below -- that filter's inclusion decision needs to be REPRODUCIBLE (same
+    chunk/patch/timestep always included or excluded, across runs and
+    processes), not genuinely random. Plain `random.random()` made separate
+    evaluation runs of the SAME checkpoint score different, randomly-sized
+    subsets of test data (confirmed: one comparison saw Manhattan sample
+    counts of 93 vs 16 across two runs with no code change), which silently
+    added sampling noise to every before/after comparison this project has
+    done. `hash()` isn't usable here either -- Python salts string hashing
+    per-process by default. sha256 of the identity is stable everywhere.
+    """
+    key = "|".join(str(p) for p in parts).encode()
+    digest = hashlib.sha256(key).hexdigest()
+    return int(digest[:8], 16) / 0xFFFFFFFF
 
 
 def load_dataset(
@@ -1095,6 +1175,7 @@ def load_dataset_windowed_patches(
     shuffle: bool = True,
     dry_timestep_fraction: float = 0.0,
     temporal_feature_version: int = 1,
+    always_include_coldstart_dry: bool = False,
 ) -> tf.data.Dataset:
     """Patch-based dataset loader with sliding window and flood filtering.
 
@@ -1136,6 +1217,19 @@ def load_dataset_windowed_patches(
         temporal_feature_version: Controls temporal channel encoding.
             1 (default, backward-compatible): all M channels = same rainfall
               scalar (original behaviour).
+        always_include_coldstart_dry: For t < n_flood_maps (spatiotemporal
+            context is zero-padded, not real history), always include the
+            window even if its label is dry, bypassing dry_timestep_fraction.
+            Why: dry_timestep_fraction throttles dry windows uniformly, but
+            t=0's label is dry by definition (simulation start) while t=1..4
+            windows that already show flooding pass the filter unthrottled.
+            That imbalance teaches the model "less real context correlates
+            with flooding" (survivorship bias), causing it to hallucinate
+            flooding from zero-padded context alone. Only meaningful when
+            dry_timestep_fraction < 1.0; default False preserves prior
+            behaviour for existing callers (eval/test scripts that
+            deliberately want dry_timestep_fraction=0.0 to exclude trivial
+            samples for cleaner depth-bin signal).
             2: 6 distinct channels per timestep giving the model richer
               temporal signal — [rate, cumulative_norm, rate_sq,
               log_cumulative, running_max, fractional_time].
@@ -1280,16 +1374,30 @@ def load_dataset_windowed_patches(
 
                 # Generate temporal windows (same as _generate_windows but for patches)
                 num_timesteps = labels_tensor.shape[0] if include_labels else 1
-                # Need n_future_steps labels ahead, so last valid t is reduced
-                last_t = num_timesteps - n_future_steps if include_labels else 1
+                # Off-by-one fix: labels_tensor[t : t+n_future_steps] needs
+                # t + n_future_steps - 1 <= num_timesteps - 1, i.e. t <= num_timesteps
+                # - n_future_steps, i.e. last_t (exclusive range bound) must be
+                # num_timesteps - n_future_steps + 1. The old `- n_future_steps`
+                # (no +1) meant the true final timestep was NEVER reachable as a
+                # target for any n_future_steps, and for large n_future_steps
+                # relative to a chunk's real length it silently produced last_t<=1
+                # or even <=0 (zero windows, chunk silently dropped) -- confirmed
+                # against real cached data: with N_FUTURE_STEPS=12 and most sims
+                # at T=13, every chunk collapsed to exactly one window at t=0
+                # (100% cold-start context), and several shorter sims produced
+                # zero windows entirely with no warning anywhere.
+                last_t = num_timesteps - n_future_steps + 1 if include_labels else 1
                 for t in range(last_t):
                     if include_labels:
                         label_step = labels_tensor[t]  # (H, W) — current timestep
                         is_dry = float(label_step.numpy().max()) < min_label_max_depth
-                        if is_dry:
+                        is_coldstart = t < n_flood_maps
+                        if is_dry and not (always_include_coldstart_dry and is_coldstart):
                             if dry_timestep_fraction <= 0.0:
                                 continue
-                            if random.random() >= dry_timestep_fraction:
+                            if _deterministic_unit_interval(
+                                sim_dir, stem, y0, x0, t
+                            ) >= dry_timestep_fraction:
                                 continue
 
                     if n_future_steps == 1:

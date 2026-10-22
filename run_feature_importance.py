@@ -28,9 +28,10 @@ from usl_models.flood_ml.model import FloodModel
 from usl_models.flood_ml.dataset import load_dataset_windowed_patches
 
 # ── Config ──────────────────────────────────────────────────────────────
-FILECACHE_DIR = pathlib.Path("/home/shared/climateiq/filecache")
-MODEL_PATH = "/home/jainr/climateiq-cnn-6/train_output/run_20260310-031133/best_model.keras"
-OUTPUT_DIR = pathlib.Path("/home/jainr/climateiq-cnn-6")
+FILECACHE_DIR = pathlib.Path("/scratch/rmj7591/climateiq/train_data")
+MODEL_PATH = "/scratch/rmj7591/climateiq/train_output/run_20260520-034928/weights_ordered.npz"
+OUTPUT_DIR = pathlib.Path("/scratch/rmj7591/climateiq/feature_importance")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PATCH_SIZE = 256
 N_FLOOD_MAPS = 5
@@ -48,7 +49,10 @@ GEO_CHANNEL_NAMES = [
     "ch7: θ_i (Initial Moisture)",
     "ch8: Slope",
     "ch9: DEM Sink",
+    "ch10: D8 Flow Direction",
+    "ch11: D8 Flow Accumulation",
 ]
+N_GEO = len(GEO_CHANNEL_NAMES)  # 12
 
 TEMPORAL_CHANNEL_NAMES = [
     "Rainfall Rate",
@@ -75,27 +79,30 @@ sim_names = [
 sim_names = [s for s in sim_names if (FILECACHE_DIR / s).exists()]
 
 # ── Load model ──────────────────────────────────────────────────────────
-print(f"Loading model: {MODEL_PATH}")
+print(f"Loading weights: {MODEL_PATH}")
 params = FloodModel.Params(
     lstm_units=128,
     lstm_kernel_size=5,
-    lstm_dropout=0.0,  # no dropout for inference
-    lstm_recurrent_dropout=0.0,
+    lstm_dropout=0.2,
+    lstm_recurrent_dropout=0.2,
     n_flood_maps=N_FLOOD_MAPS,
     m_rainfall=M_RAINFALL,
+    use_rain_broadcast=True,
+    use_group_norm=True,
+    loss_version="v1",
     optimizer=keras.optimizers.Adam(learning_rate=1e-4),
 )
 model = FloodModel(params=params, spatial_dims=(PATCH_SIZE, PATCH_SIZE))
 
-# Build model then load weights from ordered npz
-WEIGHTS_PATH = MODEL_PATH.replace("best_model.keras", "weights_ordered.npz")
+# Build model with dummy forward pass — spatiotemporal is 1-ch flood depth;
+# rain_broadcast concatenation happens inside FloodConvLSTM.call()
 dummy = {
-    "geospatial": tf.zeros((1, PATCH_SIZE, PATCH_SIZE, 10)),
+    "geospatial": tf.zeros((1, PATCH_SIZE, PATCH_SIZE, N_GEO)),
     "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, PATCH_SIZE, PATCH_SIZE, 1)),
     "temporal": tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
 }
 _ = model._model(dummy)
-data = np.load(WEIGHTS_PATH)
+data = np.load(MODEL_PATH)
 w_list = [data[f"w{i:02d}"] for i in range(len(data.files))]
 model._model.set_weights(w_list)
 print(f"Loaded {len(w_list)} weights.")
@@ -124,8 +131,8 @@ val_ds = load_dataset_windowed_patches(
 # ── 1. Gradient-based feature importance ────────────────────────────────
 print(f"\nComputing gradient importance over {N_SAMPLES} batches...")
 
-geo_grad_sum = np.zeros(10)
-spt_grad_sum = np.zeros(1)
+geo_grad_sum = np.zeros(N_GEO)
+spt_grad_sum = np.zeros(1)  # 1-ch external spatiotemporal (flood depth)
 tmp_grad_sum = np.zeros(M_RAINFALL)
 n_counted = 0
 
@@ -179,19 +186,19 @@ print(f"\n{'=' * 60}")
 print("CHANNEL-LABEL PEARSON CORRELATION (spatial, averaged over samples)")
 print("=" * 60)
 
-geo_corrs = np.zeros(10)
+geo_corrs = np.zeros(N_GEO)
 tmp_corrs = np.zeros(M_RAINFALL)
 n_corr = 0
 
 for i, (inputs, labels) in enumerate(val_ds.take(N_SAMPLES)):
-    geo_np = inputs["geospatial"].numpy()  # (B, H, W, 10)
+    geo_np = inputs["geospatial"].numpy()  # (B, H, W, N_GEO)
     lab_np = labels.numpy()                # (B, H, W)
 
     for b in range(geo_np.shape[0]):
         flat_lab = lab_np[b].flatten()
         if flat_lab.std() < 1e-6:
             continue
-        for c in range(10):
+        for c in range(N_GEO):
             flat_ch = geo_np[b, :, :, c].flatten()
             if flat_ch.std() < 1e-6:
                 continue
@@ -234,10 +241,10 @@ for idx in tmp_corr_ranked:
 fig, axes = plt.subplots(1, 3, figsize=(20, 6))
 
 # Geospatial gradient importance
-colors_geo = plt.cm.viridis(np.linspace(0.3, 0.9, 10))
+colors_geo = plt.cm.viridis(np.linspace(0.3, 0.9, N_GEO))
 sorted_geo = np.argsort(geo_importance)
-axes[0].barh(range(10), geo_importance[sorted_geo], color=colors_geo)
-axes[0].set_yticks(range(10))
+axes[0].barh(range(N_GEO), geo_importance[sorted_geo], color=colors_geo)
+axes[0].set_yticks(range(N_GEO))
 axes[0].set_yticklabels([GEO_CHANNEL_NAMES[i] for i in sorted_geo], fontsize=9)
 axes[0].set_xlabel("Mean |gradient|")
 axes[0].set_title("Geospatial Feature Importance\n(gradient-based)")
@@ -256,8 +263,8 @@ axes[1].grid(axis="x", alpha=0.3)
 # Geospatial correlation with flood depth
 sorted_corr = np.argsort(np.abs(geo_corrs))
 bar_colors = ["#d62728" if geo_corrs[i] < 0 else "#2ca02c" for i in sorted_corr]
-axes[2].barh(range(10), geo_corrs[sorted_corr], color=bar_colors)
-axes[2].set_yticks(range(10))
+axes[2].barh(range(N_GEO), geo_corrs[sorted_corr], color=bar_colors)
+axes[2].set_yticks(range(N_GEO))
 axes[2].set_yticklabels([GEO_CHANNEL_NAMES[i] for i in sorted_corr], fontsize=9)
 axes[2].set_xlabel("Pearson r with flood depth")
 axes[2].set_title("Geospatial-Flood Correlation\n(green=positive, red=negative)")
@@ -272,10 +279,10 @@ print(f"\nSaved: {out_path}")
 # ── Save numerical results ──────────────────────────────────────────────
 import json
 results = {
-    "geo_gradient_importance": {GEO_CHANNEL_NAMES[i]: float(geo_importance[i]) for i in range(10)},
+    "geo_gradient_importance": {GEO_CHANNEL_NAMES[i]: float(geo_importance[i]) for i in range(N_GEO)},
     "temporal_gradient_importance": {TEMPORAL_CHANNEL_NAMES[i]: float(tmp_importance[i]) for i in range(M_RAINFALL)},
-    "spatiotemporal_gradient_importance": float(spt_importance[0]),
-    "geo_flood_correlation": {GEO_CHANNEL_NAMES[i]: float(geo_corrs[i]) for i in range(10)},
+    "spatiotemporal_gradient_importance": spt_importance.tolist(),
+    "geo_flood_correlation": {GEO_CHANNEL_NAMES[i]: float(geo_corrs[i]) for i in range(N_GEO)},
     "temporal_flood_correlation": {TEMPORAL_CHANNEL_NAMES[i]: float(tmp_corrs[i]) for i in range(M_RAINFALL)},
     "n_samples": n_counted,
     "model_path": MODEL_PATH,

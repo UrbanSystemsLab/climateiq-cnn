@@ -62,3 +62,28 @@ test_baseline_simple.py
 validate_improvements.py
 CLIMATEIQ_TEAM_UPDATE_*
 IMPROVEMENT_STRATEGY.md
+
+# Root-level one-off eval/experiment/launcher scripts -- real package code
+# lives under usl_models/, these are scratch (.gitignore never hides
+# modifications to files that are already tracked, so this is safe even
+# where a pattern overlaps a real tracked filename like run_quick_train.py).
+/check_*.py
+/evaluation_*.py
+/train_smoke_*.py
+/run_quick_train_r*.py
+/run_val_predict.py
+/make_*.py
+/download_*.py
+/train_scratch_*.py
+/train_small.py
+/visualize_*.py
+/predict_one_chunk_smoketest.py
+/run_comparison.py
+/*.sbatch
+/all_available_sims*.txt
+/gcp_budget_estimate_*.md
+/pipeline_guide.txt
+/climateiq_pipeline_guide.*
+
+# Generated evaluation output
+/results/

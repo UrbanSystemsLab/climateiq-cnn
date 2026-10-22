@@ -14,6 +14,7 @@ import os
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
+import gc
 import io
 import pathlib
 import time
@@ -39,6 +40,7 @@ from usl_models.flood_ml.model import (
     SpatialAttention,
     FloodConvLSTM,
     GreenAmptGate,
+    FloodRoutingCNN,
 )
 from usl_models.flood_ml import customloss, metastore
 from usl_models.shared import downloader
@@ -46,93 +48,115 @@ from usl_models.shared import downloader
 # =====================================================================
 # CONFIGURATION — change these for your city / model
 # =====================================================================
-STUDY_AREA = "Chicago_Predictions"
+STUDY_AREA = "Philadelphia_Predictions"
 RAINFALL_CONFIGS = [
-    f"Chicago%2FRainfall_Data_{i}.txt" for i in range(1, 10)
+    f"Philadelphia%2FRainfall_Data_{i}.txt" for i in range(1, 10)
 ]  # 9 scenarios
 
-# Model checkpoint
-MODEL_DIR = pathlib.Path("/home/rmj7591/climateiq-cnn/train_output/run_20260329-225327")
-WEIGHTS_PATH = MODEL_DIR / "weights_ordered.npz"
-MODEL_PATH = MODEL_DIR / "best_model.keras"
+# Model: SINGLE FloodRoutingCNN checkpoint, fine-tuned at FULL RESOLUTION
+# (1000x1000, no patch cropping) from v3 depth-loss -- the most direct fix
+# for the receptive-field ceiling every prior checkpoint had (patch-cropped
+# training meant the network never saw a real watershed's full upstream
+# area in one shot). Only 8000 steps / 46 min of full-res fine-tuning
+# already beat v3 depth-loss outright on BOTH cities, every metric:
+#   Atlanta:   CSI 0.205->0.210, peak_corr 0.881->0.896
+#   Manhattan: CSI 0.347->0.363 (best of the whole session), peak_corr
+#     0.957->0.962, false_alarm_rate 0.484->0.481
+# elevation_range_m (per-study-area, from Firestore -- see main()) is
+# required by FloodRoutingCNN's true-slope feature.
+ENSEMBLE_MEMBERS = [
+    ("FloodRoutingCNN-fullres2",
+     "/scratch/rmj7591/climateiq/train_output/floodroutingcnn_fullres2_20260825-150315/weights_best.npz",
+     "frcnn", {}),
+    ("FloodRoutingCNN-downhill",
+     "/scratch/rmj7591/climateiq/train_output/floodroutingcnn_downhill_20260827-002706/weights_best.npz",
+     "frcnn", {}),
+]
 
 # Output
 OUTPUT_BUCKET = "climateiq-predictions"  # GCS bucket for results
 OUTPUT_PREFIX = "flood_predictions"  # prefix inside bucket
-LOCAL_OUTPUT_DIR = pathlib.Path("/home/rmj7591/climateiq-cnn/predict_city_output")
+LOCAL_OUTPUT_DIR = pathlib.Path(
+    "/scratch/rmj7591/climateiq/predict_city_output"
+)
 
 # Model params
 CHUNK_SIZE = 1000
 N_FLOOD_MAPS = 5
 M_RAINFALL = 6
 MAX_DEPTH_CLAMP = 4.0
-APPLY_GREEN_AMPT = True
 TEMPORAL_FEATURE_VERSION = 2
 OUTPUT_CRS = "EPSG:4326"  # WGS84 for final mosaic
 
 print(f"Study area:      {STUDY_AREA}")
 print(f"Rainfall configs: {len(RAINFALL_CONFIGS)} scenarios")
-print(f"Model:           {MODEL_PATH}")
+print(f"Model:           {len(ENSEMBLE_MEMBERS)}-member ensemble ({', '.join(n for n, _, _, _ in ENSEMBLE_MEMBERS)})")
 print(f"Output bucket:   {OUTPUT_BUCKET}")
 
 
 # =====================================================================
 # LOAD MODEL — rebuild at full chunk size
 # =====================================================================
-def load_model():
-    """Load model weights and rebuild at CHUNK_SIZE spatial dims."""
-    print(f"\nLoading model from: {MODEL_PATH}")
+def load_ensemble_models():
+    """Load all ENSEMBLE_MEMBERS into full-chunk models (CHUNK_SIZE x CHUNK_SIZE).
 
-    if WEIGHTS_PATH.exists():
-        # Use pre-extracted weights (avoids Keras load_model issues)
-        model = FloodModel(
-            params=FloodModel.Params(lstm_kernel_size=5),
-            spatial_dims=(CHUNK_SIZE, CHUNK_SIZE),
-        )
-        # Build with N_FLOOD_MAPS temporal window (call uses windowed input)
-        dummy = {
-            "geospatial": tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 12)),
-            "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, CHUNK_SIZE, CHUNK_SIZE, 1)),
-            "temporal": tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
-        }
-        _ = model._model(dummy)
-        data = np.load(str(WEIGHTS_PATH))
-        w_list = [data[f"w{i:02d}"] for i in range(len(data.files))]
-        # Expand geo_cnn first Conv2D kernel from (5,5,10,16) → (5,5,12,16).
-        # New channels (10,11) initialised to zero so output is unchanged until
-        # the model is fine-tuned to use them.
-        GEO_IDX = next(i for i, w in enumerate(w_list) if w.shape == (5, 5, 10, 16))
-        w_list[GEO_IDX] = np.pad(w_list[GEO_IDX], [(0,0),(0,0),(0,2),(0,0)])
-        model._model.set_weights(w_list)
-        print(f"  Loaded {len(w_list)} weights from {WEIGHTS_PATH}")
-        return model
-    else:
-        # Fallback: load via Keras
-        saved = keras.models.load_model(
-            str(MODEL_PATH),
-            custom_objects={
-                "SpatialAttention": SpatialAttention,
-                "FloodConvLSTM": FloodConvLSTM,
-                "GreenAmptGate": GreenAmptGate,
-                "flood_weighted_mse": customloss.flood_weighted_mse,
-                "make_hybrid_loss": customloss.make_hybrid_loss,
-            },
-        )
-        saved_weights = saved.get_weights()
-        saved_cfg = saved.get_config()
-        params = FloodModel.Params.from_dict(saved_cfg["params"])
+    Returns a list of (name, model_type, model) tuples. "fconv" members are
+    FloodModel/FloodConvLSTM-based (share one build path, differ only by
+    flow-routing/gravity-loss config); "frcnn" members are the new
+    FloodRoutingCNN architecture (different interface entirely -- no
+    spatiotemporal input, needs elevation_range_m at predict time). Models
+    are held in memory together but only ever run one at a time in
+    predict_chunk_peak, so this doesn't multiply peak activation memory --
+    only the (small) weight storage is paid once per member.
+    """
+    models = []
+    for name, weights_path, model_type, flow_kwargs in ENSEMBLE_MEMBERS:
+        print(f"\nLoading ensemble member: {name} ({weights_path}, type={model_type})")
+        if model_type == "frcnn":
+            model = FloodRoutingCNN(
+                params=FloodModel.Params(optimizer=keras.optimizers.Adam(learning_rate=1e-4)),
+                spatial_dims=(CHUNK_SIZE, CHUNK_SIZE),
+            )
+            _ = model._route_step(
+                tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 1)), tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 12)),
+                tf.zeros((1,)), tf.zeros((1,)), tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 1)), tf.zeros((1,)),
+            )
+            data = np.load(str(weights_path))
+            w_list = [data[f"w{i:02d}"] for i in range(len(data.files))]
+            model.set_weights(w_list)
+            print(f"  Loaded {len(w_list)} weights (FloodRoutingCNN)")
+        else:
+            params = FloodModel.Params(
+                lstm_units=128,
+                lstm_kernel_size=7,
+                lstm_dropout=0.2,
+                lstm_recurrent_dropout=0.2,
+                n_flood_maps=N_FLOOD_MAPS,
+                m_rainfall=M_RAINFALL,
+                use_rain_broadcast=True,
+                use_dilated_geo=True,
+                use_storm_embed=False,
+                use_deep_decoder=False,
+                use_group_norm=True,
+                loss_version="v6",
+                optimizer=keras.optimizers.Adam(learning_rate=1e-4),
+                **flow_kwargs,
+            )
+            model = FloodModel(params=params, spatial_dims=(CHUNK_SIZE, CHUNK_SIZE))
 
-        loaded = FloodConvLSTM(params=params, spatial_dims=(CHUNK_SIZE, CHUNK_SIZE))
-        dummy = {
-            "geospatial": tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 12)),
-            "temporal": tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
-            "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, CHUNK_SIZE, CHUNK_SIZE, 1)),
-        }
-        _ = loaded(dummy, training=False)
-        loaded.set_weights(saved_weights)
-        del saved
-        print(f"  Loaded {len(saved_weights)} weights via Keras")
-        return loaded
+            dummy = {
+                "geospatial":     tf.zeros((1, CHUNK_SIZE, CHUNK_SIZE, 12)),
+                "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, CHUNK_SIZE, CHUNK_SIZE, 1)),
+                "temporal":       tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
+            }
+            _ = model._model(dummy)
+
+            data = np.load(str(weights_path))
+            w_list = [data[f"w{i:02d}"] for i in range(len(data.files))]
+            model._model.set_weights(w_list)
+            print(f"  Loaded {len(w_list)} weights ({flow_kwargs})")
+        models.append((name, model_type, model))
+    return models
 
 
 # =====================================================================
@@ -177,15 +201,28 @@ def pad_temporal_to_max(temporal_2d):
 FLOOD_PERCENTILE = 100  # Use max across timesteps to capture true flood peak extent
 
 
-def predict_chunk_peak(model, geo_tf, temporal_full, rainfall_duration, buildings_mask=None):
-    """Run call_n and return flood depth (percentile over timesteps, buildings masked).
+def predict_chunk_peak(models, geo_tf, temporal_full, rainfall_duration, buildings_mask=None,
+                        elevation_range_m=None):
+    """Run call_n for each ensemble member, average their sequences, then
+    take the percentile-over-time composite (buildings masked).
+
+    Averaging happens per-timestep across members BEFORE the time composite,
+    matching exactly how evaluation_ensemble.py validated this: ensemble
+    prediction = mean of each member's (T, H, W) true-AR sequence, not a
+    post-hoc average of already-composited peak maps.
 
     Args:
-        model: FloodModel instance.
-        geo_tf: (1, H, W, 10) geospatial tensor.
+        models: list of (name, model_type, model) tuples — the ensemble
+            members. "fconv" members use the spatiotemporal-history
+            interface; "frcnn" members (FloodRoutingCNN) have no history
+            input and need elevation_range_m instead.
+        geo_tf: (1, H, W, 12) geospatial tensor.
         temporal_full: (1, 864, 6) padded temporal tensor.
         rainfall_duration: Number of timesteps to predict.
         buildings_mask: (H, W) boolean — True where buildings exist (set to 0).
+        elevation_range_m: scalar float, real (elevation_max - elevation_min)
+            in metres for this study area (from Firestore) — required by
+            "frcnn" members, ignored by "fconv" members.
 
     Returns:
         flood_depth: (H, W) numpy array — flood depth in meters.
@@ -193,15 +230,27 @@ def predict_chunk_peak(model, geo_tf, temporal_full, rainfall_duration, building
     H, W = CHUNK_SIZE, CHUNK_SIZE
     spatiotemporal = tf.zeros((1, N_FLOOD_MAPS, H, W, 1), dtype=tf.float32)
 
-    inputs = {
+    fconv_inputs = {
         "geospatial": geo_tf,
         "temporal": temporal_full,
         "spatiotemporal": spatiotemporal,
     }
+    frcnn_inputs = {
+        "geospatial": geo_tf,
+        "temporal": temporal_full,
+    }
+    if elevation_range_m is not None:
+        frcnn_inputs["elevation_range_m"] = tf.constant([elevation_range_m], dtype=tf.float32)
 
-    # call_n returns (B, n, H, W)
-    all_preds = model.call_n(inputs, n=rainfall_duration)  # (1, T, H, W)
-    all_preds_np = np.clip(all_preds.numpy()[0], 0, MAX_DEPTH_CLAMP)  # (T, H, W)
+    member_seqs = []
+    for name, model_type, model in models:
+        inputs = frcnn_inputs if model_type == "frcnn" else fconv_inputs
+        # call_n returns (B, n, H, W)
+        all_preds = model.call_n(inputs, n=rainfall_duration)  # (1, T, H, W)
+        member_seqs.append(np.clip(all_preds.numpy()[0], 0, MAX_DEPTH_CLAMP))  # (T, H, W)
+        del all_preds  # free GPU tensor immediately
+
+    all_preds_np = np.mean(np.stack(member_seqs, axis=0), axis=0)  # (T, H, W) ensemble mean
 
     # 85th percentile filters AR spike artifacts while keeping real flood signal
     flood_depth = np.percentile(all_preds_np, FLOOD_PERCENTILE, axis=0)  # (H, W)
@@ -416,12 +465,19 @@ def main():
     chunk_size = sa_data.get("chunk_size", CHUNK_SIZE)
     chunk_x_count = sa_data.get("chunk_x_count", 0)
     chunk_y_count = sa_data.get("chunk_y_count", 0)
+    elevation_min = sa_data.get("elevation_min")
+    elevation_max = sa_data.get("elevation_max")
+    elevation_range_m = (
+        elevation_max - elevation_min if elevation_min is not None and elevation_max is not None else None
+    )
 
     print(f"  CRS:          {crs_str}")
     print(f"  Cell size:    {cell_size}m")
     print(f"  LL corner:    ({x_ll_corner}, {y_ll_corner})")
     print(f"  Chunk size:   {chunk_size}")
     print(f"  Chunk grid:   {chunk_x_count} x {chunk_y_count}")
+    print(f"  Elevation range: {elevation_range_m}m "
+          f"({'MISSING -- FloodRoutingCNN member will fall back to unscaled slope' if elevation_range_m is None else 'OK'})")
 
     # ── 2. Get all feature chunks (download ONCE, reuse for all scenarios) ──
     chunk_metadata = metastore.get_spatial_feature_chunk_metadata_for_prediction(
@@ -433,8 +489,12 @@ def main():
     # Pre-download and cache all geospatial feature matrices
     print(f"\n  Downloading {total_chunks} feature matrices...")
     geo_cache = {}  # chunk_name -> (geo_tf, H, profile_args)
+    skipped = 0
     for ci, chunk_meta in enumerate(chunk_metadata):
-        feature_url = chunk_meta["feature_matrix_path"]
+        feature_url = chunk_meta.get("feature_matrix_path")
+        if not feature_url:
+            skipped += 1
+            continue
         x_idx = chunk_meta.get("x_index", 0)
         y_idx = chunk_meta.get("y_index", 0)
         chunk_name = feature_url.split("/")[-1].replace(".npy", "")
@@ -468,7 +528,7 @@ def main():
 
         geo_cache[chunk_name] = (geo_tf, H, profile, x_idx, y_idx, valid_mask, buildings_mask)
         if (ci + 1) % 20 == 0 or ci == total_chunks - 1:
-            print(f"    Downloaded {ci+1}/{total_chunks}")
+            print(f"    Downloaded {ci+1}/{total_chunks} (skipped {skipped} without features)")
 
     LOCAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -478,33 +538,40 @@ def main():
         print(f"  SCENARIO {scenario_idx+1}/{len(RAINFALL_CONFIGS)}: {rainfall_config}")
         print(f"{'='*60}")
 
-        # Clear GPU memory from previous scenario before loading model
-        tf.keras.backend.clear_session()
-        model = load_model()
+        # Resume: count already-uploaded chunks for this scenario
+        scenario_prefix = f"{OUTPUT_PREFIX}/{STUDY_AREA}/{rainfall_config}/"
+        all_scenario_blobs = list(gcs_client.bucket(OUTPUT_BUCKET).list_blobs(prefix=scenario_prefix))
+        done_blobs = set(
+            b.name.split("/")[-1].replace("_peak.tif", "")
+            for b in all_scenario_blobs
+        )
+        mosaic_blob_name = f"{OUTPUT_PREFIX}/{STUDY_AREA}/{rainfall_config}/{STUDY_AREA}_mosaic_peak_wgs84.tif"
+        mosaic_already_on_gcs = any(b.name == mosaic_blob_name for b in all_scenario_blobs)
+        all_chunks_done = len(done_blobs) >= total_chunks - 1  # -1 for the 1 missing-feature chunk
 
-        # Get rainfall metadata
-        try:
-            config_meta = metastore.get_temporal_feature_metadata_for_prediction(
-                db, rainfall_config
-            )
-        except Exception as e:
-            print(f"  SKIP — rainfall config not found: {e}")
+        if all_chunks_done and mosaic_already_on_gcs:
+            print(f"  SKIP — already complete ({len(done_blobs)} chunks + mosaic in GCS)")
             continue
 
-        rainfall_gcs_uri = config_meta["as_vector_gcs_uri"]
-        rainfall_duration = config_meta["rainfall_duration"]
-        print(f"  Rainfall duration: {rainfall_duration} timesteps ({rainfall_duration * 5} min)")
+        if all_chunks_done:
+            print(f"  MOSAIC ONLY — all {len(done_blobs)} chunks in GCS, rebuilding mosaic")
+        elif done_blobs:
+            print(f"  RESUME — {len(done_blobs)} chunks already done, skipping those")
 
-        # Build temporal tensor for this scenario
-        temporal_vec = downloader.download_as_array(gcs_client, rainfall_gcs_uri)
-        if TEMPORAL_FEATURE_VERSION == 2:
-            temporal_2d = build_temporal_v2(temporal_vec)
-        else:
-            temporal_2d = np.tile(temporal_vec[:, None], (1, M_RAINFALL)).astype(np.float32)
-        temporal_padded = pad_temporal_to_max(temporal_2d)
-        temporal_tf = tf.expand_dims(
-            tf.convert_to_tensor(temporal_padded, dtype=tf.float32), 0
-        )
+        if not all_chunks_done:
+            # Clear GPU memory from previous scenario before loading models
+            tf.keras.backend.clear_session()
+            models = load_ensemble_models()
+
+        # Get rainfall metadata (needed for temporal tensor even in mosaic-only mode? No — skip)
+        if not all_chunks_done:
+            try:
+                config_meta = metastore.get_temporal_feature_metadata_for_prediction(
+                    db, rainfall_config
+                )
+            except Exception as e:
+                print(f"  SKIP — rainfall config not found: {e}")
+                continue
 
         # Scenario output subfolder — clean old files to avoid stale TIFs
         scenario_dir = LOCAL_OUTPUT_DIR / rainfall_config.replace("%2F", "_")
@@ -513,9 +580,25 @@ def main():
                 old_tif.unlink()
         scenario_dir.mkdir(parents=True, exist_ok=True)
 
-        # ── Predict each chunk ────────────────────────────────────────
+        if not all_chunks_done:
+            rainfall_gcs_uri = config_meta["as_vector_gcs_uri"]
+            rainfall_duration = config_meta["rainfall_duration"]
+            print(f"  Rainfall duration: {rainfall_duration} timesteps ({rainfall_duration * 5} min)")
+
+            # Build temporal tensor for this scenario
+            temporal_vec = downloader.download_as_array(gcs_client, rainfall_gcs_uri)
+            if TEMPORAL_FEATURE_VERSION == 2:
+                temporal_2d = build_temporal_v2(temporal_vec)
+            else:
+                temporal_2d = np.tile(temporal_vec[:, None], (1, M_RAINFALL)).astype(np.float32)
+            temporal_padded = pad_temporal_to_max(temporal_2d)
+            temporal_tf = tf.expand_dims(
+                tf.convert_to_tensor(temporal_padded, dtype=tf.float32), 0
+            )
+
+        # ── Predict each chunk (skip if all already done) ────────────
         scenario_start = time.time()
-        for ci, chunk_name in enumerate(geo_cache):
+        for ci, chunk_name in enumerate(geo_cache) if not all_chunks_done else []:
             geo_tf, H, profile, x_idx, y_idx, valid_mask, buildings_mask = geo_cache[chunk_name]
             chunk_start = time.time()
 
@@ -524,11 +607,15 @@ def main():
                 print(f"\n  [{ci+1}/{total_chunks}] {chunk_name} — SKIP (outside study area)")
                 continue
 
+            # Resume: skip chunks already uploaded
+            if chunk_name in done_blobs:
+                continue
+
             print(f"\n  [{ci+1}/{total_chunks}] {chunk_name} (x={x_idx}, y={y_idx})")
 
             peak_depth = predict_chunk_peak(
-                model, geo_tf, temporal_tf, rainfall_duration,
-                buildings_mask=buildings_mask,
+                models, geo_tf, temporal_tf, rainfall_duration,
+                buildings_mask=buildings_mask, elevation_range_m=elevation_range_m,
             )
 
             # Apply valid_mask: set pixels outside study area to nodata
@@ -537,6 +624,9 @@ def main():
             elapsed = time.time() - chunk_start
             valid_pct = valid_mask.sum() / valid_mask.size * 100
             print(f"    Done in {elapsed:.1f}s  peak={peak_depth[valid_mask].max():.3f}m  valid={valid_pct:.0f}%")
+
+            if (ci + 1) % 50 == 0:
+                gc.collect()
 
             # Save locally
             local_path = scenario_dir / f"{STUDY_AREA}_{chunk_name}_peak.tif"
@@ -554,6 +644,16 @@ def main():
                 print(f"    WARNING: GCS upload failed: {e}")
 
         # ── Mosaic for this scenario ──────────────────────────────────
+        # If this scenario was resumed, some chunks were skipped (already in GCS).
+        # Download them back locally so the mosaic covers the full extent.
+        gcs_bucket_obj = gcs_client.bucket(OUTPUT_BUCKET)
+        for blob in gcs_bucket_obj.list_blobs(prefix=scenario_prefix):
+            chunk_fname = blob.name.split("/")[-1]
+            if not chunk_fname.endswith("_peak.tif") or "mosaic" in chunk_fname:
+                continue
+            local_chunk = scenario_dir / f"{STUDY_AREA}_{chunk_fname}"
+            if not local_chunk.exists():
+                blob.download_to_filename(str(local_chunk))
         chunk_tifs = sorted(scenario_dir.glob(f"{STUDY_AREA}_*_peak.tif"))
         mosaic_name = f"{STUDY_AREA}_mosaic_peak_wgs84.tif"
         mosaic_path = scenario_dir / mosaic_name
