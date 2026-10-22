@@ -17,6 +17,7 @@ setup(
         "google-cloud-storage==2.15.0",
         # firestore is not present in the image, but we match the cloud-storage version.
         "google-cloud-firestore==2.15.0",
+        "google-cloud-batch==0.17.35",
         "seaborn==0.13.2",
         "keras-tuner[bayesian]==1.4.7",
     ],

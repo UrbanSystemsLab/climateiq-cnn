@@ -14,6 +14,9 @@ from usl_lib.shared import geo_data
 from usl_lib.transformers import polygon_transformers
 from usl_lib.writers import elevation_writers
 
+# Options for intermediate GeoTIFFs that may cover a whole study area.
+GEOTIFF_CREATION_OPTIONS = ["COMPRESS=LZW", "TILED=YES", "BIGTIFF=IF_SAFER"]
+
 
 def crop_geotiff_to_sub_area(
     source_elevation_file_path: str | pathlib.Path,
@@ -56,10 +59,13 @@ def crop_geotiff_to_sub_area(
     row_end = min(header.row_count, int(math.ceil(lower_row)) + border_cell_count)
 
     ds = gdal.Open(str(source_elevation_file_path))
+    # Compressed because scratch space on Cloud Run is memory, and a large city's
+    # uncompressed elevation (Houston: ~11 GB) would exceed the job's memory limit.
     gdal.Translate(
         str(target_elevation_file_path),
         ds,
         srcWin=[col_start, row_start, col_end - col_start, row_end - row_start],
+        creationOptions=GEOTIFF_CREATION_OPTIONS,
     )
 
 

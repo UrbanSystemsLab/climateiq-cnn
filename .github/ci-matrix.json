@@ -1,0 +1,52 @@
+[
+  {
+    "service": "usl_lib",
+    "path": "usl_pipeline/usl_lib",
+    "runner": "ubuntu-22.04",
+    "gdal": true,
+    "emulator": true,
+    "pytest": true,
+    "deps": "usl_pipeline/usl_lib/setup.py",
+    "install": "pip install -e usl_pipeline/usl_lib[dev]"
+  },
+  {
+    "service": "study_area_uploader",
+    "path": "usl_pipeline/study_area_uploader",
+    "runner": "ubuntu-22.04",
+    "gdal": true,
+    "emulator": false,
+    "pytest": true,
+    "deps": "usl_pipeline/study_area_uploader/requirements.txt\nusl_pipeline/study_area_uploader/setup.py\nusl_pipeline/usl_lib/setup.py",
+    "install": "cd usl_pipeline/study_area_uploader && pip install -r requirements.txt && pip install -e .[dev]"
+  },
+  {
+    "service": "add_area",
+    "path": "usl_pipeline/add_area",
+    "runner": "ubuntu-22.04",
+    "gdal": true,
+    "emulator": false,
+    "pytest": false,
+    "deps": "requirements-dev.txt\nusl_pipeline/add_area/requirements.txt\nusl_pipeline/study_area_uploader/requirements.txt\nusl_pipeline/study_area_uploader/setup.py\nusl_pipeline/usl_lib/setup.py",
+    "install": "pip install -r requirements-dev.txt && cd usl_pipeline/add_area && pip install -r requirements.txt --extra-index-url https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple && pip install -e ../usl_lib -e ../study_area_uploader"
+  },
+  {
+    "service": "cloud_functions",
+    "path": "usl_pipeline/cloud_functions",
+    "runner": "ubuntu-24.04",
+    "gdal": false,
+    "emulator": false,
+    "pytest": true,
+    "deps": "requirements-dev.txt\nusl_pipeline/cloud_functions/requirements.txt",
+    "install": "pip install -r requirements-dev.txt && cd usl_pipeline/cloud_functions && pip install -r requirements.txt"
+  },
+  {
+    "service": "usl_models",
+    "path": "usl_models",
+    "runner": "ubuntu-24.04",
+    "gdal": false,
+    "emulator": true,
+    "pytest": true,
+    "deps": "usl_models/setup.py",
+    "install": "pip install -e usl_models[dev]"
+  }
+]

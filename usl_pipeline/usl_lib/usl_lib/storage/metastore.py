@@ -3,9 +3,10 @@ import datetime
 import enum
 import hashlib
 import itertools
+import logging
 import math
 import random
-from typing import Any, Iterable, cast
+from typing import Iterable
 import urllib.parse
 
 from google.cloud import firestore
@@ -22,6 +23,35 @@ WRF_HEAT_CONFIG = "wrf_heat_configs"
 
 SIMULATIONS = "simulations"
 SIMULATION_LABEL_CHUNKS = "label_chunks"
+
+
+def _declared_fields(cls: type, document: dict | None) -> dict:
+    """Drops document keys that the dataclass does not declare.
+
+    A Firestore document outlives the code that reads it. When a writer running newer
+    code adds a field, every reader built before it used to fail outright, because the
+    document was splatted straight into the constructor and an undeclared key raises
+    TypeError. Unknown keys are now logged and skipped, so a schema addition degrades
+    to a warning instead of breaking the reader.
+
+    Args:
+      cls: The dataclass the document is being read into.
+      document: The raw Firestore document contents, which may be None.
+
+    Returns:
+      The subset of the document whose keys the dataclass declares.
+    """
+    known = {field.name for field in dataclasses.fields(cls)}
+    contents = document or {}
+    unknown = contents.keys() - known
+    if unknown:
+        logging.warning(
+            "Ignoring %s field(s) not known to this build of %s: %s",
+            len(unknown),
+            cls.__name__,
+            ", ".join(sorted(unknown)),
+        )
+    return {key: value for key, value in contents.items() if key in known}
 
 
 class StudyAreaState(enum.StrEnum):
@@ -57,6 +87,8 @@ class StudyArea:
     state: StudyAreaState | None = None
     elevation_min: float | None = None
     elevation_max: float | None = None
+    slope_min: float | None = None
+    slope_max: float | None = None
     chunk_size: int | None = None
     chunk_x_count: int | None = None
     chunk_y_count: int | None = None
@@ -106,16 +138,12 @@ class StudyArea:
         if not ref.exists:
             raise ValueError(f'No such study area "{name}"')
 
-        data: dict[str, Any] = ref.to_dict() or {}
-        return cls(name=name, **data)
+        return cls(name=name, **_declared_fields(cls, ref.to_dict()))
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
         """Retrieve a Firestore reference to the study area with the given name."""
-        return cast(
-            firestore.DocumentReference,
-            db.collection(STUDY_AREAS).document(name),
-        )
+        return db.collection(STUDY_AREAS).document(name)
 
     @staticmethod
     def update_min_max_elevation(
@@ -138,6 +166,28 @@ class StudyArea:
         study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
         transaction = db.transaction()
         _update_study_area_min_max_elevation(transaction, study_area_ref, min_, max_)
+
+    @staticmethod
+    def update_min_max_slope(
+        db: firestore.Client, study_area_name: str, min_: float, max_: float
+    ) -> None:
+        """Sets slope min & max if less or greater than the current min & max.
+
+        For the given study area, transactionally updates the slope_min and
+        slope_max field to the given min_ and max_ values if they are less than and
+        greater than the current values.
+
+        Args:
+          db: The firestore database client to use to make the update.
+          study_area_name: The study area to update.
+          min_: The min slope value for the study area. Will only be set if less
+                than the study area's current min.
+          max_: The max slope value for the study area. Will only be set if less
+                than the study area's current max.
+        """
+        study_area_ref = db.collection(STUDY_AREAS).document(study_area_name)
+        transaction = db.transaction()
+        _update_study_area_min_max_slope(transaction, study_area_ref, min_, max_)
 
     @staticmethod
     def update_chunk_info(
@@ -289,14 +339,12 @@ class StudyAreaChunk:
         if not ref.exists:
             raise ValueError(f'No such chunk {chunk_name} within {study_area_name}"')
 
-        data: dict[str, Any] = ref.to_dict() or {}
-        return cls(id_=chunk_name, **data)
+        return cls(id_=chunk_name, **_declared_fields(cls, ref.to_dict()))
 
     @classmethod
     def from_ref(cls, ref: firestore.DocumentReference) -> "StudyAreaChunk":
         """Creates an instance of the chunk class based on retrieved reference."""
-        data: dict[str, Any] = ref.get().to_dict() or {}
-        return cls(id_=ref.id, **data)
+        return cls(id_=ref.id, **_declared_fields(cls, ref.get().to_dict()))
 
     @staticmethod
     def get_ref(
@@ -328,8 +376,7 @@ class StudyAreaChunk:
         ref = cls.get_ref(db, study_area_name, chunk_name).get()
         if not ref.exists:
             return None
-        data: dict[str, Any] = ref.to_dict() or {}
-        return cls(id_=chunk_name, **data)
+        return cls(id_=chunk_name, **_declared_fields(cls, ref.to_dict()))
 
     @classmethod
     def update_scaling_done(
@@ -418,6 +465,35 @@ def _update_study_area_min_max_elevation(
         transaction.update(study_area_ref, update)
 
 
+@firestore.transactional
+def _update_study_area_min_max_slope(
+    transaction: firestore.Transaction,
+    study_area_ref: firestore.DocumentReference,
+    min_: float,
+    max_: float,
+) -> None:
+    """Updates the study area's slope min & max in a transaction."""
+    snapshot = study_area_ref.get(transaction=transaction)
+    update = {}
+
+    try:
+        cur_min = snapshot.get("slope_min")
+        if min_ < cur_min:
+            update["slope_min"] = min_
+    except KeyError:
+        update["slope_min"] = min_
+
+    try:
+        cur_max = snapshot.get("slope_max")
+        if max_ > cur_max:
+            update["slope_max"] = max_
+    except KeyError:
+        update["slope_max"] = max_
+
+    if update:
+        transaction.update(study_area_ref, update)
+
+
 @dataclasses.dataclass(slots=True)
 class FloodScenarioConfig:
     """A configuration file describing rainfall patterns for a CityCAT simulation.
@@ -461,18 +537,14 @@ class FloodScenarioConfig:
         if not ref.exists:
             raise ValueError(f'No such flood config "{name}"')
 
-        data: dict[str, Any] = ref.to_dict() or {}
-        return cls(name=name, **data)
+        return cls(name=name, **_declared_fields(cls, ref.to_dict()))
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
         """Retrieve a Firestore reference to the flood config with the given name."""
         # Escape the name to avoid characters not allowed in IDs such as slashes.
-        return cast(
-            firestore.DocumentReference,
-            db.collection(CITY_CAT_RAINFALL_CONFIG).document(
-                urllib.parse.quote(name, safe=())
-            ),
+        return db.collection(CITY_CAT_RAINFALL_CONFIG).document(
+            urllib.parse.quote(name, safe=())
         )
 
 
@@ -524,16 +596,14 @@ class HeatScenarioConfig:
         if not ref.exists:
             raise ValueError(f'No such heat config "{name}"')
 
-        data: dict[str, Any] = ref.to_dict() or {}
-        return cls(name=name, **data)
+        return cls(name=name, **_declared_fields(cls, ref.to_dict()))
 
     @staticmethod
     def get_ref(db: firestore.Client, name: str) -> firestore.DocumentReference:
         """Retrieve a Firestore reference to the heat config with the given name."""
         # Escape the name to avoid characters not allowed in IDs such as slashes.
-        return cast(
-            firestore.DocumentReference,
-            db.collection(WRF_HEAT_CONFIG).document(urllib.parse.quote(name, safe=())),
+        return db.collection(WRF_HEAT_CONFIG).document(
+            urllib.parse.quote(name, safe=())
         )
 
 
@@ -586,19 +656,15 @@ class Simulation:
         ref = cls.get_ref(db, study_area_name, config_path).get()
         if not ref.exists:
             raise ValueError(f"No such simulation for {study_area_name} {config_path}")
-        data: dict[str, Any] = ref.to_dict() or {}
-        return Simulation(**data)
+        return Simulation(**_declared_fields(Simulation, ref.to_dict()))
 
     @staticmethod
     def get_ref(
         db: firestore.Client, study_area_name: str, config_path: str
     ) -> firestore.DocumentReference:
         """Retrieves a reference for the simulation for the given study are & config."""
-        return cast(
-            firestore.DocumentReference,
-            db.collection(SIMULATIONS).document(
-                urllib.parse.quote(f"{study_area_name}-{config_path}", safe=())
-            ),
+        return db.collection(SIMULATIONS).document(
+            urllib.parse.quote(f"{study_area_name}-{config_path}", safe=())
         )
 
 
@@ -629,7 +695,7 @@ class SimulationLabelChunk:
             SIMULATION_LABEL_CHUNKS
         )
         for chunk_ref in ref.list_documents():
-            yield cls(**chunk_ref.get().to_dict())
+            yield cls(**_declared_fields(cls, chunk_ref.get().to_dict()))
 
 
 class DatasetSplit(enum.StrEnum):

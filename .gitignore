@@ -14,10 +14,19 @@ logs/*
 usl_models/logs/*
 usl_models/data/*
 
+# Generated pipeline outputs
+data/
+
 .venv
 
 *.mypy_cache
 *.pytest_cache
+.DS_Store
+
+# Emacs lock files and auto-save files
+.#*
+\#*\#
+*~
 
 # FloodML noise files
 *.png
