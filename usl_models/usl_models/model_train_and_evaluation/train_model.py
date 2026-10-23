@@ -53,7 +53,7 @@ from usl_models.flood_ml.dataset_improved import load_dataset_windowed_patches
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
 OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LOG_NAME = "semi_physical_test_6_step_60_mid_check_part_grad_loss_no_mass_same_to_old_train_loss"
+LOG_NAME = "semi_new_test_v03_1"
 
 PATCH_SIZE = 256
 PATCH_STRIDE = 128
@@ -219,7 +219,7 @@ STEPS_PER_EPOCH = 2000  # V1 baseline — only rain_broadcast is the variable
 # Strategy: keep V1 loss + V1 weights, add rain_broadcast as the ONLY change.
 # This way we strictly build on V1's 30+ epochs of prior knowledge.
 ARCH_V3 = True                     # framework flag
-WARM_START = True                  # load V3 Round 3 weights (incremental on top of V3 R3)
+WARM_START = False                  # load V3 Round 3 weights (incremental on top of V3 R3)
 USE_RAIN_BROADCAST = True          # kept from R3 (neutral-positive)
 USE_DILATED_GEO = False            # still disabled
 USE_STORM_EMBED = False            # still disabled

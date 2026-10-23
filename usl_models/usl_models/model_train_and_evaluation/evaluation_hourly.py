@@ -24,7 +24,7 @@ SEED = 42
 keras.utils.set_random_seed(SEED)
 
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
-OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output/semi_physical_test_6_step_60_mid_check_part_grad_loss_no_mass_same_to_old_train_loss/evaluation_hourly_new_dataset")
+OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output/semi_physical_test_6_step_60_mid_check_full_grad_loss_no_mass_same_to_old_train_loss/evaluation_hourly_new_dataset")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PATCH_SIZE   = 256
@@ -35,7 +35,7 @@ N_SAMPLES = 1000  # batches — more = more reliable correlation estimate
 
 CHECKPOINTS = {
     "R14 (focal loss, 8 US cities)": pathlib.Path(
-        "/scratch/hw4402/climateiq_output/semi_physical_test_6_step_60_mid_check_part_grad_loss_no_mass_same_to_old_train_loss/weights_ordered.npz"
+        "/scratch/hw4402/climateiq_output/semi_physical_test_6_step_60_mid_check_full_grad_loss_no_mass_same_to_old_train_loss/weights_ordered.npz"
     ),
 }
 

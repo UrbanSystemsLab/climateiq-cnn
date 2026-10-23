@@ -17,7 +17,7 @@ from usl_models.flood_ml import customloss
 Activation: TypeAlias = Literal["relu", "sigmoid", "tanh", "softmax", "linear"]
 PadMode: TypeAlias = Literal["REFLECT", "CONSTANT"]
 RESOLUTION = 2
-REVOLVESTEPS = 60
+REVOLVESTEPS = 30
 EPS = 1e-7 
 V_MAX = 1
 N_BPTT = 30
@@ -689,8 +689,8 @@ class FloodPhysicConvLSTM(keras.Model):
         # Final 3×3 to single output channel. Linear activation lets
         # the loss gradient flow unconstrained; clip to ≥0 at inference.
         self.output_d_conv = layers.Conv2D(2, 3, padding="same", activation="tanh")
-        self.output_s_conv = layers.Conv2D(2, 3, padding="same", activation="tanh")
-        self.infil_transp_conv = layers.Conv2D(1, 3, padding="same", activation="sigmoid")
+        self.output_s_conv = layers.Conv2D(2, 3, padding="same", activation="linear")
+        self.infil_transp_conv = layers.Conv2D(1, 3, padding="same", activation="relu")
 
         # Physics-based infiltration correction (no trainable weights)
         self.green_ampt_gate = GreenAmptGate(name="green_ampt_gate")
@@ -814,7 +814,7 @@ class FloodPhysicConvLSTM(keras.Model):
         # flood_velocity = flood_d * flood_s
         flood_velocity = self.output_s_conv(x) * V_MAX # [B, H, W, 2]
         # the infiltration
-        infiltration_transpiration = self.infil_transp_conv(x) * 1e-4
+        infiltration_transpiration = self.infil_transp_conv(x)
 
         self._v_mean = tf.reduce_mean(tf.abs(flood_velocity))
         self._infil_mean = tf.reduce_mean(infiltration_transpiration)
@@ -842,7 +842,7 @@ class FloodPhysicConvLSTM(keras.Model):
             vel_i = velocity if use_grad else v_sg
             inf_i = infiltration_transpiration if use_grad else inf_sg
 
-            infiltration_volume = inf_i * RESOLUTION**2 * step_time
+            infiltration_volume = inf_i * RESOLUTION**2 / REVOLVESTEPS
             out_volume = vel_i * current_depth * RESOLUTION * step_time
             total_out = tf.reduce_sum(out_volume, axis=-1, keepdims=True) + infiltration_volume # [B, H, W, 1]
 
@@ -1046,15 +1046,15 @@ class FloodPhysicConvLSTM(keras.Model):
                 step_loss = self.compute_loss(y=yk, y_pred=pred)
 
                 # # Mass preservation: penalise mismatch in mean depth
-                # pred_mass = tf.reduce_mean(pred, axis=[1, 2, 3])
-                # gt_mass = tf.reduce_mean(yk, axis=[1, 2, 3])
-                # mass_loss = tf.reduce_mean(tf.square(pred_mass - gt_mass))
+                pred_mass = tf.reduce_mean(pred, axis=[1, 2, 3])
+                gt_mass = tf.reduce_mean(yk, axis=[1, 2, 3])
+                mass_loss = tf.reduce_mean(tf.square(pred_mass - gt_mass))
 
                 # Later steps matter more (error should not accumulate)
                 time_weight = 1.0 + 0.3 * k
 
-                # total_loss += time_weight * (step_loss + 0.2 * mass_loss)
-                total_loss += time_weight * (step_loss)
+                total_loss += time_weight * (step_loss + 0.2 * mass_loss)
+                # total_loss += time_weight * (step_loss)
 
                 # Feed corrected prediction back: clip at 4.0m to match GT depth cap
                 # (was 2.5m which caused hard ceiling — pred never learned >2.5m)
