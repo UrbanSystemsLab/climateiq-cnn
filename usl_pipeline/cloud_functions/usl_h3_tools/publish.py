@@ -19,6 +19,8 @@ import requests
 from usl_lib.shared import area_names
 
 TILE_SOURCES_PREFIX = "tile_sources"
+# <tileset>.pmtiles, overwritten by each build.
+TILESERVER_LATEST_PREFIX = "tileserver/latest"
 CITY_H3_SOURCE = "{area}/h3_{area}.geojson"
 NATIONAL_ADMIN_SOURCE = "USA_Combined/admin.geojson"
 CITY_H3_TILESET_PREFIX = "climateiq-h3-"

@@ -31,7 +31,7 @@ from usl_lib.chunkers import raster_chunkers
 from usl_lib.readers import simulation_readers
 from usl_lib.readers import config_readers
 from usl_lib.readers import elevation_readers, polygon_readers
-from usl_lib.shared import geo_data, wps_data
+from usl_lib.shared import area_names, geo_data, wps_data
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import file_names
 from usl_lib.storage import metastore
@@ -1666,6 +1666,7 @@ try:
         ensure_wgs84,
     )
     from cli_preprocess_tiff_to_h3csv import preprocess_city  # noqa: E402
+    from usl_h3_tools import pmtiles_build  # noqa: E402
     from usl_h3_tools import util_io  # noqa: E402
     from usl_h3_tools import publish as tile_publish  # noqa: E402
 except ImportError:
@@ -1917,18 +1918,18 @@ def _title_case_gdf(gdf):
 
 
 STATE_FIPS_TO_INFO = {
-    "04": {"name": "Arizona", "osm_id": "162018"},
-    "06": {"name": "California", "osm_id": "165475"},
-    "10": {"name": "Delaware", "osm_id": "162110"},
-    "12": {"name": "Florida", "osm_id": "162050"},
-    "13": {"name": "Georgia", "osm_id": "161957"},
-    "17": {"name": "Illinois", "osm_id": "122586"},
-    "22": {"name": "Louisiana", "osm_id": "224922"},
-    "24": {"name": "Maryland", "osm_id": "162112"},
-    "34": {"name": "New Jersey", "osm_id": "224951"},
-    "36": {"name": "New York", "osm_id": "61320"},
-    "42": {"name": "Pennsylvania", "osm_id": "162109"},
-    "48": {"name": "Texas", "osm_id": "114690"},
+    "04": {"name": "Arizona", "osm_id": "162018", "abbr": "AZ"},
+    "06": {"name": "California", "osm_id": "165475", "abbr": "CA"},
+    "10": {"name": "Delaware", "osm_id": "162110", "abbr": "DE"},
+    "12": {"name": "Florida", "osm_id": "162050", "abbr": "FL"},
+    "13": {"name": "Georgia", "osm_id": "161957", "abbr": "GA"},
+    "17": {"name": "Illinois", "osm_id": "122586", "abbr": "IL"},
+    "22": {"name": "Louisiana", "osm_id": "224922", "abbr": "LA"},
+    "24": {"name": "Maryland", "osm_id": "162112", "abbr": "MD"},
+    "34": {"name": "New Jersey", "osm_id": "224951", "abbr": "NJ"},
+    "36": {"name": "New York", "osm_id": "61320", "abbr": "NY"},
+    "42": {"name": "Pennsylvania", "osm_id": "162109", "abbr": "PA"},
+    "48": {"name": "Texas", "osm_id": "114690", "abbr": "TX"},
 }
 
 USA_BOUNDARY_ID = "148838"
@@ -2339,6 +2340,100 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
 
 
 # ---------------------------------------------------------------------------
+# PMTiles for tileserver-gl
+# ---------------------------------------------------------------------------
+
+TILESERVER_BUCKET_ENV = "TILESERVER_BUCKET"
+PMTILES_CONTENT_TYPE = "application/vnd.pmtiles"
+
+
+def _city_area_name(city_config):
+    """Returns the city's <ISO3>_<STATE>_<City> name, or None for an unknown state."""
+    name = city_config["name"]
+    if area_names.is_canonical_area_name(name):
+        return name
+    state = STATE_FIPS_TO_INFO.get(str(city_config.get("state_fips")), {}).get("abbr")
+    if state is None:
+        return None
+    return area_names.canonical_area_name("USA", state, name)
+
+
+def _start_pmtiles_build(tileset, source_dir, tiles_dir):
+    """Starts building tileset's PMTiles from source_dir's per-level GeoJSON."""
+    layers = [
+        pmtiles_build.LayerSource(
+            layer.layer_name,
+            layer.minzoom,
+            layer.maxzoom,
+            os.path.join(
+                source_dir, f"admin_level_{layer.admin_level}_all_cities.geojson"
+            ),
+        )
+        for layer in tileset.layers
+    ]
+    path = os.path.join(tiles_dir, f"{tileset.name}.pmtiles")
+    process = pmtiles_build.start(path, tileset.name, tileset.description, layers)
+    return tileset, path, process
+
+
+def _start_city_pmtiles_build(city_config, tiles_bucket, output_dir, tiles_dir):
+    """Starts building the city's H3 PMTiles, or returns None if it can't be named."""
+    area_name = _city_area_name(city_config)
+    if area_name is None:
+        logging.warning(
+            "No <ISO3>_<STATE>_<City> name for %s (state_fips=%s); skipping PMTiles",
+            city_config["name"],
+            city_config.get("state_fips"),
+        )
+        return None
+    tileset = tile_publish.tileset_for_object(
+        tiles_bucket, tile_publish.CITY_H3_SOURCE.format(area=area_name)
+    )
+    return _start_pmtiles_build(tileset, output_dir, tiles_dir)
+
+
+def _start_national_admin_pmtiles_build(
+    pipeline_bucket, output_prefix, tiles_bucket, tiles_dir
+):
+    """Starts building the national admin PMTiles from the all-cities GeoJSON."""
+    tileset = tile_publish.tileset_for_object(
+        tiles_bucket, tile_publish.NATIONAL_ADMIN_SOURCE
+    )
+    source_dir = os.path.join(tiles_dir, tileset.name)
+    os.makedirs(source_dir, exist_ok=True)
+    bucket = storage.Client().bucket(pipeline_bucket)
+    for layer in tileset.layers:
+        fname = f"admin_level_{layer.admin_level}_all_cities.geojson"
+        blob = bucket.blob(f"{output_prefix}{fname}")
+        if blob.exists():
+            blob.download_to_filename(os.path.join(source_dir, fname))
+    return _start_pmtiles_build(tileset, source_dir, tiles_dir)
+
+
+def _upload_pmtiles_build(build, tiles_bucket):
+    """Waits for a build and uploads its PMTiles to the tileserver's latest/ prefix.
+
+    Returns:
+        The gs:// URI, or None if the tileset had no features.
+
+    Raises:
+        RuntimeError: The build failed.
+    """
+    tileset, path, process = build
+    if process.wait() != 0:
+        raise RuntimeError(
+            f"Building {tileset.name} PMTiles exited with {process.returncode}"
+        )
+    if not os.path.exists(path):
+        return None
+    blob_name = f"{tile_publish.TILESERVER_LATEST_PREFIX}/{tileset.name}.pmtiles"
+    blob = storage.Client().bucket(tiles_bucket).blob(blob_name)
+    blob.upload_from_filename(path, content_type=PMTILES_CONTENT_TYPE)
+    logging.info("Uploaded gs://%s/%s", tiles_bucket, blob_name)
+    return f"gs://{tiles_bucket}/{blob_name}"
+
+
+# ---------------------------------------------------------------------------
 # Pipeline runner
 # ---------------------------------------------------------------------------
 
@@ -2644,7 +2739,27 @@ def _process_city_from_predictions(
     output_dir = os.path.join(work_dir, "output")
     _add_breadcrumbs_to_outputs(output_dir, config_dict=config_dict)
 
+    tiles_bucket = os.environ.get(TILESERVER_BUCKET_ENV)
+    tiles_dir = os.path.join(work_dir, "tiles")
+    pmtiles_builds = []
+    if tiles_bucket:
+        os.makedirs(tiles_dir, exist_ok=True)
+        city_build = _start_city_pmtiles_build(
+            city_config, tiles_bucket, output_dir, tiles_dir
+        )
+        if city_build:
+            pmtiles_builds.append(city_build)
+
     _merge_and_upload_outputs(pipeline_bucket, "output/", output_dir, {city_name})
+
+    if tiles_bucket:
+        pmtiles_builds.append(
+            _start_national_admin_pmtiles_build(
+                pipeline_bucket, "output/", tiles_bucket, tiles_dir
+            )
+        )
+        uploaded = [_upload_pmtiles_build(b, tiles_bucket) for b in pmtiles_builds]
+        results["pmtiles"] = [uri for uri in uploaded if uri]
 
     results["city"] = city_name
     results["gcs_output"] = f"gs://{pipeline_bucket}/output/"
