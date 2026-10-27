@@ -2081,14 +2081,15 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
             and "COUNTYFP" in gdf10.columns
         )
         if has_fips:
-            missing = (
-                gdf10[county_col].isna()
-                | (gdf10[county_col].astype(str) == "<NA>")
+            missing = gdf10[county_col].isna() | (
+                gdf10[county_col].astype(str) == "<NA>"
             )
             if missing.any() and 6 in gdfs:
-                county_lookup = dict(
-                    zip(gdfs[6]["GEOID"].astype(str), gdfs[6]["name"].astype(str))
-                ) if "GEOID" in gdfs[6].columns and "name" in gdfs[6].columns else {}
+                county_lookup = (
+                    dict(zip(gdfs[6]["GEOID"].astype(str), gdfs[6]["name"].astype(str)))
+                    if "GEOID" in gdfs[6].columns and "name" in gdfs[6].columns
+                    else {}
+                )
                 for idx in gdf10.index[missing]:
                     sfp = str(gdf10.at[idx, "STATEFP"])
                     cfp = str(gdf10.at[idx, "COUNTYFP"])
@@ -2417,7 +2418,10 @@ def _gcs_compose(dest_blob, sources):
 
 
 def _publish_to_output_bucket(
-    pipeline_bucket_name, output_dir, city_name, output_bucket=None,
+    pipeline_bucket_name,
+    output_dir,
+    city_name,
+    output_bucket=None,
     state_fips=None,
 ):
     """Copy per-city and combined files to the output bucket with clean names.
@@ -2916,8 +2920,9 @@ def _process_city_from_predictions(
 
     out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
 
-    _publish_combined_outputs(output_dir, city_output_dir, out_bucket,
-                              pipeline_bucket, state_fips=state_fips)
+    _publish_combined_outputs(
+        output_dir, city_output_dir, out_bucket, pipeline_bucket, state_fips=state_fips
+    )
 
     if local_h3_csv and os.path.exists(local_h3_csv):
         client = storage.Client()
@@ -2944,6 +2949,7 @@ def _process_city_from_predictions(
 def _combine_geojson_files(file_paths):
     """Merge multiple GeoJSON FeatureCollections into one."""
     import json as _json
+
     all_features = []
     for path in file_paths:
         try:
@@ -2956,7 +2962,11 @@ def _combine_geojson_files(file_paths):
 
 
 def _publish_combined_outputs(
-    output_dir, city_folder, output_bucket, pipeline_bucket, state_fips=None,
+    output_dir,
+    city_folder,
+    output_bucket,
+    pipeline_bucket,
+    state_fips=None,
 ):
     """Publish combined GeoJSON files to the output bucket.
 
@@ -2997,7 +3007,9 @@ def _publish_combined_outputs(
         out_bucket.blob(dest).upload_from_filename(h3_local)
         logging.info(
             "Published combined H3: gs://%s/%s (%d features)",
-            output_bucket, dest, len(combined_h3["features"]),
+            output_bucket,
+            dest,
+            len(combined_h3["features"]),
         )
 
     _publish_national_admin(admin_files, output_bucket)
@@ -3023,9 +3035,7 @@ def _publish_national_admin(local_admin_files, output_bucket):
         try:
             existing = _json.loads(existing_blob.download_as_text())
             all_features.extend(existing.get("features", []))
-            logging.info(
-                "Read existing national admin: %d features", len(all_features)
-            )
+            logging.info("Read existing national admin: %d features", len(all_features))
         except Exception as e:
             logging.error("Failed to read existing admin.geojson: %s", e)
 
@@ -3036,7 +3046,8 @@ def _publish_national_admin(local_admin_files, output_bucket):
     }
     if new_cities:
         all_features = [
-            f for f in all_features
+            f
+            for f in all_features
             if f.get("properties", {}).get("city") not in new_cities
         ]
 
@@ -3052,7 +3063,8 @@ def _publish_national_admin(local_admin_files, output_bucket):
     )
     logging.info(
         "Published national admin: gs://%s/USA_Combined/admin.geojson (%d features)",
-        output_bucket, len(all_features),
+        output_bucket,
+        len(all_features),
     )
 
 
@@ -3073,6 +3085,7 @@ def _get_mongo_uri():
     )
     try:
         from google.cloud import secretmanager
+
         sm = secretmanager.SecretManagerServiceClient()
         resp = sm.access_secret_version(request={"name": secret_name})
         return resp.payload.data.decode("UTF-8")
@@ -3117,7 +3130,8 @@ def _sync_to_mongodb(output_dir, city_name):
         return
 
     h3_files = [
-        f for f in os.listdir(output_dir)
+        f
+        for f in os.listdir(output_dir)
         if f.startswith("h3_") and f.endswith(".geojson")
     ]
     if h3_files:
@@ -3140,10 +3154,7 @@ def _sync_to_mongodb(output_dir, city_name):
                 fc = _json.load(f)
             feats = fc.get("features", [])
             if level == 8:
-                feats = [
-                    f for f in feats
-                    if f.get("properties", {}).get("is_city")
-                ]
+                feats = [f for f in feats if f.get("properties", {}).get("is_city")]
             admin_features.extend(feats)
         except Exception as e:
             logging.error("Failed to read %s: %s", fname, e)
@@ -3186,12 +3197,12 @@ def _mongo_replace_city_file(collection, file_path, city_name, _json):
         for f in features
     ]
     del fc, features
-    result = collection.delete_many(
-        {"properties.city": city_name}
-    )
+    result = collection.delete_many({"properties.city": city_name})
     logging.info(
         "MongoDB %s: removed %d old %s docs",
-        collection.name, result.deleted_count, city_name,
+        collection.name,
+        result.deleted_count,
+        city_name,
     )
     _mongo_batch_insert(collection, docs, city_name)
 
@@ -3199,6 +3210,7 @@ def _mongo_replace_city_file(collection, file_path, city_name, _json):
 def _mongo_batch_insert(collection, docs, city_name, batch_size=5000):
     """Insert docs in batches of 5000 with retry."""
     import time as _time
+
     total = len(docs)
     done = 0
     for i in range(0, total, batch_size):
@@ -3211,7 +3223,9 @@ def _mongo_batch_insert(collection, docs, city_name, batch_size=5000):
                 if attempt >= 4:
                     logging.error(
                         "MongoDB insert failed at %d/%d: %s",
-                        done, total, e,
+                        done,
+                        total,
+                        e,
                     )
                     raise
                 _time.sleep(min(30, 5 * (attempt + 1)))
@@ -3219,7 +3233,10 @@ def _mongo_batch_insert(collection, docs, city_name, batch_size=5000):
         if done % 50000 < batch_size:
             logging.info(
                 "MongoDB %s %s: %d/%d",
-                collection.name, city_name, done, total,
+                collection.name,
+                city_name,
+                done,
+                total,
             )
     logging.info("MongoDB %s %s: DONE %d docs", collection.name, city_name, total)
 

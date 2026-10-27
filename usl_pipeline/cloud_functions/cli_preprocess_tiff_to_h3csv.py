@@ -155,9 +155,11 @@ def _aggregate_bottom_up(res12_df: pd.DataFrame) -> pd.DataFrame:
         parents = child_df["cell_code"].apply(
             lambda c, r=parent_res: h3.cell_to_parent(c, r)
         )
-        agg = child_df.assign(parent=parents).groupby(
-            "parent", as_index=False
-        )["value"].mean()
+        agg = (
+            child_df.assign(parent=parents)
+            .groupby("parent", as_index=False)["value"]
+            .mean()
+        )
         agg = agg.rename(columns={"parent": "cell_code"})
         agg["h3_res"] = parent_res
         all_frames.append(agg)

@@ -354,9 +354,11 @@ def enrich_admin(
         h3_gdf_filtered = h3_gdf[h3_gdf["h3_res"] == h3_resolution]
         if h3_gdf_filtered.empty:
             available = sorted(h3_gdf["h3_res"].unique())
-            fallback = max(r for r in available if r <= h3_resolution) if any(
-                r <= h3_resolution for r in available
-            ) else max(available)
+            fallback = (
+                max(r for r in available if r <= h3_resolution)
+                if any(r <= h3_resolution for r in available)
+                else max(available)
+            )
             print(
                 f"[admin_enrich] Requested H3 res {h3_resolution} not in CSV "
                 f"(available: {available}), falling back to res {fallback}"
@@ -364,7 +366,7 @@ def enrich_admin(
             h3_gdf = h3_gdf[h3_gdf["h3_res"] == fallback].reset_index(drop=True)
         else:
             h3_gdf = h3_gdf_filtered.reset_index(drop=True)
-        res = h3_gdf['h3_res'].iloc[0] if len(h3_gdf) else '?'
+        res = h3_gdf["h3_res"].iloc[0] if len(h3_gdf) else "?"
         print(
             f"[admin_enrich] Filtered to H3 res {res}: "
             f"{len(h3_gdf)} cells (from {before})"
