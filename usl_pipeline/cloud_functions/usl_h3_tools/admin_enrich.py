@@ -351,9 +351,24 @@ def enrich_admin(
     # using all would quadruple-count every cell in the aggregation statistics.
     if h3_resolution is not None and "h3_res" in h3_gdf.columns:
         before = len(h3_gdf)
-        h3_gdf = h3_gdf[h3_gdf["h3_res"] == h3_resolution].reset_index(drop=True)
+        h3_gdf_filtered = h3_gdf[h3_gdf["h3_res"] == h3_resolution]
+        if h3_gdf_filtered.empty:
+            available = sorted(h3_gdf["h3_res"].unique())
+            fallback = (
+                max(r for r in available if r <= h3_resolution)
+                if any(r <= h3_resolution for r in available)
+                else max(available)
+            )
+            print(
+                f"[admin_enrich] Requested H3 res {h3_resolution} not in CSV "
+                f"(available: {available}), falling back to res {fallback}"
+            )
+            h3_gdf = h3_gdf[h3_gdf["h3_res"] == fallback].reset_index(drop=True)
+        else:
+            h3_gdf = h3_gdf_filtered.reset_index(drop=True)
+        res = h3_gdf["h3_res"].iloc[0] if len(h3_gdf) else "?"
         print(
-            f"[admin_enrich] Filtered to H3 resolution {h3_resolution}: "
+            f"[admin_enrich] Filtered to H3 res {res}: "
             f"{len(h3_gdf)} cells (from {before})"
         )
 
