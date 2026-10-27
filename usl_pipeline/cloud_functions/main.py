@@ -1658,6 +1658,7 @@ try:
     from cli_unified_pipeline import (  # noqa: E402
         process_admin_levels,
         process_h3_tilesets,
+        build_h3_breadcrumb_index,
     )
     from cli_add_admin_breadcrumbs import (  # noqa: E402
         add_parent_fields_point_within,
@@ -1699,16 +1700,16 @@ OUTPUT_BUCKET = "climateiq-h3-tiles"
 MAX_COMBINED_BYTES = 20 * 1024 * 1024 * 1024
 
 LEVEL_PATH_MAP = {
-    "6": "admin/counties",
-    "8": "admin/places",
-    "10": "admin/tracts",
-    "106": "hex/res06",
-    "107": "hex/res07",
-    "108": "hex/res08",
-    "109": "hex/res09",
-    "110": "hex/res10",
-    "111": "hex/res11",
-    "112": "hex/res12",
+    "6": "counties",
+    "8": "places",
+    "10": "tracts",
+    "106": "res06",
+    "107": "res07",
+    "108": "res08",
+    "109": "res09",
+    "110": "res10",
+    "111": "res11",
+    "112": "res12",
 }
 
 WATER_POLYGONS_PREFIX = "water_polygons"
@@ -1830,6 +1831,13 @@ def _derive_admin_fields(city_config, tiff_bbox, admin_boundaries):
             areas = hits.geometry.area
             largest = hits.loc[areas.idxmax()]
             city_config["place_name"] = largest["NAME"]
+            if "STATEFP" in largest.index:
+                city_config["state_fips"] = largest["STATEFP"]
+                logging.info(
+                    "Derived state_fips=%s from place %s",
+                    largest["STATEFP"],
+                    largest["NAME"],
+                )
             logging.info("Derived place_name=%s", city_config["place_name"])
 
     return city_config
@@ -1928,19 +1936,32 @@ def _title_case_gdf(gdf):
 
 
 STATE_FIPS_TO_INFO = {
-    "04": {"name": "Arizona", "osm_id": "162018"},
-    "06": {"name": "California", "osm_id": "165475"},
-    "10": {"name": "Delaware", "osm_id": "162110"},
-    "12": {"name": "Florida", "osm_id": "162050"},
-    "13": {"name": "Georgia", "osm_id": "161957"},
-    "17": {"name": "Illinois", "osm_id": "122586"},
-    "22": {"name": "Louisiana", "osm_id": "224922"},
-    "24": {"name": "Maryland", "osm_id": "162112"},
-    "34": {"name": "New Jersey", "osm_id": "224951"},
-    "36": {"name": "New York", "osm_id": "61320"},
-    "42": {"name": "Pennsylvania", "osm_id": "162109"},
-    "48": {"name": "Texas", "osm_id": "114690"},
+    "04": {"name": "Arizona", "osm_id": "162018", "abbr": "AZ"},
+    "06": {"name": "California", "osm_id": "165475", "abbr": "CA"},
+    "10": {"name": "Delaware", "osm_id": "162110", "abbr": "DE"},
+    "12": {"name": "Florida", "osm_id": "162050", "abbr": "FL"},
+    "13": {"name": "Georgia", "osm_id": "161957", "abbr": "GA"},
+    "17": {"name": "Illinois", "osm_id": "122586", "abbr": "IL"},
+    "22": {"name": "Louisiana", "osm_id": "224922", "abbr": "LA"},
+    "24": {"name": "Maryland", "osm_id": "162112", "abbr": "MD"},
+    "34": {"name": "New Jersey", "osm_id": "224951", "abbr": "NJ"},
+    "36": {"name": "New York", "osm_id": "61320", "abbr": "NY"},
+    "42": {"name": "Pennsylvania", "osm_id": "162109", "abbr": "PA"},
+    "48": {"name": "Texas", "osm_id": "114690", "abbr": "TX"},
 }
+
+
+def _city_output_folder(city_name, state_fips=None):
+    """Build output folder name: USA_{STATE}_{CityPascalCase}.
+
+    Falls back to USA_{CityName} if state_fips is unknown.
+    """
+    pascal = city_name.replace(" ", "")
+    if state_fips:
+        abbr = STATE_FIPS_TO_INFO.get(str(state_fips), {}).get("abbr")
+        if abbr:
+            return f"USA_{abbr}_{pascal}"
+    return f"USA_{pascal}"
 
 USA_BOUNDARY_ID = "148838"
 USA_NAME = "United States of America"
@@ -1999,7 +2020,17 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
     if 6 in gdfs:
         gdfs[6]["is_city"] = False
     if 8 in gdfs:
-        gdfs[8]["is_city"] = True
+        place_name = None
+        if config_dict and "cities" in config_dict:
+            for c in config_dict["cities"]:
+                pn = c.get("place_name")
+                if pn:
+                    place_name = pn.lower()
+                    break
+        if place_name and "name" in gdfs[8].columns:
+            gdfs[8]["is_city"] = gdfs[8]["name"].str.lower().str.strip() == place_name.lower().strip()
+        else:
+            gdfs[8]["is_city"] = True
     if 10 in gdfs:
         gdfs[10]["is_city"] = False
 
@@ -2025,12 +2056,36 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
     if 10 in gdfs and 8 in gdfs:
         gdfs[10] = add_parent_fields_point_within(gdfs[10], gdfs[8], parent_level=8)
         if "admin_level_8_parent_localname" in gdfs[10].columns:
+            col8 = gdfs[10]["admin_level_8_parent_localname"]
+            gdfs[10]["admin_level_8_parent_localname"] = col8.where(
+                ~(col8.isna() | (col8.astype(str) == "<NA>")), ""
+            )
             gdfs[10]["place_name"] = gdfs[10]["admin_level_8_parent_localname"]
+        if "admin_level_8_parent_boundary_id" in gdfs[10].columns:
+            col8id = gdfs[10]["admin_level_8_parent_boundary_id"]
+            gdfs[10]["admin_level_8_parent_boundary_id"] = col8id.where(
+                ~(col8id.isna() | (col8id.astype(str) == "<NA>")), ""
+            )
 
     if 10 in gdfs and 6 in gdfs:
         gdfs[10] = add_parent_fields_point_within(gdfs[10], gdfs[6], parent_level=6)
-        if "admin_level_6_parent_localname" in gdfs[10].columns:
-            gdfs[10]["county_name"] = gdfs[10]["admin_level_6_parent_localname"]
+        # Fallback: fill <NA> county breadcrumbs from FIPS codes
+        gdf10 = gdfs[10]
+        county_col = "admin_level_6_parent_localname"
+        county_id_col = "admin_level_6_parent_boundary_id"
+        if county_col in gdf10.columns and "STATEFP" in gdf10.columns and "COUNTYFP" in gdf10.columns:
+            missing = gdf10[county_col].isna() | (gdf10[county_col].astype(str) == "<NA>")
+            if missing.any() and 6 in gdfs:
+                county_lookup = dict(
+                    zip(gdfs[6]["GEOID"].astype(str), gdfs[6]["name"].astype(str))
+                ) if "GEOID" in gdfs[6].columns and "name" in gdfs[6].columns else {}
+                for idx in gdf10.index[missing]:
+                    geoid = str(gdf10.at[idx, "STATEFP"]) + str(gdf10.at[idx, "COUNTYFP"])
+                    if geoid in county_lookup:
+                        gdf10.at[idx, county_id_col] = geoid
+                        gdf10.at[idx, county_col] = county_lookup[geoid]
+        if county_col in gdf10.columns:
+            gdf10["county_name"] = gdf10[county_col]
 
     for lvl, gdf in gdfs.items():
         _title_case_gdf(gdf)
@@ -2326,8 +2381,8 @@ def _level_to_path(level_str):
         return path
     lvl = int(level_str)
     if lvl > 100:
-        return f"hex/res{lvl - 100:02d}"
-    return f"admin/level{lvl}"
+        return f"res{lvl - 100:02d}"
+    return f"level{lvl}"
 
 
 def _gcs_compose(dest_blob, sources):
@@ -2350,7 +2405,8 @@ def _gcs_compose(dest_blob, sources):
 
 
 def _publish_to_output_bucket(
-    pipeline_bucket_name, output_dir, city_name, output_bucket=None
+    pipeline_bucket_name, output_dir, city_name, output_bucket=None,
+    state_fips=None,
 ):
     """Copy per-city and combined files to the output bucket with clean names.
 
@@ -2369,7 +2425,7 @@ def _publish_to_output_bucket(
     client = storage.Client()
     out_bucket = client.bucket(output_bucket)
     pipe_bucket = client.bucket(pipeline_bucket_name)
-    city_lower = city_name.lower().replace(" ", "_")
+    city_folder = _city_output_folder(city_name, state_fips)
 
     for local_path in output_files:
         fname = os.path.basename(local_path)
@@ -2379,7 +2435,7 @@ def _publish_to_output_bucket(
         level_str = m.group(1)
         rel_path = _level_to_path(level_str)
 
-        dest_path = f"us/{city_lower}/{rel_path}.geojson"
+        dest_path = f"{city_folder}/{rel_path}.geojson"
         blob = out_bucket.blob(dest_path)
         blob.upload_from_filename(local_path)
         logging.info("Published per-city: gs://%s/%s", output_bucket, dest_path)
@@ -2443,7 +2499,7 @@ def _publish_to_output_bucket(
                     sources.append(rb)
                 sources.append(footer_blob)
 
-                dest = f"us/combined/{rel_path}.geojson"
+                dest = f"USA_Combined/{rel_path}.geojson"
                 dest_blob = out_bucket.blob(dest)
                 _gcs_compose(dest_blob, sources)
                 logging.info(
@@ -2476,7 +2532,7 @@ def _publish_to_output_bucket(
                         sources.append(rb)
                     sources.append(footer_blob)
 
-                    dest = f"us/combined/{rel_path}_part{pi}.geojson"
+                    dest = f"USA_Combined/{rel_path}_part{pi}.geojson"
                     dest_blob = out_bucket.blob(dest)
                     _gcs_compose(dest_blob, sources)
                     part_cities = [c for c, _, _ in part_entries]
@@ -2495,7 +2551,7 @@ def _publish_to_output_bucket(
     try:
         for blob in client.list_blobs(output_bucket, prefix="_compose/"):
             blob.delete()
-        for blob in client.list_blobs(output_bucket, prefix="us/combined/"):
+        for blob in client.list_blobs(output_bucket, prefix="USA_Combined/"):
             if "__tmp" in blob.name:
                 blob.delete()
     except Exception:
@@ -2526,12 +2582,21 @@ def _run_pipeline(
         admin_outputs = process_admin_levels(config_dict, on_level_done=on_level_done)
         logging.info("Admin boundary tilesets created: %d", len(admin_outputs))
 
+    h3_breadcrumb_lookup = None
     if run_mode in ("full", "h3_only"):
+        level_10_path = os.path.join(
+            config_dict["output_dir"], "admin_level_10_all_cities.geojson"
+        )
+        h3_breadcrumb_lookup = build_h3_breadcrumb_index(level_10_path)
+        if h3_breadcrumb_lookup:
+            logging.info("Built H3 spatial breadcrumb index from %s", level_10_path)
+
         h3_outputs = process_h3_tilesets(
             config_dict,
             max_workers=4,
             on_resolution_done=on_level_done,
             h3_breadcrumbs=h3_breadcrumbs,
+            h3_breadcrumb_lookup=h3_breadcrumb_lookup,
         )
         logging.info("H3 tilesets created: %d", len(h3_outputs))
 
@@ -2812,31 +2877,18 @@ def _process_city_from_predictions(
 
     output_dir = os.path.join(work_dir, "output")
     uploaded_levels = []
+    state_fips = city_config.get("state_fips")
+    city_output_dir = _city_output_folder(city_name, state_fips)
 
     def _on_level_done(level, output_path):
-        """Upload each level immediately after it finishes."""
+        """Track completed levels; breadcrumbs are added per level."""
         try:
             _add_breadcrumbs_to_outputs(
                 os.path.dirname(output_path), config_dict=config_dict
             )
-            fname = os.path.basename(output_path)
-            per_city_dest = f"output/by_city/{city_name}/{fname}"
-            _upload_to_gcs(pipeline_bucket, output_path, per_city_dest)
-            logging.info("Uploaded per-city: %s", per_city_dest)
-
-            level_str = str(level if level < 100 else level)
-            rel_path = _level_to_path(level_str)
-            out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
-            client = storage.Client()
-            bucket_obj = client.bucket(out_bucket)
-            city_lower = city_name.lower().replace(" ", "_")
-            dest_path = f"us/{city_lower}/{rel_path}.geojson"
-            bucket_obj.blob(dest_path).upload_from_filename(output_path)
-            logging.info("Published: gs://%s/%s", out_bucket, dest_path)
-
-            uploaded_levels.append(level_str)
+            uploaded_levels.append(str(level if level < 100 else level))
         except Exception as e:
-            logging.error("Failed to upload level %s: %s", level, e)
+            logging.error("Failed to process level %s: %s", level, e)
 
     h3_breadcrumbs = {city_name: _build_city_breadcrumbs(city_config)}
 
@@ -2850,12 +2902,289 @@ def _process_city_from_predictions(
 
     _merge_and_upload_outputs(pipeline_bucket, "output/", output_dir, {city_name})
 
-    _publish_to_output_bucket(pipeline_bucket, output_dir, city_name)
+    out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
+
+    _publish_combined_outputs(output_dir, city_output_dir, out_bucket,
+                              pipeline_bucket, state_fips=state_fips)
+
+    if local_h3_csv and os.path.exists(local_h3_csv):
+        client = storage.Client()
+        bucket_obj = client.bucket(out_bucket)
+        csv_dest = f"{city_output_dir}/h3_sampled.csv"
+        bucket_obj.blob(csv_dest).upload_from_filename(local_h3_csv)
+        logging.info("Published H3 CSV: gs://%s/%s", out_bucket, csv_dest)
 
     results["city"] = city_name
     results["gcs_output"] = f"gs://{pipeline_bucket}/output/"
-    results["output_bucket"] = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
+    results["output_bucket"] = out_bucket
+    results["city_output_folder"] = city_output_dir
+
+    _sync_to_mongodb(output_dir, city_name)
+
     return results
+
+
+# ---------------------------------------------------------------------------
+# Combined output publishing
+# ---------------------------------------------------------------------------
+
+
+def _combine_geojson_files(file_paths):
+    """Merge multiple GeoJSON FeatureCollections into one."""
+    import json as _json
+    all_features = []
+    for path in file_paths:
+        try:
+            with open(path) as f:
+                fc = _json.load(f)
+            all_features.extend(fc.get("features", []))
+        except Exception as e:
+            logging.error("Failed to read %s for combining: %s", path, e)
+    return {"type": "FeatureCollection", "features": all_features}
+
+
+def _publish_combined_outputs(
+    output_dir, city_folder, output_bucket, pipeline_bucket, state_fips=None,
+):
+    """Publish combined GeoJSON files to the output bucket.
+
+    Per-city:   {city_folder}/h3_{city_folder}.geojson  (H3 res 6-12 combined)
+    National:   USA_Combined/admin.geojson (all cities' admin levels 6+8+10, + level 4 NYC)
+    """
+    import glob as _glob
+    import json as _json
+    import re as _re
+
+    output_files = _glob.glob(os.path.join(output_dir, "*.geojson"))
+    if not output_files:
+        return
+
+    h3_files = []
+    admin_files = []
+    for local_path in sorted(output_files):
+        fname = os.path.basename(local_path)
+        m = _re.search(r"admin_level_(\d+)_", fname)
+        if not m:
+            continue
+        level = int(m.group(1))
+        if level > 100:
+            h3_files.append(local_path)
+        else:
+            admin_files.append(local_path)
+
+    client = storage.Client()
+    out_bucket = client.bucket(output_bucket)
+
+    if h3_files:
+        combined_h3 = _combine_geojson_files(h3_files)
+        h3_fname = f"h3_{city_folder}.geojson"
+        h3_local = os.path.join(output_dir, h3_fname)
+        with open(h3_local, "w") as f:
+            _json.dump(combined_h3, f)
+        dest = f"{city_folder}/{h3_fname}"
+        out_bucket.blob(dest).upload_from_filename(h3_local)
+        logging.info(
+            "Published combined H3: gs://%s/%s (%d features)",
+            output_bucket, dest, len(combined_h3["features"]),
+        )
+
+    _publish_national_admin(admin_files, output_bucket)
+
+
+def _publish_national_admin(local_admin_files, output_bucket):
+    """Merge this city's admin files into USA_Combined/admin.geojson.
+
+    Reads existing admin.geojson from GCS (other cities), adds this city's
+    admin features, and re-uploads the combined file.
+    """
+    import json as _json
+
+    if not local_admin_files:
+        return
+
+    client = storage.Client()
+    out_bucket = client.bucket(output_bucket)
+
+    all_features = []
+    existing_blob = out_bucket.blob("USA_Combined/admin.geojson")
+    if existing_blob.exists():
+        try:
+            existing = _json.loads(existing_blob.download_as_text())
+            all_features.extend(existing.get("features", []))
+            logging.info(
+                "Read existing national admin: %d features", len(all_features)
+            )
+        except Exception as e:
+            logging.error("Failed to read existing admin.geojson: %s", e)
+
+    new_features = _combine_geojson_files(local_admin_files).get("features", [])
+
+    new_cities = {
+        f.get("properties", {}).get("city") for f in new_features if f.get("properties")
+    }
+    if new_cities:
+        all_features = [
+            f for f in all_features
+            if f.get("properties", {}).get("city") not in new_cities
+        ]
+
+    all_features.extend(new_features)
+
+    if not all_features:
+        logging.info("No admin features for national merge")
+        return
+
+    combined = {"type": "FeatureCollection", "features": all_features}
+    existing_blob.upload_from_string(
+        _json.dumps(combined), content_type="application/json"
+    )
+    logging.info(
+        "Published national admin: gs://%s/USA_Combined/admin.geojson (%d features)",
+        output_bucket, len(all_features),
+    )
+
+
+# ---------------------------------------------------------------------------
+# MongoDB sync
+# ---------------------------------------------------------------------------
+
+MONGO_ADMIN_COLLECTION = "admin_level"
+MONGO_H3_COLLECTION = "h3"
+
+
+def _get_mongo_uri():
+    uri = os.environ.get("MONGODB_URI")
+    if uri:
+        return uri
+    secret_name = os.environ.get(
+        "MONGODB_SECRET", "projects/climateiq-test/secrets/mongodb-uri/versions/latest"
+    )
+    try:
+        from google.cloud import secretmanager
+        sm = secretmanager.SecretManagerServiceClient()
+        resp = sm.access_secret_version(request={"name": secret_name})
+        return resp.payload.data.decode("UTF-8")
+    except Exception as e:
+        logging.warning("Could not read MongoDB secret: %s", e)
+        return None
+
+
+def _sync_to_mongodb(output_dir, city_name):
+    """Push combined GeoJSON to MongoDB Atlas.
+
+    Reads the combined h3_{city_folder}.geojson → h3 collection
+    Reads all admin-level files (4/6/8/10) → admin_level collection
+    Upserts by (city, admin_level, boundary_id/cell_code).
+    """
+    import json as _json
+    import glob as _glob
+    import re as _re
+
+    mongo_uri = _get_mongo_uri()
+    if not mongo_uri:
+        logging.info("MongoDB URI not configured — skipping sync")
+        return
+
+    try:
+        from pymongo import MongoClient, ReplaceOne
+    except ImportError:
+        logging.warning("pymongo not installed — skipping MongoDB sync")
+        return
+
+    try:
+        client = MongoClient(
+            mongo_uri,
+            serverSelectionTimeoutMS=30000,
+            socketTimeoutMS=300000,
+            connectTimeoutMS=30000,
+            retryWrites=True,
+        )
+        db = client[os.environ.get("MONGODB_DATABASE", "climateiq_data")]
+    except Exception as e:
+        logging.error("MongoDB connection failed: %s", e)
+        return
+
+    h3_files = [f for f in os.listdir(output_dir) if f.startswith("h3_") and f.endswith(".geojson")]
+    if h3_files:
+        h3_path = os.path.join(output_dir, h3_files[0])
+        _mongo_replace_city_file(db[MONGO_H3_COLLECTION], h3_path, city_name, _json)
+    else:
+        logging.info("No combined H3 file found — skipping H3 MongoDB sync")
+
+    admin_features = []
+    for local_path in sorted(_glob.glob(os.path.join(output_dir, "*.geojson"))):
+        fname = os.path.basename(local_path)
+        m = _re.search(r"admin_level_(\d+)_", fname)
+        if not m:
+            continue
+        level = int(m.group(1))
+        if level > 100:
+            continue
+        try:
+            with open(local_path) as f:
+                fc = _json.load(f)
+            feats = fc.get("features", [])
+            if level == 8:
+                feats = [f for f in feats if f.get("properties", {}).get("is_city") is True]
+            admin_features.extend(feats)
+        except Exception as e:
+            logging.error("Failed to read %s: %s", fname, e)
+
+    if admin_features:
+        docs = [
+            {"type": "Feature", "properties": f.get("properties", {}), "geometry": f.get("geometry")}
+            for f in admin_features
+        ]
+        db[MONGO_ADMIN_COLLECTION].delete_many({"properties.city": city_name})
+        _mongo_batch_insert(db[MONGO_ADMIN_COLLECTION], docs, city_name)
+
+    try:
+        client.close()
+    except Exception:
+        pass
+
+
+def _mongo_replace_city_file(collection, file_path, city_name, _json):
+    """Replace a city's docs: remove old city data, bulk insert new from GeoJSON file."""
+    try:
+        with open(file_path) as f:
+            fc = _json.load(f)
+    except Exception as e:
+        logging.error("Failed to read %s: %s", file_path, e)
+        return
+    features = fc.get("features", [])
+    if not features:
+        return
+    docs = [
+        {"type": "Feature", "properties": f.get("properties", {}), "geometry": f.get("geometry")}
+        for f in features
+    ]
+    del fc, features
+    result = collection.delete_many({"properties.city": city_name})
+    logging.info("MongoDB %s: removed %d old %s docs", collection.name, result.deleted_count, city_name)
+    _mongo_batch_insert(collection, docs, city_name)
+
+
+def _mongo_batch_insert(collection, docs, city_name, batch_size=5000):
+    """Insert docs in batches of 5000 with retry."""
+    import time as _time
+    total = len(docs)
+    done = 0
+    for i in range(0, total, batch_size):
+        batch = docs[i : i + batch_size]
+        for attempt in range(5):
+            try:
+                collection.insert_many(batch, ordered=False)
+                break
+            except Exception as e:
+                if attempt >= 4:
+                    logging.error("MongoDB insert failed after 5 retries at %d/%d: %s", done, total, e)
+                    raise
+                _time.sleep(min(30, 5 * (attempt + 1)))
+        done += len(batch)
+        if done % 50000 < batch_size:
+            logging.info("MongoDB %s %s: %d/%d", collection.name, city_name, done, total)
+    logging.info("MongoDB %s %s: DONE %d docs", collection.name, city_name, total)
 
 
 # ---------------------------------------------------------------------------

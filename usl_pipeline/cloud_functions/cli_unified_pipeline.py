@@ -23,7 +23,69 @@ import pandas as pd
 import yaml
 import h3
 
+from shapely.geometry import Point
+from shapely import STRtree
+
 from usl_h3_tools.admin_enrich import enrich_admin
+
+
+BREADCRUMB_FIELDS = [
+    "admin_level_10_parent_boundary_id",
+    "admin_level_10_parent_localname",
+    "admin_level_8_parent_boundary_id",
+    "admin_level_8_parent_localname",
+    "admin_level_6_parent_boundary_id",
+    "admin_level_6_parent_localname",
+]
+
+
+def build_h3_breadcrumb_index(level_10_path: str):
+    """Build a spatial index from breadcrumbed tract polygons.
+
+    Returns a callable: cell_code -> dict of parent breadcrumb fields,
+    or None if the cell doesn't fall inside any tract.
+    """
+    if not os.path.exists(level_10_path):
+        return None
+
+    gdf = gpd.read_file(level_10_path)
+    if gdf.crs is None:
+        gdf = gdf.set_crs("EPSG:4326")
+    else:
+        gdf = gdf.to_crs("EPSG:4326")
+
+    if len(gdf) == 0:
+        return None
+
+    tract_crumbs = []
+    for _, row in gdf.iterrows():
+        crumb = {}
+        bid = row.get("boundary_id") or row.get("id") or row.get("GEOID")
+        crumb["admin_level_10_parent_boundary_id"] = str(bid) if bid else None
+        name = row.get("name") or row.get("NAME")
+        crumb["admin_level_10_parent_localname"] = str(name) if name else None
+        for field in BREADCRUMB_FIELDS:
+            if field.startswith("admin_level_10"):
+                continue
+            val = row.get(field)
+            if val is not None and str(val) not in ("<NA>", "None", "nan"):
+                crumb[field] = str(val) if str(val) != "" else None
+            else:
+                crumb[field] = None
+        tract_crumbs.append(crumb)
+
+    tree = STRtree(gdf.geometry.values)
+    geoms = gdf.geometry.values
+
+    def lookup(cell_code: str):
+        lat, lng = h3.cell_to_latlng(cell_code)
+        pt = Point(lng, lat)
+        idx = tree.query(pt, predicate="intersects")
+        if len(idx) == 0:
+            return None
+        return tract_crumbs[idx[0]]
+
+    return lookup
 
 # Configuration for admin levels
 ADMIN_LEVELS: List[Dict[str, Any]] = [
@@ -68,22 +130,26 @@ def build_filter_expr(city: Dict[str, Any], level: int) -> str:
         geoids_str = ", ".join(f"'{g}'" for g in county_geoids)
         return f"GEOID in [{geoids_str}]"
     elif level == 8:
-        place_name = city["place_name"]
-        return f"STATEFP == '{state}' and NAME == '{place_name}'"
+        states = sorted({g[:2] for g in county_geoids}) if county_geoids else [state]
+        if len(states) == 1:
+            return f"STATEFP == '{states[0]}'"
+        states_str = ", ".join(f"'{s}'" for s in states)
+        return f"STATEFP in [{states_str}]"
     elif level == 10:
-        # US FIPS: 2-digit numeric state code ("04", "36"). International: alpha ("ZA").
         is_us = state.isdigit() and len(state) == 2
         if is_us:
-            # Census tract level: filter by state and
-            # county code(s) (last 3 digits of GEOID)
-            county_codes = [g[-3:] for g in county_geoids]
-            if len(county_codes) == 1:
-                return f"STATEFP == '{state}' and COUNTYFP == '{county_codes[0]}'"
-            codes_str = ", ".join(f"'{c}'" for c in county_codes)
-            return f"STATEFP == '{state}' and COUNTYFP in [{codes_str}]"
+            by_state: dict = {}
+            for g in county_geoids:
+                by_state.setdefault(g[:2], []).append(g[2:5])
+            parts = []
+            for s, codes in sorted(by_state.items()):
+                if len(codes) == 1:
+                    parts.append(f"(STATEFP == '{s}' and COUNTYFP == '{codes[0]}')")
+                else:
+                    codes_str = ", ".join(f"'{c}'" for c in sorted(codes))
+                    parts.append(f"(STATEFP == '{s}' and COUNTYFP in [{codes_str}])")
+            return " or ".join(parts)
         else:
-            # International city: filter by STATEFP only
-            # (OSM wards all share the same state code)
             return f"STATEFP == '{state}'"
     else:
         raise ValueError(f"Unsupported admin level: {level}")
@@ -118,10 +184,10 @@ def process_single_city_level(
             " (international city)"
         )
         return None
-    if level == 8 and not place_name:
+    if level == 8 and not county_geoids:
         print(
             f"[unified] Skipping admin level 8 for"
-            f" {city_name} — no place_name configured"
+            f" {city_name} — no county_geoids to derive states"
         )
         return None
 
@@ -138,6 +204,9 @@ def process_single_city_level(
     print(f"[unified] Processing {city_name} - Admin Level {level}")
     print(f"[unified]   Filter: {filter_expr}")
 
+    h3_res_for_level = {6: 9, 8: 10, 10: 10}
+    enrichment_res = h3_res_for_level.get(level, 9)
+
     try:
         enrich_admin(
             admin_path=admin_path,
@@ -150,9 +219,7 @@ def process_single_city_level(
             filter_expr=filter_expr,
             geoid_col=geoid_col,
             clip_bbox=clip_bbox,
-            # Use res 9 only — avoids 4x
-            # over-counting from multi-res CSV
-            h3_resolution=9,
+            h3_resolution=enrichment_res,
             water_polygon_path=water_polygon_path,
         )
         # Inject city field so merge_and_upload_outputs can filter by city
@@ -373,6 +440,7 @@ def process_h3_tilesets(
     max_workers: int = 4,
     on_resolution_done=None,
     h3_breadcrumbs=None,
+    h3_breadcrumb_lookup=None,
 ) -> Dict[int, str]:
     """Generate H3 hexagon tilesets for all cities.
 
@@ -389,6 +457,9 @@ def process_h3_tilesets(
             written to disk.
         h3_breadcrumbs: Optional dict {city_name: {breadcrumb_key: value}}
             injected into every feature's properties at write time.
+        h3_breadcrumb_lookup: Optional callable (cell_code -> dict)
+            from build_h3_breadcrumb_index; provides per-cell
+            tract/county/place parent fields via spatial lookup.
     """
     output_dir = config["output_dir"]
     temp_dir = os.path.join(output_dir, "_temp")
@@ -488,6 +559,10 @@ def process_h3_tilesets(
                     }
                     if h3_breadcrumbs and city_name in h3_breadcrumbs:
                         props.update(h3_breadcrumbs[city_name])
+                    if h3_breadcrumb_lookup:
+                        cell_crumbs = h3_breadcrumb_lookup(str(cell))
+                        if cell_crumbs:
+                            props.update(cell_crumbs)
                     for col, idx in val_col_indices.items():
                         v = row_tuple[idx]
                         props[col] = (
@@ -549,10 +624,8 @@ def process_h3_tilesets(
         combine_geojson_files(temp_files, combined_output, admin_level)
         combined_outputs[resolution] = combined_output
 
-        # Upload immediately after each resolution
-        # finishes — don't wait for all resolutions
         if on_resolution_done:
-            on_resolution_done(resolution, combined_output)
+            on_resolution_done(admin_level, combined_output)
 
     return combined_outputs
 
