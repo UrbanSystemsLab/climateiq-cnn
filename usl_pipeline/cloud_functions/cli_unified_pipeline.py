@@ -75,7 +75,6 @@ def build_h3_breadcrumb_index(level_10_path: str):
         tract_crumbs.append(crumb)
 
     tree = STRtree(gdf.geometry.values)
-    geoms = gdf.geometry.values
 
     def lookup(cell_code: str):
         lat, lng = h3.cell_to_latlng(cell_code)
@@ -86,6 +85,7 @@ def build_h3_breadcrumb_index(level_10_path: str):
         return tract_crumbs[idx[0]]
 
     return lookup
+
 
 # Configuration for admin levels
 ADMIN_LEVELS: List[Dict[str, Any]] = [

@@ -165,7 +165,7 @@ def _aggregate_bottom_up(res12_df: pd.DataFrame) -> pd.DataFrame:
 
     result = pd.concat(all_frames, ignore_index=True)
     print(
-        f"    [aggregate] bottom-up: "
+        "    [aggregate] bottom-up: "
         + ", ".join(
             f"res {r}: {int((result['h3_res'] == r).sum()):,}"
             for r in [H3_BASE_RES] + H3_PARENT_RESOLUTIONS

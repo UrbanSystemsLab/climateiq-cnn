@@ -364,8 +364,9 @@ def enrich_admin(
             h3_gdf = h3_gdf[h3_gdf["h3_res"] == fallback].reset_index(drop=True)
         else:
             h3_gdf = h3_gdf_filtered.reset_index(drop=True)
+        res = h3_gdf['h3_res'].iloc[0] if len(h3_gdf) else '?'
         print(
-            f"[admin_enrich] Filtered to H3 resolution {h3_gdf['h3_res'].iloc[0] if len(h3_gdf) else '?'}: "
+            f"[admin_enrich] Filtered to H3 res {res}: "
             f"{len(h3_gdf)} cells (from {before})"
         )
 

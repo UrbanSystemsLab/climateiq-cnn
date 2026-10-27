@@ -1963,6 +1963,7 @@ def _city_output_folder(city_name, state_fips=None):
             return f"USA_{abbr}_{pascal}"
     return f"USA_{pascal}"
 
+
 USA_BOUNDARY_ID = "148838"
 USA_NAME = "United States of America"
 
@@ -2028,7 +2029,8 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
                     place_name = pn.lower()
                     break
         if place_name and "name" in gdfs[8].columns:
-            gdfs[8]["is_city"] = gdfs[8]["name"].str.lower().str.strip() == place_name.lower().strip()
+            names = gdfs[8]["name"].str.lower().str.strip()
+            gdfs[8]["is_city"] = names == place_name.lower().strip()
         else:
             gdfs[8]["is_city"] = True
     if 10 in gdfs:
@@ -2073,14 +2075,24 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
         gdf10 = gdfs[10]
         county_col = "admin_level_6_parent_localname"
         county_id_col = "admin_level_6_parent_boundary_id"
-        if county_col in gdf10.columns and "STATEFP" in gdf10.columns and "COUNTYFP" in gdf10.columns:
-            missing = gdf10[county_col].isna() | (gdf10[county_col].astype(str) == "<NA>")
+        has_fips = (
+            county_col in gdf10.columns
+            and "STATEFP" in gdf10.columns
+            and "COUNTYFP" in gdf10.columns
+        )
+        if has_fips:
+            missing = (
+                gdf10[county_col].isna()
+                | (gdf10[county_col].astype(str) == "<NA>")
+            )
             if missing.any() and 6 in gdfs:
                 county_lookup = dict(
                     zip(gdfs[6]["GEOID"].astype(str), gdfs[6]["name"].astype(str))
                 ) if "GEOID" in gdfs[6].columns and "name" in gdfs[6].columns else {}
                 for idx in gdf10.index[missing]:
-                    geoid = str(gdf10.at[idx, "STATEFP"]) + str(gdf10.at[idx, "COUNTYFP"])
+                    sfp = str(gdf10.at[idx, "STATEFP"])
+                    cfp = str(gdf10.at[idx, "COUNTYFP"])
+                    geoid = sfp + cfp
                     if geoid in county_lookup:
                         gdf10.at[idx, county_id_col] = geoid
                         gdf10.at[idx, county_col] = county_lookup[geoid]
@@ -2410,8 +2422,8 @@ def _publish_to_output_bucket(
 ):
     """Copy per-city and combined files to the output bucket with clean names.
 
-    Per-city:  us/{city}/admin/counties.geojson
-    Combined:  us/combined/hex/res12.geojson  (split if >20 GB)
+    Per-city:  {city_folder}/counties.geojson
+    Combined:  USA_Combined/res12.geojson
     """
     import glob as _glob
     import re as _re
@@ -2948,8 +2960,8 @@ def _publish_combined_outputs(
 ):
     """Publish combined GeoJSON files to the output bucket.
 
-    Per-city:   {city_folder}/h3_{city_folder}.geojson  (H3 res 6-12 combined)
-    National:   USA_Combined/admin.geojson (all cities' admin levels 6+8+10, + level 4 NYC)
+    Per-city:  {city_folder}/h3_{city_folder}.geojson
+    National:  USA_Combined/admin.geojson
     """
     import glob as _glob
     import json as _json
@@ -3086,7 +3098,7 @@ def _sync_to_mongodb(output_dir, city_name):
         return
 
     try:
-        from pymongo import MongoClient, ReplaceOne
+        from pymongo import MongoClient
     except ImportError:
         logging.warning("pymongo not installed — skipping MongoDB sync")
         return
@@ -3104,7 +3116,10 @@ def _sync_to_mongodb(output_dir, city_name):
         logging.error("MongoDB connection failed: %s", e)
         return
 
-    h3_files = [f for f in os.listdir(output_dir) if f.startswith("h3_") and f.endswith(".geojson")]
+    h3_files = [
+        f for f in os.listdir(output_dir)
+        if f.startswith("h3_") and f.endswith(".geojson")
+    ]
     if h3_files:
         h3_path = os.path.join(output_dir, h3_files[0])
         _mongo_replace_city_file(db[MONGO_H3_COLLECTION], h3_path, city_name, _json)
@@ -3125,14 +3140,21 @@ def _sync_to_mongodb(output_dir, city_name):
                 fc = _json.load(f)
             feats = fc.get("features", [])
             if level == 8:
-                feats = [f for f in feats if f.get("properties", {}).get("is_city") is True]
+                feats = [
+                    f for f in feats
+                    if f.get("properties", {}).get("is_city")
+                ]
             admin_features.extend(feats)
         except Exception as e:
             logging.error("Failed to read %s: %s", fname, e)
 
     if admin_features:
         docs = [
-            {"type": "Feature", "properties": f.get("properties", {}), "geometry": f.get("geometry")}
+            {
+                "type": "Feature",
+                "properties": f.get("properties", {}),
+                "geometry": f.get("geometry"),
+            }
             for f in admin_features
         ]
         db[MONGO_ADMIN_COLLECTION].delete_many({"properties.city": city_name})
@@ -3145,7 +3167,7 @@ def _sync_to_mongodb(output_dir, city_name):
 
 
 def _mongo_replace_city_file(collection, file_path, city_name, _json):
-    """Replace a city's docs: remove old city data, bulk insert new from GeoJSON file."""
+    """Replace a city's docs from a GeoJSON file."""
     try:
         with open(file_path) as f:
             fc = _json.load(f)
@@ -3156,12 +3178,21 @@ def _mongo_replace_city_file(collection, file_path, city_name, _json):
     if not features:
         return
     docs = [
-        {"type": "Feature", "properties": f.get("properties", {}), "geometry": f.get("geometry")}
+        {
+            "type": "Feature",
+            "properties": f.get("properties", {}),
+            "geometry": f.get("geometry"),
+        }
         for f in features
     ]
     del fc, features
-    result = collection.delete_many({"properties.city": city_name})
-    logging.info("MongoDB %s: removed %d old %s docs", collection.name, result.deleted_count, city_name)
+    result = collection.delete_many(
+        {"properties.city": city_name}
+    )
+    logging.info(
+        "MongoDB %s: removed %d old %s docs",
+        collection.name, result.deleted_count, city_name,
+    )
     _mongo_batch_insert(collection, docs, city_name)
 
 
@@ -3178,12 +3209,18 @@ def _mongo_batch_insert(collection, docs, city_name, batch_size=5000):
                 break
             except Exception as e:
                 if attempt >= 4:
-                    logging.error("MongoDB insert failed after 5 retries at %d/%d: %s", done, total, e)
+                    logging.error(
+                        "MongoDB insert failed at %d/%d: %s",
+                        done, total, e,
+                    )
                     raise
                 _time.sleep(min(30, 5 * (attempt + 1)))
         done += len(batch)
         if done % 50000 < batch_size:
-            logging.info("MongoDB %s %s: %d/%d", collection.name, city_name, done, total)
+            logging.info(
+                "MongoDB %s %s: %d/%d",
+                collection.name, city_name, done, total,
+            )
     logging.info("MongoDB %s %s: DONE %d docs", collection.name, city_name, total)
 
 
