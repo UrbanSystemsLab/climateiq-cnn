@@ -831,25 +831,26 @@ class FloodPhysicConvLSTM(keras.Model):
         adj_v_v = tf.nn.relu(-1 * velocity_padded[:, 0:-2, 1:-1, 1:2]) # [B, H, W, 1]
         velocity = tf.concat([self_v_u, self_v_v, adj_v_u, adj_v_v], axis=-1)
 
-        v_sg = tf.stop_gradient(velocity)
-        inf_sg = tf.stop_gradient(infiltration_transpiration)
+        # v_sg = tf.stop_gradient(velocity)
+        # inf_sg = tf.stop_gradient(infiltration_transpiration)
         
         for i in range(REVOLVESTEPS):
 
-            if i == REVOLVESTEPS - N_BPTT:
-                current_depth = tf.stop_gradient(current_depth)
-            use_grad = i >= REVOLVESTEPS - N_BPTT
-            vel_i = velocity if use_grad else v_sg
-            inf_i = infiltration_transpiration if use_grad else inf_sg
+            # if i == REVOLVESTEPS - N_BPTT:
+            #     current_depth = tf.stop_gradient(current_depth)
+            # use_grad = i >= REVOLVESTEPS - N_BPTT
+            # vel_i = velocity if use_grad else v_sg
+            # inf_i = infiltration_transpiration if use_grad else inf_sg
 
-            infiltration_volume = inf_i * RESOLUTION**2 / REVOLVESTEPS
-            out_volume = vel_i * current_depth * RESOLUTION * step_time
+            infiltration_volume = infiltration_transpiration * RESOLUTION**2 / REVOLVESTEPS
+            out_volume = velocity * current_depth * RESOLUTION * step_time
+            # out_volume = velocity * current_depth * RESOLUTION
             total_out = tf.reduce_sum(out_volume, axis=-1, keepdims=True) + infiltration_volume # [B, H, W, 1]
 
             available = rain_volume + current_depth * RESOLUTION**2
             need_limit = total_out > available
 
-            safe_total = tf.where(need_limit, tf.maximum(total_out, 0.01), tf.ones_like(total_out))
+            safe_total = tf.where(need_limit, tf.maximum(total_out, 0.00001), tf.ones_like(total_out))
 
             out_rate = tf.where(need_limit, available/safe_total, tf.ones_like(total_out))
             # out_rate = tf.clip_by_value((rain_volume + current_depth * RESOLUTION**2 + 0.01)/(total_out+0.01), 0, 1) # [B, H, W, 1]
