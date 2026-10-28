@@ -186,10 +186,18 @@ class FloodModel:
     def _build_model(self) -> keras.Model:
         model = FloodPhysicConvLSTM(self._params, spatial_dims=self._spatial_dims)
         # model = FloodConvLSTM(self._params, spatial_dims=self._spatial_dims)
-        loss_fn = (
-            customloss.make_hybrid_loss_v3
-            if getattr(self._params, "loss_version", "v1") == "v3"
-            else customloss.make_hybrid_loss
+        # v11_fa2/v12_bandcsi ported from arch-v3-experiment (2026-10-26):
+        # train with v11_fa2, optionally follow with a short v12_bandcsi
+        # fine-tune -- see v12_bandcsi's own docstring for why that order
+        # matters. v3/default(v1) kept for existing configs that still use
+        # them.
+        _loss_fns = {
+            "v3": customloss.make_hybrid_loss_v3,
+            "v11_fa2": customloss.make_hybrid_loss_v11_fa2,
+            "v12_bandcsi": customloss.make_hybrid_loss_v12_bandcsi,
+        }
+        loss_fn = _loss_fns.get(
+            getattr(self._params, "loss_version", "v1"), customloss.make_hybrid_loss
         )
         model.compile(
             optimizer=self._params.optimizer,
@@ -398,6 +406,103 @@ class GreenAmptGate(keras.layers.Layer):
     def get_config(self):
         """Return Keras serialisation config (no extra params)."""
         return super().get_config()
+
+
+@register_keras_serializable()
+class LearnedVelocityGate(keras.layers.Layer):
+    """Two-direction (right, down) version of arch-v3-experiment's gate.
+
+    Confirmed with Huihai (2026-10-27): output exactly two directions, right
+    and down, using the same structural idea as arch-v3-experiment's
+    LearnedFlowRoutingGate -- a softmax over {retain, right, down} so the
+    split is guaranteed to sum to 100% of each cell's depth (nothing
+    invented or lost), the same conservation guarantee the GreenAmptGate /
+    routing-gate family provides elsewhere in this project.
+
+    IMPORTANT TRADEOFF -- confirm this is acceptable before training on it
+    for real: the original output_s_conv used a SIGNED 2-channel velocity
+    (channel 0 sign = right(+)/left(-), channel 1 sign = down(+)/up(-)), so
+    it could represent flow in all 4 directions. A retain/right/down softmax
+    is strictly non-negative -- it can only ever push water right or down,
+    never left or up. Any cell whose physically-correct flow is leftward or
+    upward cannot express that in this scheme; it can only show up as the
+    LEFT or UP neighbour's own rightward/downward push. This is a direct,
+    known consequence of "two directions" (as requested), not a bug -- but
+    it's a real modelling restriction worth being explicit about.
+
+    The retain/right/down fractions are converted to a velocity-shaped
+    output (scaled by max_velocity) so this stays a drop-in replacement for
+    output_s_conv's [B, H, W, 2] shape -- nothing downstream (the
+    REVOLVESTEPS loop, core_layer, v_core_layer) needs to change. Because
+    the output is now always >= 0, the neighbour-inflow gather in that loop
+    (which used to extract inflow from a NEGATIVE neighbour value via
+    relu(-adj_v)) will never fire -- inflow in this scheme comes only from
+    being the right/bottom neighbour of some other cell's push, the same as
+    any other push-only finite-volume scheme, just worth knowing it changes
+    that loop's behaviour even though its code is untouched.
+    """
+
+    def __init__(self, max_velocity: float = 2.0, **kwargs):
+        """Builds the gate.
+
+        Args:
+            max_velocity: Scales the retain/right/down fractions into a
+                velocity-shaped output, so this stays a drop-in replacement
+                for output_s_conv. Not a physical speed cap in the same
+                sense as before -- a fraction of 1.0 (this cell's entire
+                depth moving right) maps to max_velocity exactly. Not tuned.
+            **kwargs: Forwarded to keras.layers.Layer.
+        """
+        super().__init__(**kwargs)
+        self.max_velocity = max_velocity
+
+    def build(self, input_shape):
+        """Creates the conv that predicts retain/right/down logits."""
+
+        def _retain_bias_init(shape, dtype=None):
+            # [right_logit, down_logit, retain_logit] -- retain starts
+            # heavily favoured (softmax([0, 0, 5]) puts ~99% of mass on
+            # retain), so warm-started onto an already-trained model, this
+            # layer starts close to a no-op and has to EARN any routing
+            # behaviour through training -- same conservative-init pattern
+            # as arch-v3-experiment's LearnedFlowRoutingGate.
+            return tf.constant([0.0, 0.0, 5.0], dtype=dtype)
+
+        self.route_conv = keras.layers.Conv2D(
+            filters=3,
+            kernel_size=3,
+            padding="same",
+            kernel_initializer=keras.initializers.RandomNormal(stddev=0.01),
+            bias_initializer=_retain_bias_init,
+            name="learned_velocity_route_logits",
+        )
+        super().build(input_shape)
+
+    def call(self, x: tf.Tensor) -> tf.Tensor:
+        """Predicts [right_velocity, down_velocity] from decoder features.
+
+        Args:
+            x: [B, H, W, C] decoder feature map -- same input output_s_conv
+                currently takes.
+
+        Returns:
+            [B, H, W, 2] non-negative velocity-shaped output -- right and
+            down fractions of this cell's depth, scaled by max_velocity.
+            Always >= 0 (see class docstring's tradeoff note): this gate
+            cannot represent leftward or upward flow from a cell's own
+            channels.
+        """
+        logits = self.route_conv(x)  # [B, H, W, 3] = [right, down, retain]
+        probs = tf.nn.softmax(logits, axis=-1)
+        right_down = probs[..., 0:2]  # drop the retain channel
+        return self.max_velocity * right_down
+
+    def get_config(self):
+        """Returns this layer's constructor kwargs for serialization."""
+        config = super().get_config()
+        config.update({"max_velocity": self.max_velocity})
+        return config
+
 
 @register_keras_serializable()
 class FloodPhysicConvLSTM(keras.Model):
@@ -687,7 +792,12 @@ class FloodPhysicConvLSTM(keras.Model):
         # Final 3×3 to single output channel. Linear activation lets
         # the loss gradient flow unconstrained; clip to ≥0 at inference.
         self.output_d_conv = layers.Conv2D(2, 3, padding="same", activation="tanh")
-        self.output_s_conv = layers.Conv2D(2, 3, padding="same", activation="linear")
+        # Was: layers.Conv2D(2, 3, padding="same", activation="linear")
+        # (unconstrained shortcut layer). Replaced with the bounded,
+        # conservatively-initialised gate -- see LearnedVelocityGate's
+        # docstring for the design tradeoff versus arch-v3-experiment's
+        # softmax-based gate.
+        self.output_s_conv = LearnedVelocityGate(name="learned_velocity_gate")
         self.infil_transp_conv = layers.Conv2D(1, 3, padding="same", activation="linear")
 
         # Physics-based infiltration correction (no trainable weights)

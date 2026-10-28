@@ -105,6 +105,7 @@ def compute_flow_features(geo_np: np.ndarray, cell_size: float = 2.0) -> np.ndar
     H, W = geo_np.shape[:2]
     try:
         import tempfile
+        import time
         import rasterio
         import whitebox
         from rasterio.transform import Affine
@@ -114,48 +115,78 @@ def compute_flow_features(geo_np: np.ndarray, cell_size: float = 2.0) -> np.ndar
     valid = geo_np[:, :, 1].astype(np.float32)
     elev = geo_np[:, :, 0].astype(np.float32) * valid  # zero-fill nodata
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = pathlib.Path(tmp)
-        dem_tif = tmp_path / "dem.tif"
-        tr = Affine(cell_size, 0, 0, 0, -cell_size, H * cell_size)
-        with rasterio.open(
-            dem_tif,
-            "w",
-            driver="GTiff",
-            height=H,
-            width=W,
-            count=1,
-            dtype="float32",
-            transform=tr,
-            crs="EPSG:3857",
-        ) as f:
-            f.write(elev[np.newaxis])
+    # Ported from arch-v3-experiment (2026-10-28), after this exact function
+    # (without this fix) hung a real training run indefinitely: WhiteboxTools
+    # runs as an external subprocess, and under heavy concurrent load
+    # (multiple training/inference jobs sharing CPUs and TMPDIR), the
+    # subprocess can fail silently and leave fdir.tif/facc.tif missing. A
+    # single flaky chunk should not crash -- or silently stall -- an entire
+    # multi-hour training run. Retry a few times, then fall back to a
+    # zero-filled placeholder with a logged warning rather than raising.
+    last_err = None
+    for attempt in range(3):
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = pathlib.Path(tmp)
+                dem_tif = tmp_path / "dem.tif"
+                tr = Affine(cell_size, 0, 0, 0, -cell_size, H * cell_size)
+                with rasterio.open(
+                    dem_tif,
+                    "w",
+                    driver="GTiff",
+                    height=H,
+                    width=W,
+                    count=1,
+                    dtype="float32",
+                    transform=tr,
+                    crs="EPSG:3857",
+                ) as f:
+                    f.write(elev[np.newaxis])
 
-        wbt = whitebox.WhiteboxTools()
-        wbt.set_working_dir(str(tmp_path))
-        wbt.set_verbose_mode(False)
+                wbt = whitebox.WhiteboxTools()
+                wbt.set_working_dir(str(tmp_path))
+                wbt.set_verbose_mode(False)
 
-        fdir_tif = tmp_path / "fdir.tif"
-        facc_tif = tmp_path / "facc.tif"
-        wbt.d8_pointer(dem=str(dem_tif), output=str(fdir_tif), esri_pntr=False)
-        wbt.d8_flow_accumulation(
-            i=str(fdir_tif),
-            output=str(facc_tif),
-            out_type="cells",
-            log=False,
-            clip=False,
-            pntr=True,
-            esri_pntr=False,
-        )
+                fdir_tif = tmp_path / "fdir.tif"
+                facc_tif = tmp_path / "facc.tif"
+                wbt.d8_pointer(dem=str(dem_tif), output=str(fdir_tif), esri_pntr=False)
+                wbt.d8_flow_accumulation(
+                    i=str(fdir_tif),
+                    output=str(facc_tif),
+                    out_type="cells",
+                    log=False,
+                    clip=False,
+                    pntr=True,
+                    esri_pntr=False,
+                )
 
-        with rasterio.open(fdir_tif) as f:
-            fdir = f.read(1).astype(np.float32) / 255.0
-        with rasterio.open(facc_tif) as f:
-            facc_raw = f.read(1).astype(np.float32)
-            facc_log = np.log1p(np.maximum(facc_raw, 0.0))
-            facc = facc_log / max(float(facc_log.max()), 1e-9)
+                if not fdir_tif.exists() or not facc_tif.exists():
+                    raise FileNotFoundError(
+                        f"whitebox subprocess did not produce output (fdir "
+                        f"exists={fdir_tif.exists()}, facc exists="
+                        f"{facc_tif.exists()})"
+                    )
 
-    return np.stack([fdir * valid, facc * valid], axis=-1).astype(np.float32)
+                with rasterio.open(fdir_tif) as f:
+                    fdir = f.read(1).astype(np.float32) / 255.0
+                with rasterio.open(facc_tif) as f:
+                    facc_raw = f.read(1).astype(np.float32)
+                    facc_log = np.log1p(np.maximum(facc_raw, 0.0))
+                    facc = facc_log / max(float(facc_log.max()), 1e-9)
+
+            return np.stack([fdir * valid, facc * valid], axis=-1).astype(np.float32)
+        except Exception as e:  # noqa: BLE001 -- broad on purpose, see retry below
+            last_err = e
+            time.sleep(0.5 * (attempt + 1))  # brief backoff before retry
+
+    # All retries exhausted -- log and fall back to zero-filled features
+    # rather than crashing (or silently stalling) the whole training job
+    # over one chunk.
+    print(
+        f"⚠ compute_flow_features: whitebox failed after 3 attempts ({last_err}); "
+        f"falling back to zero-filled ch10-11 for this chunk"
+    )
+    return np.zeros((H, W, 2), dtype=np.float32)
 
 def _build_temporal_tensor_v2(temporal_vec: np.ndarray) -> tf.Tensor:
     """Build 6-channel temporal tensor from raw rainfall vector.

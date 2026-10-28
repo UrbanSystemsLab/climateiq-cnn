@@ -77,6 +77,7 @@ def _flood_focal_loss(
     threshold: float = 0.05,
     gamma: float = 2.0,
     flooded_weight: float = 10.0,
+    false_alarm_weight: float = 1.0,
 ) -> tf.Tensor:
     """Binary flood-detection focal loss.
 
@@ -90,12 +91,20 @@ def _flood_focal_loss(
     appropriate because producing no flood where flooding exists is far
     worse than a small false alarm.
 
+    false_alarm_weight: explicit weight on false alarms (predicting wet
+    where GT is dry). Defaults to 1.0, which reproduces this function's
+    original behaviour exactly -- added so make_hybrid_loss_v11_fa2 (ported
+    over from the arch-v3-experiment branch) can tune it independently of
+    flooded_weight. Existing callers that don't pass this argument are
+    unaffected.
+
     Args:
         y_true:       [B, H, W] GT depth, already capped at DEPTH_CAP_M.
         y_pred_relu:  [B, H, W] predicted depth, relu'd, uncapped.
         threshold:    Flood detection threshold in metres.
         gamma:        Focal loss concentration parameter.
         flooded_weight: Extra weight on missed floods (false negatives).
+        false_alarm_weight: Extra weight on false alarms (false positives).
 
     Returns:
         Scalar focal loss.
@@ -109,7 +118,7 @@ def _flood_focal_loss(
     eps = 1e-7
     bce = -(
         flooded_weight * flood_gt * tf.math.log(flood_prob + eps)
-        + (1.0 - flood_gt) * tf.math.log(1.0 - flood_prob + eps)
+        + false_alarm_weight * (1.0 - flood_gt) * tf.math.log(1.0 - flood_prob + eps)
     )
 
     # Focal weight: hard examples (wrong) get higher weight
@@ -271,6 +280,150 @@ def make_hybrid_loss_v3(y_true, y_pred):
     focal = _flood_focal_loss(y_true, y_pred_relu)
 
     return weighted_mse + 1.0 * peak_penalty + 0.3 * focal
+
+
+# ---------------------------------------------------------------------------
+# Ported from arch-v3-experiment (2026-10-26): v11_fa2 is what the current
+# production checkpoint on that branch trains with; v12_bandcsi is a short
+# follow-up fine-tune on top of an already-v11_fa2-trained model (not a
+# from-scratch loss -- see its own docstring for why). Use v11_fa2 to train,
+# then optionally v12_bandcsi for a final polish pass.
+# ---------------------------------------------------------------------------
+
+
+def _v11_variant_body(y_true, y_pred, false_alarm_weight):
+    """Shared body for the v11 false_alarm_weight calibration sweep.
+
+    v11 itself (false_alarm_weight=8.0) proved the mechanism works -- real-
+    AR false-alarm rate dropped substantially on both cities (Atlanta
+    ~0.70->0.48, Manhattan ~0.63->0.41) -- but overshot: CSI and dangerous-
+    CSI both fell hard (Manhattan CSI 0.175->0.060). These variants sweep
+    false_alarm_weight between v10's untuned 1.0 and v11's 8.0 to find a
+    point that keeps more of the false-alarm win without giving back this
+    much detection accuracy -- same calibration pattern as the v8/v9/v10
+    flooded_weight sweep and the gravity_loss_weight 1/3/5 sweep.
+    """
+    DEPTH_CAP_M_V11 = 4.0
+    if y_true.shape.ndims == 4 and y_true.shape[-1] == 1:
+        y_true = y_true[..., 0]
+    if y_pred.shape.ndims == 4 and y_pred.shape[-1] == 1:
+        y_pred = y_pred[..., 0]
+
+    valid = tf.math.logical_not(tf.math.is_nan(y_true))
+    y_true = tf.where(valid, y_true, tf.zeros_like(y_true))
+    y_pred = tf.where(valid, y_pred, tf.zeros_like(y_pred))
+    valid_float = tf.cast(valid, tf.float32)
+
+    y_true = tf.minimum(y_true, DEPTH_CAP_M_V11)
+    y_pred_relu = tf.nn.relu(y_pred)
+
+    flood_bin = tf.cast(y_true > 0.0, tf.float32)[..., tf.newaxis]
+    active = tf.squeeze(
+        tf.nn.max_pool2d(flood_bin, ksize=5, strides=1, padding="SAME"), axis=-1
+    )
+    any_active = tf.reduce_any(active > 0.5, axis=[1, 2], keepdims=True)
+    active = tf.where(any_active, active, tf.ones_like(active))
+    effective_mask = valid_float * active
+
+    depth_weight = (
+        1.0
+        + 4.0 * tf.sigmoid(30.0 * (y_true - 0.05))
+        + 12.0 * tf.sigmoid(5.0 * (y_true - 1.0))
+    )
+    squared_error = tf.square(y_pred_relu - y_true)
+    weighted_mse = tf.reduce_sum(depth_weight * squared_error * effective_mask) / (
+        tf.reduce_sum(effective_mask) + 1e-8
+    )
+
+    valid_f = tf.cast(valid, tf.float32)
+    pred_max = tf.reduce_max(y_pred_relu * valid_f, axis=[1, 2])
+    true_max = tf.reduce_max(y_true * valid_f, axis=[1, 2])
+    peak_penalty = tf.reduce_mean(tf.square(pred_max - true_max))
+
+    focal = _flood_focal_loss(
+        y_true, y_pred_relu, flooded_weight=5.0, false_alarm_weight=false_alarm_weight
+    )
+
+    return weighted_mse + 0.2 * peak_penalty + 0.6 * focal
+
+
+@register_keras_serializable(package="Custom", name="make_hybrid_loss_v11_fa2")
+def make_hybrid_loss_v11_fa2(y_true, y_pred):
+    """V11 sweep point: false_alarm_weight=2.0 (was 8.0 in v11, 1.0 in v10)."""
+    return _v11_variant_body(y_true, y_pred, false_alarm_weight=2.0)
+
+
+def _soft_band_csi_loss(y_true, y_pred, bands, sharpness=40.0):
+    """Differentiable surrogate for CSI within each (lo, hi) depth band.
+
+    MSE-style losses have no notion of "landed in the right depth band" --
+    they only see continuous error magnitude. This term does, via a soft
+    (sigmoid-product) relaxation of band membership instead of a hard
+    threshold, so it's differentiable and can be optimized directly, the
+    same way soft-IoU/soft-Dice losses are used in segmentation when the
+    eval metric itself is a thresholded overlap score. Returns 1 - mean(soft
+    CSI) across `bands`, i.e. 0 when every true/predicted pixel pair agrees
+    on which band it's in.
+
+    y_true/y_pred must already be same-shape, NaN-free, and depth (not
+    logits) -- caller's job, so this stays a pure, reusable building block.
+    """
+
+    def soft_band(depth, lo, hi):
+        lower = tf.sigmoid(sharpness * (depth - lo))
+        return lower if hi is None else lower * tf.sigmoid(sharpness * (hi - depth))
+
+    losses = []
+    for lo, hi in bands:
+        pred_in = soft_band(y_pred, lo, hi)
+        true_in = soft_band(y_true, lo, hi)
+        tp = tf.reduce_sum(pred_in * true_in)
+        fp = tf.reduce_sum(pred_in * (1.0 - true_in))
+        fn = tf.reduce_sum((1.0 - pred_in) * true_in)
+        soft_csi = tp / (tp + fp + fn + 1e-6)
+        losses.append(1.0 - soft_csi)
+    return tf.reduce_mean(tf.stack(losses))
+
+
+@register_keras_serializable(package="Custom", name="make_hybrid_loss_v12_bandcsi")
+def make_hybrid_loss_v12_bandcsi(y_true, y_pred):
+    """v11_fa2 base plus a soft-CSI surrogate for the low/med depth bands.
+
+    Targets the low (0.15-0.30m) and med (0.30-0.60m) depth bands -- the two
+    evaluation metrics v11_fa2's depth_weight term doesn't specifically
+    target (it upweights ANY flooded pixel and >1m pixels, but nothing
+    rewards correct band classification in between). Diagnosed that
+    low_csi/med_csi (7-17% across every model tried on arch-v3-experiment)
+    are bottlenecked by depth PRECISION, not training amount: typical MAE
+    (0.1-0.26m) is comparable to or larger than these bands' own width
+    (0.15m, 0.30m), so a close-but-imprecise prediction lands in the wrong
+    bin and scores as a miss on both sides.
+
+    NOT meant to train a model from scratch -- the soft-CSI term only gives
+    a useful gradient once predicted depths are already roughly right, so
+    use this as a short fine-tune on top of a model already trained with
+    make_hybrid_loss_v11_fa2, not as the first loss a fresh model sees.
+    """
+    y_true_sq = (
+        y_true[..., 0] if y_true.shape.ndims == 4 and y_true.shape[-1] == 1 else y_true
+    )
+    y_pred_sq = (
+        y_pred[..., 0] if y_pred.shape.ndims == 4 and y_pred.shape[-1] == 1 else y_pred
+    )
+
+    valid = tf.math.logical_not(tf.math.is_nan(y_true_sq))
+    y_true_safe = tf.where(valid, y_true_sq, tf.zeros_like(y_true_sq))
+    y_pred_relu = tf.nn.relu(y_pred_sq)
+    # Invalid pixels get their prediction zeroed too -- otherwise a stray
+    # high prediction on a masked-out pixel could still fall in-band and
+    # pollute the soft-CSI sums despite contributing nothing to `base`.
+    y_pred_safe = tf.where(valid, y_pred_relu, tf.zeros_like(y_pred_relu))
+
+    base = _v11_variant_body(y_true, y_pred, false_alarm_weight=2.0)
+    band_csi_loss = _soft_band_csi_loss(
+        y_true_safe, y_pred_safe, bands=[(0.15, 0.30), (0.30, 0.60)]
+    )
+    return base + 2.0 * band_csi_loss
 
 
 # ---------------------------------------------------------------------------
