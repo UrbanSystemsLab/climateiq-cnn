@@ -252,7 +252,7 @@ with strategy.scope():
         use_storm_embed=USE_STORM_EMBED,
         use_deep_decoder=USE_DEEP_DECODER,
         use_group_norm=USE_GROUP_NORM,
-        loss_version="v1",                           # ROUND 6: V1 loss — only feedback clip changed
+        loss_version="v11_fa2",                           # ROUND 6: V1 loss — only feedback clip changed
         optimizer=keras.optimizers.Adam(learning_rate=cosine_lr, global_clipnorm=1.0),
     )
     model = FloodModel(params=params, spatial_dims=(PATCH_SIZE, PATCH_SIZE))

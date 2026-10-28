@@ -915,12 +915,12 @@ class FloodPhysicConvLSTM(keras.Model):
         #######################################################
         # need to modify here: 
         # the speed direction s_d, output [B, H, W, 2]
-        # flood_d = self.output_d_conv(x)
+        flood_d = self.output_d_conv(x)
         # the speed for 4 direction s_8: output [B, H, W, 2]
-        # flood_s = self.output_s_conv(x)
+        flood_s = self.output_s_conv(x) # [B, H, W, 2]
 
-        # flood_velocity = flood_d * flood_s
-        flood_velocity = self.output_s_conv(x)
+        flood_velocity = flood_d * flood_s
+
         # the infiltration
         infiltration_transpiration = self.infil_transp_conv(x)
 
