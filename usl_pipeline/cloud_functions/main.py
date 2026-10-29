@@ -3168,13 +3168,36 @@ def _sync_to_mongodb(output_dir, city_name):
             }
             for f in admin_features
         ]
-        db[MONGO_ADMIN_COLLECTION].delete_many({"properties.city": city_name})
+        _mongo_batched_delete(
+            db[MONGO_ADMIN_COLLECTION], {"properties.city": city_name}
+        )
         _mongo_batch_insert(db[MONGO_ADMIN_COLLECTION], docs, city_name)
 
     try:
         client.close()
     except Exception:
         pass
+
+
+def _mongo_batched_delete(collection, filter_dict, batch_size=50000):
+    """Delete matching docs in batches to avoid socket timeouts on large cities."""
+    total = 0
+    while True:
+        ids = [
+            doc["_id"]
+            for doc in collection.find(filter_dict, {"_id": 1}).limit(batch_size)
+        ]
+        if not ids:
+            break
+        collection.delete_many({"_id": {"$in": ids}})
+        total += len(ids)
+        if total % 100000 < batch_size:
+            logging.info(
+                "MongoDB %s: deleted %d docs so far",
+                collection.name,
+                total,
+            )
+    return total
 
 
 def _mongo_replace_city_file(collection, file_path, city_name, _json):
@@ -3197,11 +3220,11 @@ def _mongo_replace_city_file(collection, file_path, city_name, _json):
         for f in features
     ]
     del fc, features
-    result = collection.delete_many({"properties.city": city_name})
+    removed = _mongo_batched_delete(collection, {"properties.city": city_name})
     logging.info(
         "MongoDB %s: removed %d old %s docs",
         collection.name,
-        result.deleted_count,
+        removed,
         city_name,
     )
     _mongo_batch_insert(collection, docs, city_name)
