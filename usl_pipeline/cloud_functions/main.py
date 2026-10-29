@@ -3168,7 +3168,9 @@ def _sync_to_mongodb(output_dir, city_name):
             }
             for f in admin_features
         ]
-        _mongo_batched_delete(db[MONGO_ADMIN_COLLECTION], {"properties.city": city_name})
+        _mongo_batched_delete(
+            db[MONGO_ADMIN_COLLECTION], {"properties.city": city_name}
+        )
         _mongo_batch_insert(db[MONGO_ADMIN_COLLECTION], docs, city_name)
 
     try:
