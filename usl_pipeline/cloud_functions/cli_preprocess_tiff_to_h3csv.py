@@ -6,7 +6,8 @@ Steps:
   1. For each scenario (e.g. Rainfall_Data_1.txt ... Rainfall_Data_9.txt):
        a. Download 2m mosaic GeoTIFF from climateiq-predictions bucket
        b. Resample 2m -> 10m (average)
-       c. Convert to H3 cells (res 9-12) window-by-window in parallel
+       c. Convert to H3 cells at res 12 (jittered sampling) window-by-window
+       d. Aggregate bottom-up: res 12 -> 11 -> 10 -> ... -> 6
   2. Merge all scenario DataFrames on (cell_code, h3_res) -> single CSV
      Columns: cell_code, h3_res, flood_depth_1y, flood_depth_5y, ... flood_depth_1000y
 
@@ -20,8 +21,9 @@ GCS path expected:
 
 import gc
 import os
+import threading
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -42,9 +44,10 @@ import h3
 
 WINDOW_SIZE = 1024  # pixels per processing tile
 JITTER_SAMPLES = 3  # jitter grid size for res-12 (3×3 = 9 samples)
-H3_FAST_RES = [6, 7, 8, 9, 10, 11]
-H3_JITTER_RES = 12
+H3_BASE_RES = 12  # finest resolution — computed directly from pixels
+H3_PARENT_RESOLUTIONS = list(range(11, 5, -1))  # 11→6, aggregated bottom-up
 RESAMPLE_FACTOR = 5.0  # 2m -> 10m
+MAX_CONCURRENT_SCENARIOS = 3  # parallel scenario processing (each uses n_workers procs)
 
 
 # ── Step 1: Resample 2m -> 10m ────────────────────────────────────────────────
@@ -95,10 +98,10 @@ def resample_to_10m(src_path: str, dst_path: str) -> None:
 
 
 def _process_window(args: Tuple) -> Optional[Tuple[dict, dict]]:
-    """Worker: aggregate pixel values within a raster window into H3 cells.
+    """Worker: aggregate pixel values into H3 res-12 cells via jittered sampling.
 
-    Returns (h3_sum, h3_count) dicts keyed by
-    (cell_code, res), or None if empty.
+    Returns (h3_sum, h3_count) dicts keyed by cell_code, or None if empty.
+    Coarser resolutions (6-11) are derived bottom-up after all windows merge.
     """
     tiff_path, window = args
     h3_sum: dict = defaultdict(float)
@@ -111,8 +114,6 @@ def _process_window(args: Tuple) -> Optional[Tuple[dict, dict]]:
         transform = src.transform
         crs = src.crs
 
-        # Process all valid pixels inside city boundary (nan = outside boundary)
-        # Zero flood depth is a valid prediction and must be preserved
         mask = ~np.isnan(data)
         if nodata is not None:
             mask &= data != nodata
@@ -127,30 +128,56 @@ def _process_window(args: Tuple) -> Optional[Tuple[dict, dict]]:
 
         base_xs, base_ys = xy(transform, abs_rows, abs_cols, offset="center")
 
-        # Resolutions 9-11: single sample per pixel
-        lons, lats = warp_transform(crs, "EPSG:4326", base_xs, base_ys)
-        for lat, lon, val in zip(lats, lons, vals):
-            for res in H3_FAST_RES:
-                cell = h3.latlng_to_cell(lat, lon, res)
-                h3_sum[(cell, res)] += val
-                h3_count[(cell, res)] += 1
-
-        # Resolution 12: jittered sampling (H3 cells smaller than pixels)
         for dy in offsets:
             for dx in offsets:
                 xs = [x + dx * transform.a for x in base_xs]
                 ys = [y + dy * abs(transform.e) for y in base_ys]
-                lons12, lats12 = warp_transform(crs, "EPSG:4326", xs, ys)
-                for lat, lon, val in zip(lats12, lons12, vals):
-                    cell = h3.latlng_to_cell(lat, lon, H3_JITTER_RES)
-                    h3_sum[(cell, H3_JITTER_RES)] += val
-                    h3_count[(cell, H3_JITTER_RES)] += 1
+                lons, lats = warp_transform(crs, "EPSG:4326", xs, ys)
+                for lat, lon, val in zip(lats, lons, vals):
+                    cell = h3.latlng_to_cell(lat, lon, H3_BASE_RES)
+                    h3_sum[cell] += val
+                    h3_count[cell] += 1
 
     return h3_sum, h3_count
 
 
+def _aggregate_bottom_up(res12_df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate res-12 H3 cells bottom-up through res 11 down to res 6.
+
+    Each parent cell's value is the mean of its children's values.
+    This preserves spatial variance — large cells reflect the distribution
+    of their children rather than independently sampling raw pixels.
+    """
+    all_frames = [res12_df]
+    child_df = res12_df
+
+    for parent_res in H3_PARENT_RESOLUTIONS:
+        parents = child_df["cell_code"].apply(
+            lambda c, r=parent_res: h3.cell_to_parent(c, r)
+        )
+        agg = (
+            child_df.assign(parent=parents)
+            .groupby("parent", as_index=False)["value"]
+            .mean()
+        )
+        agg = agg.rename(columns={"parent": "cell_code"})
+        agg["h3_res"] = parent_res
+        all_frames.append(agg)
+        child_df = agg
+
+    result = pd.concat(all_frames, ignore_index=True)
+    print(
+        "    [aggregate] bottom-up: "
+        + ", ".join(
+            f"res {r}: {int((result['h3_res'] == r).sum()):,}"
+            for r in [H3_BASE_RES] + H3_PARENT_RESOLUTIONS
+        )
+    )
+    return result
+
+
 def tiff_to_h3_dataframe(tiff_10m_path: str, n_workers: int = 4) -> pd.DataFrame:
-    """Convert a 10m GeoTIFF to an H3 DataFrame.
+    """Convert a 10m GeoTIFF to an H3 DataFrame (res 6-12, bottom-up).
 
     Columns: cell_code, h3_res, value.
     """
@@ -177,19 +204,22 @@ def tiff_to_h3_dataframe(tiff_10m_path: str, n_workers: int = 4) -> pd.DataFrame
             if result is None:
                 continue
             h3_sum, h3_count = result
-            for k, v in h3_sum.items():
-                global_sum[k] += v
-                global_count[k] += h3_count[k]
+            for cell, v in h3_sum.items():
+                global_sum[cell] += v
+                global_count[cell] += h3_count[cell]
 
-    rows = [
+    res12_rows = [
         {
             "cell_code": cell,
-            "h3_res": res,
-            "value": global_sum[(cell, res)] / global_count[(cell, res)],
+            "h3_res": H3_BASE_RES,
+            "value": global_sum[cell] / global_count[cell],
         }
-        for (cell, res) in global_sum
+        for cell in global_sum
     ]
-    return pd.DataFrame(rows)
+    res12_df = pd.DataFrame(res12_rows)
+    print(f"    [tiff->h3] res 12: {len(res12_df):,} cells")
+
+    return _aggregate_bottom_up(res12_df)
 
 
 # ── Step 3: Process all scenarios for one city ────────────────────────────────
@@ -260,7 +290,11 @@ def preprocess_city(
     scenario_dfs: Dict[str, pd.DataFrame] = {}
     tiff_bbox: Optional[Tuple[float, float, float, float]] = None
 
-    for scenario_file, col_name in scenario_mapping.items():
+    _bbox_lock = threading.Lock()
+
+    def _process_one_scenario(scenario_file, col_name):
+        nonlocal tiff_bbox
+
         blob_path = (
             f"flood_predictions/{city_folder}/"
             f"{config_prefix}%2F{scenario_file}/{mosaic_filename}"
@@ -273,24 +307,21 @@ def preprocess_city(
         local_2m = os.path.join(work_dir, f"_raw_{col_name}.tif")
         local_10m = os.path.join(work_dir, f"_10m_{col_name}.tif")
 
-        # Download
         try:
             src_bucket.blob(blob_path).download_to_filename(local_2m)
         except Exception as e:
             print(f"    WARNING: skipping {col_name} — download failed: {e}")
-            continue
+            return None, col_name
 
-        # Capture tiff bbox once (all scenarios share the same extent)
-        if tiff_bbox is None:
-            tiff_bbox = get_tiff_bbox_wgs84(local_2m)
-            print(f"    Tiff bbox (WGS84): {tiff_bbox}")
+        with _bbox_lock:
+            if tiff_bbox is None:
+                tiff_bbox = get_tiff_bbox_wgs84(local_2m)
+                print(f"    Tiff bbox (WGS84): {tiff_bbox}")
 
-        # Resample 2m -> 10m
-        print("    Resampling to 10m...")
+        print(f"    Resampling {col_name} to 10m...")
         resample_to_10m(local_2m, local_10m)
         os.remove(local_2m)
 
-        # Upload 10m TIFF to GCS intermediates if requested
         if int_bucket is not None:
             tiff_gcs_path = (
                 f"{intermediates_prefix}/{city_name}/tiffs/{col_name}_10m.tif"
@@ -300,13 +331,11 @@ def preprocess_city(
             )
             int_bucket.blob(tiff_gcs_path).upload_from_filename(local_10m)
 
-        # Convert to H3
         df = tiff_to_h3_dataframe(local_10m, n_workers=n_workers)
         df = df.rename(columns={"value": col_name})
         print(f"    {col_name}: {len(df):,} H3 cells")
         os.remove(local_10m)
 
-        # Upload per-scenario CSV to GCS intermediates if requested
         if int_bucket is not None:
             local_scenario_csv = os.path.join(work_dir, f"_scenario_{col_name}.csv")
             df.to_csv(local_scenario_csv, index=False)
@@ -318,8 +347,22 @@ def preprocess_city(
             int_bucket.blob(csv_gcs_path).upload_from_filename(local_scenario_csv)
             os.remove(local_scenario_csv)
 
-        scenario_dfs[col_name] = df
         gc.collect()
+        return df, col_name
+
+    print(
+        f"  [preprocess] Processing {len(scenario_mapping)} scenarios "
+        f"({MAX_CONCURRENT_SCENARIOS} concurrent)..."
+    )
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_SCENARIOS) as executor:
+        futures = {
+            executor.submit(_process_one_scenario, sf, cn): cn
+            for sf, cn in scenario_mapping.items()
+        }
+        for future in futures:
+            df, col_name = future.result()
+            if df is not None:
+                scenario_dfs[col_name] = df
 
     if not scenario_dfs:
         raise ValueError(

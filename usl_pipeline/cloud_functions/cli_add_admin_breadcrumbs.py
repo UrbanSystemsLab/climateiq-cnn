@@ -105,6 +105,7 @@ def add_parent_fields_point_within(
     parent_m = to_metric(parent)
 
     joined = gpd.sjoin(child_pts, parent_m, how="left", predicate="within")
+    joined = joined[~joined.index.duplicated(keep="first")]
 
     # joined includes columns from child (left) and parent (right)
     # If there are name collisions, GeoPandas will suffix with _left/_right.
