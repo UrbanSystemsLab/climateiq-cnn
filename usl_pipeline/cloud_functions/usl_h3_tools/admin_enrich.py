@@ -52,7 +52,9 @@ def h3_resolution(h: str) -> int:
     raise AttributeError("Could not find an H3 resolution function on 'h3' module")
 
 
-def df_with_geom_from_h3(csv_path: str, h3_col: str) -> gpd.GeoDataFrame:
+def df_with_geom_from_h3(
+    csv_path: str, h3_col: str, h3_resolution: Optional[int] = None
+) -> gpd.GeoDataFrame:
     """Read a CSV with an H3 column and return a GeoDataFrame with polygons."""
     print(f"[admin_enrich] Loading H3 CSV: {csv_path}")
     df = pd.read_csv(csv_path)
@@ -60,6 +62,14 @@ def df_with_geom_from_h3(csv_path: str, h3_col: str) -> gpd.GeoDataFrame:
         raise KeyError(
             f"H3 column {h3_col!r} not found in {csv_path}. "
             f"Columns: {list(df.columns)}"
+        )
+
+    if h3_resolution is not None and "h3_res" in df.columns:
+        before = len(df)
+        df = df[df["h3_res"] == h3_resolution].reset_index(drop=True)
+        print(
+            f"[admin_enrich] Pre-filtered to H3 res {h3_resolution}: "
+            f"{len(df)} rows (from {before})"
         )
 
     print(f"[admin_enrich] Converting H3 cells in '{h3_col}' to polygons …")
@@ -344,33 +354,7 @@ def enrich_admin(
     # ------------------------------------------------------------------
     # 2. Load H3 CSV with geometry
     # ------------------------------------------------------------------
-    h3_gdf = df_with_geom_from_h3(h3_csv, h3_col=h3_col)
-
-    # Filter to a single H3 resolution if requested.
-    # Multi-resolution CSVs (from preprocessing) contain the same area at 4 resolutions;
-    # using all would quadruple-count every cell in the aggregation statistics.
-    if h3_resolution is not None and "h3_res" in h3_gdf.columns:
-        before = len(h3_gdf)
-        h3_gdf_filtered = h3_gdf[h3_gdf["h3_res"] == h3_resolution]
-        if h3_gdf_filtered.empty:
-            available = sorted(h3_gdf["h3_res"].unique())
-            fallback = (
-                max(r for r in available if r <= h3_resolution)
-                if any(r <= h3_resolution for r in available)
-                else max(available)
-            )
-            print(
-                f"[admin_enrich] Requested H3 res {h3_resolution} not in CSV "
-                f"(available: {available}), falling back to res {fallback}"
-            )
-            h3_gdf = h3_gdf[h3_gdf["h3_res"] == fallback].reset_index(drop=True)
-        else:
-            h3_gdf = h3_gdf_filtered.reset_index(drop=True)
-        res = h3_gdf["h3_res"].iloc[0] if len(h3_gdf) else "?"
-        print(
-            f"[admin_enrich] Filtered to H3 res {res}: "
-            f"{len(h3_gdf)} cells (from {before})"
-        )
+    h3_gdf = df_with_geom_from_h3(h3_csv, h3_col=h3_col, h3_resolution=h3_resolution)
 
     # Determine which value columns to aggregate
     if not value_cols:
@@ -478,7 +462,9 @@ def enrich_admin(
     # Filter admin polygons to those overlapping the H3 data footprint (study area).
     # Geometries are NOT clipped — original census/water-clipped shapes are preserved.
     print("[admin_enrich] Filtering to H3 data footprint (study area)…")
-    h3_data_footprint = _unary_union(h3_gdf.geometry)
+    from shapely.geometry import box
+
+    h3_data_footprint = box(*h3_gdf.total_bounds)
 
     before_filter = len(admin_gdf)
     admin_gdf = admin_gdf[admin_gdf.intersects(h3_data_footprint)].reset_index(

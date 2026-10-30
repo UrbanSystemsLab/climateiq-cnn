@@ -3230,8 +3230,8 @@ def _mongo_replace_city_file(collection, file_path, city_name, _json):
     _mongo_batch_insert(collection, docs, city_name)
 
 
-def _mongo_batch_insert(collection, docs, city_name, batch_size=5000):
-    """Insert docs in batches of 5000 with retry."""
+def _mongo_batch_insert(collection, docs, city_name, batch_size=25000):
+    """Insert docs in batches with retry."""
     import time as _time
 
     total = len(docs)
