@@ -690,7 +690,7 @@ class FloodPhysicConvLSTM(keras.Model):
         # the loss gradient flow unconstrained; clip to ≥0 at inference.
         self.output_d_conv = layers.Conv2D(2, 3, padding="same", activation="tanh")
         self.output_s_conv = layers.Conv2D(2, 3, padding="same", activation="linear")
-        self.infil_transp_conv = layers.Conv2D(1, 3, padding="same", activation="linear")
+        self.infil_transp_conv = layers.Conv2D(1, 3, padding="same", activation="relu")
 
         # Physics-based infiltration correction (no trainable weights)
         self.green_ampt_gate = GreenAmptGate(name="green_ampt_gate")
@@ -812,7 +812,7 @@ class FloodPhysicConvLSTM(keras.Model):
         # flood_s = self.output_s_conv(x)
 
         # flood_velocity = flood_d * flood_s
-        flood_velocity = self.output_s_conv(x) * V_MAX # [B, H, W, 2]
+        flood_velocity = self.output_s_conv(x) # [B, H, W, 2]
         # the infiltration
         infiltration_transpiration = self.infil_transp_conv(x)
 
@@ -836,35 +836,33 @@ class FloodPhysicConvLSTM(keras.Model):
         
         for i in range(REVOLVESTEPS):
 
-            # if i == REVOLVESTEPS - N_BPTT:
-            #     current_depth = tf.stop_gradient(current_depth)
-            # use_grad = i >= REVOLVESTEPS - N_BPTT
-            # vel_i = velocity if use_grad else v_sg
-            # inf_i = infiltration_transpiration if use_grad else inf_sg
+            current_depth = tf.nn.relu(current_depth)
 
             infiltration_volume = infiltration_transpiration * RESOLUTION**2 / REVOLVESTEPS
             out_volume = velocity * current_depth * RESOLUTION * step_time
-            # out_volume = velocity * current_depth * RESOLUTION
+
             total_out = tf.reduce_sum(out_volume, axis=-1, keepdims=True) + infiltration_volume # [B, H, W, 1]
 
-            available = rain_volume + current_depth * RESOLUTION**2
-            need_limit = total_out > available
+            # ##########################################################################################
+            # # This is the old volume change calculation logic, will lead to speed limitation but conserve the no negative depth rule, removed it and added a negative depth penalty
+            # available = rain_volume + current_depth * RESOLUTION**2
+            # need_limit = total_out > available
 
-            safe_total = tf.where(need_limit, tf.maximum(total_out, 0.00001), tf.ones_like(total_out))
+            # safe_total = tf.where(need_limit, tf.maximum(total_out, 0.00001), tf.ones_like(total_out))
 
-            out_rate = tf.where(need_limit, available/safe_total, tf.ones_like(total_out))
-            # out_rate = tf.clip_by_value((rain_volume + current_depth * RESOLUTION**2 + 0.01)/(total_out+0.01), 0, 1) # [B, H, W, 1]
+            # out_rate = tf.where(need_limit, available/safe_total, tf.ones_like(total_out))
+            # # out_rate = tf.clip_by_value((rain_volume + current_depth * RESOLUTION**2 + 0.01)/(total_out+0.01), 0, 1) # [B, H, W, 1]
 
-            out_volume = out_volume * out_rate
-            infiltration_volume = infiltration_volume * out_rate
+            # out_volume = out_volume * out_rate
+            # infiltration_volume = infiltration_volume * out_rate
+            # ##########################################################################################
 
             out_volume_padded = tf.pad(out_volume, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT") 
             in_volume = out_volume_padded[:, 1:-1, 0:-2, 0:1] + out_volume_padded[:, 1:-1, 2:, 2:3] + out_volume_padded[:, 0:-2, 1:-1, 1:2] + out_volume_padded[:, 2:, 1:-1, 3:4] # [B, H, W, 1]
 
             new_volume = current_depth*RESOLUTION**2 + rain_volume - infiltration_volume - tf.reduce_sum(out_volume, axis=-1, keepdims=True) + in_volume
 
-            current_depth = tf.nn.relu(new_volume/RESOLUTION**2)
-            # current_depth = tf.where(current_depth < 0.0001, 0.0, current_depth)
+            current_depth = new_volume/RESOLUTION**2
 
         return current_depth
 
@@ -1039,23 +1037,26 @@ class FloodPhysicConvLSTM(keras.Model):
                     },
                     training=True,
                 )
-                pred = tf.nn.relu(pred)
+                # pred = tf.nn.relu(pred)
 
                 # Green-Ampt infiltration correction
                 # pred, cumul_F = self.green_ampt_gate(pred, geospatial, cumul_F)
 
                 step_loss = self.compute_loss(y=yk, y_pred=pred)
 
-                # # Mass preservation: penalise mismatch in mean depth
-                pred_mass = tf.reduce_mean(pred, axis=[1, 2, 3])
-                gt_mass = tf.reduce_mean(yk, axis=[1, 2, 3])
-                mass_loss = tf.reduce_mean(tf.square(pred_mass - gt_mass))
+                # # # Mass preservation: penalise mismatch in mean depth
+                # pred_mass = tf.reduce_mean(pred, axis=[1, 2, 3])
+                # gt_mass = tf.reduce_mean(yk, axis=[1, 2, 3])
+                # mass_loss = tf.reduce_mean(tf.square(pred_mass - gt_mass))
+
+                # negative value penalty
+                negative_values = tf.nn.relu(-1 * pred)
+                negative_loss = tf.reduce_mean(tf.square(negative_values))
 
                 # Later steps matter more (error should not accumulate)
                 time_weight = 1.0 + 0.3 * k
 
-                total_loss += time_weight * (step_loss + 0.2 * mass_loss)
-                # total_loss += time_weight * (step_loss)
+                total_loss += time_weight * (step_loss + 10 * negative_loss)
 
                 # Feed corrected prediction back: clip at 4.0m to match GT depth cap
                 # (was 2.5m which caused hard ceiling — pred never learned >2.5m)
