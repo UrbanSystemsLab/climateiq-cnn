@@ -3019,8 +3019,6 @@ def _process_city_from_predictions(
                 pipeline_bucket, "output/", tiles_bucket, tiles_dir
             )
         )
-        uploaded = [_upload_pmtiles_build(b, tiles_bucket) for b in pmtiles_builds]
-        results["pmtiles"] = [uri for uri in uploaded if uri]
 
     out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
 
@@ -3041,6 +3039,10 @@ def _process_city_from_predictions(
     results["city_output_folder"] = city_output_dir
 
     _sync_to_mongodb(output_dir, city_name)
+
+    if tiles_bucket:
+        uploaded = [_upload_pmtiles_build(b, tiles_bucket) for b in pmtiles_builds]
+        results["pmtiles"] = [uri for uri in uploaded if uri]
 
     return results
 
