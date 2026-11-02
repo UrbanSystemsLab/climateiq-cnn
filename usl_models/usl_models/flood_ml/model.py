@@ -690,7 +690,7 @@ class FloodPhysicConvLSTM(keras.Model):
         # the loss gradient flow unconstrained; clip to ≥0 at inference.
         self.output_d_conv = layers.Conv2D(2, 3, padding="same", activation="tanh")
         self.output_s_conv = layers.Conv2D(2, 3, padding="same", activation="linear")
-        self.infil_transp_conv = layers.Conv2D(1, 3, padding="same", activation="relu")
+        self.infil_transp_conv = layers.Conv2D(1, 3, padding="same", activation="linear")
 
         # Physics-based infiltration correction (no trainable weights)
         self.green_ampt_gate = GreenAmptGate(name="green_ampt_gate")
