@@ -53,7 +53,7 @@ from usl_models.flood_ml.dataset_improved import load_dataset_windowed_patches
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
 OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LOG_NAME = "semi_new_test_v03_flow_1"
+LOG_NAME = "semi_new_test_v03_overall_flow_1"
 
 PATCH_SIZE = 256
 PATCH_STRIDE = 128

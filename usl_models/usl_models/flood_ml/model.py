@@ -811,60 +811,31 @@ class FloodPhysicConvLSTM(keras.Model):
         # the speed for 4 direction s_8: output [B, H, W, 2]
         # flood_s = self.output_s_conv(x)
 
-        # flood_velocity = flood_d * flood_s
-        flood_velocity = self.output_s_conv(x) # [B, H, W, 2]
+        flood_flow = self.output_s_conv(x) # [B, H, W, 2]
         # the infiltration
         infiltration_transpiration = self.infil_transp_conv(x)
+        infiltration_volume = infiltration_transpiration * RESOLUTION**2
 
-        self._v_mean = tf.reduce_mean(tf.abs(flood_velocity))
-        self._infil_mean = tf.reduce_mean(infiltration_transpiration)
+        rain_volume = rain_rate[:, -1] * RESOLUTION**2 * 300 # cubic meters per 5 minutes
 
-        step_time = 300 / REVOLVESTEPS # in seconds
-        # the rainfall: rain_rate
-        rain_volume = rain_rate[:, -1] * RESOLUTION**2 * step_time # cubic meters per time step
-
-        velocity_padded = tf.pad(flood_velocity, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
+        flow_padded = tf.pad(flood_flow, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
         # adj_v = self.v_core_layer(adj_v)
-        self_v_u = tf.nn.relu(flood_velocity[..., 0:1])
-        self_v_v = tf.nn.relu(flood_velocity[..., 1:2])
-        adj_v_u = tf.nn.relu(-1 * velocity_padded[:, 1:-1, 0:-2, 0:1]) # [B, H, W, 1]
-        adj_v_v = tf.nn.relu(-1 * velocity_padded[:, 0:-2, 1:-1, 1:2]) # [B, H, W, 1]
-        velocity = tf.concat([self_v_u, self_v_v, adj_v_u, adj_v_v], axis=-1)
+        self_v_u = tf.nn.relu(flood_flow[..., 0:1])
+        self_v_v = tf.nn.relu(flood_flow[..., 1:2])
+        adj_v_u = tf.nn.relu(-1 * flow_padded[:, 1:-1, 0:-2, 0:1]) # [B, H, W, 1]
+        adj_v_v = tf.nn.relu(-1 * flow_padded[:, 0:-2, 1:-1, 1:2]) # [B, H, W, 1]
+        out_flow = tf.concat([self_v_u, self_v_v, adj_v_u, adj_v_v], axis=-1) # [B, H, W, 4]
 
-        # v_sg = tf.stop_gradient(velocity)
-        # inf_sg = tf.stop_gradient(infiltration_transpiration)
-        
-        for i in range(REVOLVESTEPS):
+        out_volume = tf.reduce_sum(out_flow, axis=-1, keepdims=True) # [B, H, W, 1]
 
-            current_depth = tf.nn.relu(current_depth)
+        out_flow_padded = tf.pad(out_flow, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT") # [B, H, W, 4]
+        in_volume = out_flow_padded[:, 1:-1, 0:-2, 0:1] + out_flow_padded[:, 1:-1, 2:, 2:3] + out_flow_padded[:, 0:-2, 1:-1, 1:2] + out_flow_padded[:, 2:, 1:-1, 3:4] # [B, H, W, 1]
 
-            infiltration_volume = infiltration_transpiration * RESOLUTION**2 / REVOLVESTEPS
-            out_volume = velocity * current_depth * RESOLUTION * step_time
+        new_volume = current_depth*RESOLUTION**2 + rain_volume - infiltration_volume - out_volume + in_volume
 
-            total_out = tf.reduce_sum(out_volume, axis=-1, keepdims=True) + infiltration_volume # [B, H, W, 1]
+        new_depth = new_volume/RESOLUTION**2
 
-            # ##########################################################################################
-            # # This is the old volume change calculation logic, will lead to speed limitation but conserve the no negative depth rule, removed it and added a negative depth penalty
-            # available = rain_volume + current_depth * RESOLUTION**2
-            # need_limit = total_out > available
-
-            # safe_total = tf.where(need_limit, tf.maximum(total_out, 0.00001), tf.ones_like(total_out))
-
-            # out_rate = tf.where(need_limit, available/safe_total, tf.ones_like(total_out))
-            # # out_rate = tf.clip_by_value((rain_volume + current_depth * RESOLUTION**2 + 0.01)/(total_out+0.01), 0, 1) # [B, H, W, 1]
-
-            # out_volume = out_volume * out_rate
-            # infiltration_volume = infiltration_volume * out_rate
-            # ##########################################################################################
-
-            out_volume_padded = tf.pad(out_volume, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT") 
-            in_volume = out_volume_padded[:, 1:-1, 0:-2, 0:1] + out_volume_padded[:, 1:-1, 2:, 2:3] + out_volume_padded[:, 0:-2, 1:-1, 1:2] + out_volume_padded[:, 2:, 1:-1, 3:4] # [B, H, W, 1]
-
-            new_volume = current_depth*RESOLUTION**2 + rain_volume - infiltration_volume - tf.reduce_sum(out_volume, axis=-1, keepdims=True) + in_volume
-
-            current_depth = new_volume/RESOLUTION**2
-
-        return current_depth
+        return new_depth
 
     def call_n(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
         """Runs the entire autoregressive model.
@@ -1082,27 +1053,7 @@ class FloodPhysicConvLSTM(keras.Model):
                 total_loss += tf.add_n(self.losses)
 
         grads = tape.gradient(total_loss, self.trainable_variables)
-        # self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
-
-        ################################################################################
-
-        grad_norm = tf.linalg.global_norm(grads)              # None 会被自动忽略
-        ok = tf.math.is_finite(total_loss) & tf.math.is_finite(grad_norm)
-        # 有 inf/NaN 时把梯度全置 0，权重就不会被污染
-        grads = [None if g is None else tf.where(ok, g, tf.zeros_like(g)) for g in grads]
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
-
-        # def _log():
-        #     tf.print("step", step, "| loss", total_loss, "| grad_norm", grad_norm,
-        #             "| |v| mean/max", self._dbg["v_abs_mean"], self._dbg["v_abs_max"],
-        #             "| v_sat", self._dbg["v_sat_frac"], "| infil", self._dbg["infil_mean"],
-        #             "\n    pred_mass", tf.stack(pm_list), "\n    gt_mass  ", tf.stack(gm_list),
-        #             "\n    step_loss", tf.stack(sl_list), summarize=-1)
-        #     return tf.constant(0)
-
-        # tf.cond(step % 50 == 0, _log, lambda: tf.constant(0))
-
-        ################################################################################
 
         # Metrics on last-step prediction
         for metric in self.metrics:
@@ -1111,12 +1062,7 @@ class FloodPhysicConvLSTM(keras.Model):
             else:
                 metric.update_state(y_steps[:, -1], last_pred)
         logs = {m.name: m.result() for m in self.metrics}
-        logs.update(
-            gnorm=grad_norm,
-            v_mean=self._v_mean,
-            infil=self._infil_mean,
-            bad=1.0 - tf.cast(ok, tf.float32),
-        )
+
         return logs
 
     def test_step(self, data):
