@@ -47,6 +47,7 @@ JITTER_SAMPLES = 3  # jitter grid size for res-12 (3×3 = 9 samples)
 H3_BASE_RES = 12  # finest resolution — computed directly from pixels
 H3_PARENT_RESOLUTIONS = list(range(11, 5, -1))  # 11→6, aggregated bottom-up
 RESAMPLE_FACTOR = 5.0  # 2m -> 10m
+WET_THRESHOLD = 0.01  # meters; pixels below this are dry
 MAX_CONCURRENT_SCENARIOS = 3  # parallel scenario processing (each uses n_workers procs)
 
 
@@ -97,15 +98,15 @@ def resample_to_10m(src_path: str, dst_path: str) -> None:
 # ── Step 2: Tiff -> H3 (worker) ───────────────────────────────────────────────
 
 
-def _process_window(args: Tuple) -> Optional[Tuple[dict, dict]]:
-    """Worker: aggregate pixel values into H3 res-12 cells via jittered sampling.
+def _process_window(args: Tuple) -> Optional[dict]:
+    """Worker: collect wet pixel values per H3 res-12 cell via jittered sampling.
 
-    Returns (h3_sum, h3_count) dicts keyed by cell_code, or None if empty.
+    Returns dict of {cell_code: [wet_values]} or None if empty.
+    Only pixels above WET_THRESHOLD are kept (prop_p90wet method).
     Coarser resolutions (6-11) are derived bottom-up after all windows merge.
     """
     tiff_path, window = args
-    h3_sum: dict = defaultdict(float)
-    h3_count: dict = defaultdict(int)
+    h3_values: dict = defaultdict(list)
     offsets = np.linspace(-0.4, 0.4, JITTER_SAMPLES)
 
     with rasterio.open(tiff_path) as src:
@@ -134,11 +135,11 @@ def _process_window(args: Tuple) -> Optional[Tuple[dict, dict]]:
                 ys = [y + dy * abs(transform.e) for y in base_ys]
                 lons, lats = warp_transform(crs, "EPSG:4326", xs, ys)
                 for lat, lon, val in zip(lats, lons, vals):
-                    cell = h3.latlng_to_cell(lat, lon, H3_BASE_RES)
-                    h3_sum[cell] += val
-                    h3_count[cell] += 1
+                    if val > WET_THRESHOLD:
+                        cell = h3.latlng_to_cell(lat, lon, H3_BASE_RES)
+                        h3_values[cell].append(val)
 
-    return h3_sum, h3_count
+    return h3_values if h3_values else None
 
 
 def _aggregate_bottom_up(res12_df: pd.DataFrame) -> pd.DataFrame:
@@ -195,26 +196,24 @@ def tiff_to_h3_dataframe(tiff_10m_path: str, n_workers: int = 4) -> pd.DataFrame
 
     print(f"    [tiff->h3] {len(windows)} windows, {n_workers} workers")
 
-    global_sum: dict = defaultdict(float)
-    global_count: dict = defaultdict(int)
+    global_values: dict = defaultdict(list)
 
     args = [(tiff_10m_path, w) for w in windows]
     with ProcessPoolExecutor(max_workers=n_workers) as executor:
         for result in executor.map(_process_window, args, chunksize=8):
             if result is None:
                 continue
-            h3_sum, h3_count = result
-            for cell, v in h3_sum.items():
-                global_sum[cell] += v
-                global_count[cell] += h3_count[cell]
+            for cell, vals in result.items():
+                global_values[cell].extend(vals)
 
     res12_rows = [
         {
             "cell_code": cell,
             "h3_res": H3_BASE_RES,
-            "value": global_sum[cell] / global_count[cell],
+            "value": float(np.percentile(vals, 90)),
         }
-        for cell in global_sum
+        for cell, vals in global_values.items()
+        if vals
     ]
     res12_df = pd.DataFrame(res12_rows)
     print(f"    [tiff->h3] res 12: {len(res12_df):,} cells")
