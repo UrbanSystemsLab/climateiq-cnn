@@ -2,7 +2,7 @@ import io
 import json
 from unittest import mock
 
-from usl_h3_tools import publish
+from postprocessing import tile_publish
 
 _FEATURES = [
     {"type": "Feature", "properties": {"admin_level": 109}, "geometry": None},
@@ -12,7 +12,7 @@ _FEATURES = [
         "geometry": {"type": "Point", "coordinates": [-84.4, 33.7]},
     },
 ]
-_TILESET = publish.tileset_for_object(
+_TILESET = tile_publish.tileset_for_object(
     "bucket", "USA_GA_Atlanta/h3_USA_GA_Atlanta.geojson"
 )
 
@@ -34,7 +34,7 @@ def test_mapbox_upload_source_streams_staged_file():
 
     session.request.side_effect = request
 
-    publish.Mapbox("climateiq", "sk.token", storage_client, session).upload_source(
+    tile_publish.Mapbox("climateiq", "sk.token", storage_client, session).upload_source(
         _TILESET
     )
 
@@ -61,9 +61,9 @@ def test_mapbox_publish_creates_tileset_and_starts_job():
         mock.MagicMock(ok=True, **{"json.return_value": {"jobId": "job-1"}}),
     ]
 
-    result = publish.Mapbox("climateiq", "sk.token", mock.MagicMock(), session).publish(
-        _TILESET
-    )
+    result = tile_publish.Mapbox(
+        "climateiq", "sk.token", mock.MagicMock(), session
+    ).publish(_TILESET)
 
     tileset_url = (
         "https://api.mapbox.com/tilesets/v1/climateiq.climateiq-h3-USA_GA_Atlanta"

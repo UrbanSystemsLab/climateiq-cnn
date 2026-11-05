@@ -5,8 +5,9 @@ Processes multiple cities in a single run and combines outputs into unified tile
 This solves the scalability issue of running separate commands for each city.
 
 Usage:
-    python cli_unified_pipeline.py --config cities_config.yaml
-    python cli_unified_pipeline.py --config cities_config.yaml --skip-h3-tiles
+    python -m postprocessing.cli_unified_pipeline --config cities_config.yaml
+    python -m postprocessing.cli_unified_pipeline --config cities_config.yaml \
+        --skip-h3-tiles
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ import h3
 from shapely.geometry import Point
 from shapely import STRtree
 
-from usl_h3_tools.admin_enrich import enrich_admin
+from postprocessing.admin_enrich import enrich_admin
 
 
 BREADCRUMB_FIELDS = [

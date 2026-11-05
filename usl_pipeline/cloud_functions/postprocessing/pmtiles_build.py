@@ -3,7 +3,7 @@
 The build runs in its own Python process (see start), because pyogrio bundles
 a newer GDAL than fiona and rasterio:
 
-    python -m usl_h3_tools.pmtiles_build OUT.pmtiles --name NAME \
+    python -m postprocessing.pmtiles_build OUT.pmtiles --name NAME \
         --layer LAYER:MINZOOM:MAXZOOM:PATH [--layer ...]
 """
 

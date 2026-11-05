@@ -4,10 +4,10 @@ Takes a city from raw geodata to flood predictions on the ClimateIQ dashboard. F
 
 | # | Stage | Runs on | Started by | Code |
 |---|---|---|---|---|
-| 1 | Add area | Cloud Run job `add-area` | Someone, by hand | `add_area/`, `study_area_uploader/` |
-| 2 | Preprocessing | 12 Cloud Functions | Stage 1's uploads | `cloud_functions/main.py`, data pipeline half |
-| 3 | Prediction | On-prem HPC cluster | Someone, by hand | `../usl_models/`, see `3_prediction/README.md` |
-| 4 | Post-processing | 3 Cloud Functions | Stage 3's uploads | `cloud_functions/main.py`, H3 half, plus `cloud_functions/usl_h3_tools/` |
+| 1 | Add area | Cloud Run job `add-area` | by hand | `add_area/`, `study_area_uploader/` |
+| 2 | Preprocessing | 12 Cloud Functions | Stage 1's uploads | `cloud_functions/main.py` |
+| 3 | Prediction | On-prem HPC cluster | by hand | `../usl_models/`, see `3_prediction/README.md` |
+| 4 | Post-processing | 3 Cloud Functions | Stage 3's uploads | `cloud_functions/postprocessing/` |
 
 `usl_lib/` is shared by stages 1, 2 and 4.
 
@@ -105,11 +105,13 @@ Manual, and the least documented stage. See `3_prediction/README.md`.
 | Bucket names | `usl_lib/usl_lib/storage/cloud_storage.py` |
 | Firestore schema | `usl_lib/usl_lib/storage/metastore.py`, and `../usl_models/usl_models/flood_ml/metastore.py`, which copies the names by hand |
 | The flood model | `../usl_models/usl_models/flood_ml/` |
-| H3 aggregation | `cloud_functions/cli_preprocess_tiff_to_h3csv.py` |
-| H3 resolutions and scenario names | Constants in the H3 half of `cloud_functions/main.py` |
-| Mapbox tilesets and layers | `cloud_functions/usl_h3_tools/publish.py` |
-| PMTiles | `cloud_functions/usl_h3_tools/pmtiles_build.py` |
-| MongoDB sync | `_sync_to_mongodb` in `cloud_functions/main.py` |
+| Stage 4 entry points | `cloud_functions/postprocessing/entry_points.py` |
+| The steps of a stage 4 run | `cloud_functions/postprocessing/city_pipeline.py` |
+| H3 aggregation | `cloud_functions/postprocessing/cli_preprocess_tiff_to_h3csv.py` |
+| H3 resolutions and scenario names | `cloud_functions/postprocessing/city_config.py` |
+| Mapbox tilesets and layers | `cloud_functions/postprocessing/tile_publish.py` |
+| PMTiles | `cloud_functions/postprocessing/pmtiles_build.py` |
+| MongoDB sync | `cloud_functions/postprocessing/mongo_sync.py` |
 | What gets deployed, memory, timeouts | `../.github/deploy/functions.json`, plus climateiq-terraform |
 | What ships in a function | `../scripts/stage_cloud_functions.sh`, plus the zip lists in climateiq-terraform |
 

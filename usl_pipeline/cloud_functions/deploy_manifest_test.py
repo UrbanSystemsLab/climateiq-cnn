@@ -14,19 +14,17 @@ _MANIFEST = _ROOT / ".github" / "deploy" / "functions.json"
 _CI_MATRIX = _ROOT / ".github" / "ci-matrix.json"
 _CI_WORKFLOW = _ROOT / ".github" / "workflows" / "ci.yml"
 
-# tile_publish is the last name bound inside main.py's guarded H3 import.
 _CHECK_STAGED_SOURCE = """
 import pathlib
 import sys
 
 import main
-import usl_h3_tools
+import postprocessing
 import usl_lib
 
 staged = pathlib.Path.cwd().resolve()
-for module in (main, usl_h3_tools, usl_lib):
+for module in (main, postprocessing, usl_lib):
     assert pathlib.Path(module.__file__).resolve().is_relative_to(staged), module
-assert hasattr(main, "tile_publish"), "guarded H3 import failed"
 for entry_point in sys.argv[1:]:
     assert callable(getattr(main, entry_point, None)), entry_point
 """

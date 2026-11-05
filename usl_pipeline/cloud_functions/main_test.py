@@ -7,6 +7,7 @@ from unittest import mock
 from enum import Enum
 
 from google.api_core import exceptions
+from google.cloud import error_reporting
 from google.cloud import firestore
 from google.cloud import storage
 import functions_framework
@@ -28,7 +29,7 @@ def _add_to_tar(tar: tarfile.TarFile, file_name: str, content_bytes: bytes):
     tar.addfile(tf, io.BytesIO(content_bytes))
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, _):
@@ -206,7 +207,7 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
     )
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_build_feature_matrix_flood_already_done_will_be_skipped(
@@ -356,7 +357,7 @@ class TestVar(Enum):
     RH = 1
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 @mock.patch("main.wps_data.Var", TestVar)
@@ -793,7 +794,7 @@ def test_write_wps_chunk_metastore_entry_handles_subfolders(
     )
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_build_feature_matrix_errors(
@@ -937,7 +938,7 @@ def test_build_and_upload_study_area_chunk(
     )
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_write_heat_scenario_config_metadata(
@@ -1111,7 +1112,7 @@ def test_build_and_upload_study_area_chunk_handles_subfolders(
     )
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _):
@@ -1190,7 +1191,7 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
     old_chunk_ref_mock.delete.assert_called_once()
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 @mock.patch.object(main.wrf, "getvar", autospec=True)
@@ -1318,7 +1319,7 @@ def test_build_wrf_label_matrix(
     )
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_client, _):
@@ -1407,7 +1408,7 @@ def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_clien
     )
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 @mock.patch.object(main.storage, "Client", autospec=True)
 def test_write_flood_scenario_metadata_rejects_too_long_rainfall(
@@ -1450,7 +1451,7 @@ def test_write_flood_scenario_metadata_rejects_too_long_rainfall(
     mock_error_reporting_client().report_exception.assert_called_once()
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 def test_write_flood_scenario_metadata_ignore_non_rainfall_files(
     mock_firestore_client, _
@@ -1470,7 +1471,7 @@ def test_write_flood_scenario_metadata_ignore_non_rainfall_files(
     mock_firestore_client.assert_not_called()
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 def test_delete_flood_scenario_metadata(mock_firestore_client, _):
     """Ensure we sync config uploads to the metastore."""
@@ -1496,7 +1497,7 @@ def test_delete_flood_scenario_metadata(mock_firestore_client, _):
     )
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 @mock.patch.object(main.firestore, "Client", autospec=True)
 def test_delete_flood_scenario_metadata_ignore_non_rainfall_files(
     mock_firestore_client, _
@@ -1516,7 +1517,7 @@ def test_delete_flood_scenario_metadata_ignore_non_rainfall_files(
     mock_firestore_client.assert_not_called()
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 def test_retry_decorator_runs_decorated_func(mock_error_reporter):
     """Ensures our retry decorator passes the event to the decorated function."""
     mock_func = mock.MagicMock()
@@ -1537,7 +1538,7 @@ def test_retry_decorator_runs_decorated_func(mock_error_reporter):
     mock_error_reporter.assert_not_called()
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 def test_retry_decorator_skips_gcloud_tmp_files(_):
     """Ensures our retry decorator skips GCS events for temp gcloud files."""
     mock_func = mock.MagicMock()
@@ -1556,7 +1557,7 @@ def test_retry_decorator_skips_gcloud_tmp_files(_):
     mock_func.assert_not_called()
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 def test_retry_decorator_error_reporting(mock_error_reporter):
     """Ensures our retry decorator logs and raises errors."""
     mock_func = mock.MagicMock(side_effect=RuntimeError("oh no!"))
@@ -1579,7 +1580,7 @@ def test_retry_decorator_error_reporting(mock_error_reporter):
     mock_error_reporter.assert_called_with()
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 def test_retry_decorator_custom_error_reporting(mock_error_reporter):
     """Ensures our retry decorator passes the event to custom error handlers."""
     error = RuntimeError("oh no!")
@@ -1603,7 +1604,7 @@ def test_retry_decorator_custom_error_reporting(mock_error_reporter):
     mock_error_reporter.assert_called_once_with()
 
 
-@mock.patch.object(main.error_reporting, "Client", autospec=True)
+@mock.patch.object(error_reporting, "Client", autospec=True)
 def test_retry_decorator_error_timeout(mock_error_reporter):
     """Ensures our retry decorator halts on old invocations."""
     mock_func = mock.MagicMock(side_effect=RuntimeError("oh no!"))

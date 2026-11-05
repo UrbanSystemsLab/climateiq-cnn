@@ -1,4 +1,4 @@
-from usl_h3_tools import pmtiles_build
+from postprocessing import pmtiles_build
 
 
 def test_start_runs_the_build_in_a_new_process(tmp_path):
