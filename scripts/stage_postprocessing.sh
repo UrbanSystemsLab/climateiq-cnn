@@ -14,10 +14,9 @@ LIB="$ROOT/usl_pipeline/usl_lib/usl_lib"
 OUT="${1:-$ROOT/build/postprocessing_source}"
 
 rm -rf "$OUT"
-mkdir -p "$OUT/wheels" "$OUT/usl_lib"
+mkdir -p "$OUT/usl_lib"
 
 cp "$SRC/main.py" "$SRC/requirements.txt" "$SRC/cities_config.yaml" "$OUT/"
-cp "$SRC"/wheels/*.whl "$OUT/wheels/"
 rsync -a --include='*/' --include='*.py' --exclude='*' --prune-empty-dirs \
   "$LIB/" "$OUT/usl_lib/"
 rsync -a --include='*/' --include='*.py' --exclude='*' --prune-empty-dirs \
