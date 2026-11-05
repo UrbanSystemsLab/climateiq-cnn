@@ -1,8 +1,8 @@
 {
   "region": "us-central1",
   "groups": {
-    "pipeline": {
-      "description": "Data pipeline Cloud Functions (gen2). Infra is owned by climateiq-terraform/modules/data_pipeline; only code is deployed from here.",
+    "preprocessing": {
+      "description": "Stage 2 Cloud Functions (gen2). Infra is owned by climateiq-terraform/modules/data_pipeline; only code is deployed from here.",
       "source": "usl_pipeline/cloud_functions",
       "stage": "scripts/stage_cloud_functions.sh",
       "runtime": "python311",
@@ -18,7 +18,15 @@
         "upload-wrf-study-area-chunk": {"entry_point": "build_and_upload_study_area_chunk", "memory": "512Mi", "timeout": 60},
         "rescale-feature-matrix": {"entry_point": "rescale_feature_matrices", "memory": "4Gi", "timeout": 540},
         "write-study-area-metadata": {"entry_point": "write_study_area_metadata", "memory": "512Mi", "timeout": 60},
-        "write-wrf-heat-config-metadata": {"entry_point": "write_heat_scenario_config_metadata", "memory": "512Mi", "timeout": 60},
+        "write-wrf-heat-config-metadata": {"entry_point": "write_heat_scenario_config_metadata", "memory": "512Mi", "timeout": 60}
+      }
+    },
+    "postprocessing": {
+      "description": "Stage 4 Cloud Functions (gen2). Infra is owned by climateiq-terraform/modules/h3_pipeline; only code is deployed from here.",
+      "source": "usl_pipeline/4_postprocessing",
+      "stage": "scripts/stage_postprocessing.sh",
+      "runtime": "python311",
+      "functions": {
         "h3-pipeline": {"entry_point": "process_h3_pipeline", "memory": "32Gi", "timeout": 3600},
         "h3-pipeline-tiff-trigger": {"entry_point": "process_h3_pipeline_on_tiff_upload", "memory": "32Gi", "timeout": 3600},
         "h3-tile-publish": {"entry_point": "publish_tiles", "memory": "4Gi", "timeout": 3600}

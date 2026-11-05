@@ -2,10 +2,8 @@ import dataclasses
 import datetime
 import io
 import logging
-import os
 import pathlib
 import re
-import sys
 import tarfile
 import time
 from typing import BinaryIO, IO, TextIO, Tuple
@@ -1532,19 +1530,3 @@ def rescale_feature_matrices(cloud_event: functions_framework.CloudEvent) -> Non
     _start_feature_rescaling_if_ready(
         storage.Client().bucket(cloud_event.data["bucket"]), cloud_event.data["name"]
     )
-
-
-# ---------------------------------------------------------------------------
-# H3 pipeline
-# ---------------------------------------------------------------------------
-
-sys.path.insert(0, os.path.dirname(__file__))
-
-try:
-    from postprocessing.entry_points import (  # noqa: E402,F401
-        process_h3_pipeline,
-        process_h3_pipeline_on_tiff_upload,
-        publish_tiles,
-    )
-except ImportError:
-    pass

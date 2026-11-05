@@ -19,25 +19,23 @@ import pathlib
 import sys
 
 import main
-import postprocessing
 import usl_lib
 
 staged = pathlib.Path.cwd().resolve()
-for module in (main, postprocessing, usl_lib):
+for module in (main, usl_lib):
     assert pathlib.Path(module.__file__).resolve().is_relative_to(staged), module
 for entry_point in sys.argv[1:]:
     assert callable(getattr(main, entry_point, None)), entry_point
 """
 
 
-def _pipeline_functions() -> dict[str, dict[str, str]]:
-    manifest = json.loads(_MANIFEST.read_text())
-    return manifest["groups"]["pipeline"]["functions"]
+def _groups() -> dict[str, dict]:
+    return json.loads(_MANIFEST.read_text())["groups"]
 
 
 def test_manifest_entry_points_exist_in_main():
-    functions = _pipeline_functions()
-    assert functions, "manifest lists no pipeline functions"
+    functions = _groups()["preprocessing"]["functions"]
+    assert functions, "manifest lists no preprocessing functions"
     for name, spec in functions.items():
         entry_point = spec["entry_point"]
         assert callable(
@@ -46,16 +44,16 @@ def test_manifest_entry_points_exist_in_main():
 
 
 def test_manifest_function_names_are_cloud_function_names():
-    for name in _pipeline_functions():
-        assert name == name.lower() and "_" not in name, (
-            f"{name!r} should be the GCP function name (lowercase, hyphenated), "
-            "not the Python entry point"
-        )
+    for group in _groups().values():
+        for name in group["functions"]:
+            assert name == name.lower() and "_" not in name, (
+                f"{name!r} should be the GCP function name (lowercase, hyphenated), "
+                "not the Python entry point"
+            )
 
 
 def test_staged_source_resolves_every_entry_point(tmp_path):
-    manifest = json.loads(_MANIFEST.read_text())
-    group = manifest["groups"]["pipeline"]
+    group = _groups()["preprocessing"]
     entry_points = [spec["entry_point"] for spec in group["functions"].values()]
 
     staged = tmp_path / "source"

@@ -14,7 +14,7 @@ on:
         type: string
         required: true
       functions:
-        description: '"all", "none", or comma-separated function names'
+        description: '"all", "none", "group:<name>", or comma-separated function names'
         type: string
         default: all
       add_area:
@@ -82,6 +82,11 @@ jobs:
           case "$FUNCTIONS" in
             all)     selected="$all" ;;
             none|"") selected='[]' ;;
+            group:*)
+              selected=$(echo "$all" | jq -c --arg g "${FUNCTIONS#group:}" '
+                map(select(.group == $g))
+                | if length == 0 then error("no functions in group \($g)") else . end
+              ') ;;
             *)
               selected=$(echo "$all" | jq -c --arg csv "$FUNCTIONS" '
                 ($csv | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))) as $want

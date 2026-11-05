@@ -23,11 +23,6 @@ cp "$SRC"/wheels/*.whl "$OUT/wheels/"
 rsync -a --include='*/' --include='*.py' --exclude='*' --prune-empty-dirs \
   "$LIB/" "$OUT/usl_lib/"
 
-# H3 pipeline files
-cp "$SRC/cities_config.yaml" "$OUT/"
-rsync -a --include='*/' --include='*.py' --exclude='*' --prune-empty-dirs \
-  "$SRC/postprocessing/" "$OUT/postprocessing/"
-
 # Stop gcloud from generating its own .gcloudignore and keep caches out.
 printf '__pycache__/\n*.pyc\n' > "$OUT/.gcloudignore"
 

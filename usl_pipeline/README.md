@@ -7,7 +7,7 @@ Takes a city from raw geodata to flood predictions on the ClimateIQ dashboard. F
 | 1 | Add area | Cloud Run job `add-area` | by hand | `add_area/`, `study_area_uploader/` |
 | 2 | Preprocessing | 12 Cloud Functions | Stage 1's uploads | `cloud_functions/main.py` |
 | 3 | Prediction | On-prem HPC cluster | by hand | `../usl_models/`, see `3_prediction/README.md` |
-| 4 | Post-processing | 3 Cloud Functions | Stage 3's uploads | `cloud_functions/postprocessing/` |
+| 4 | Post-processing | 3 Cloud Functions | Stage 3's uploads | `4_postprocessing/` |
 
 `usl_lib/` is shared by stages 1, 2 and 4.
 
@@ -15,17 +15,6 @@ Takes a city from raw geodata to flood predictions on the ClimateIQ dashboard. F
 - `<area>` is a study area name, `<ISO3>_<STATE>_<City>`, for example `USA_GA_Atlanta`.
 - Bucket names here leave out `BUCKET_PREFIX`: `test-` in climateiq-test, empty in climateiq.
 - `raw-data-h3index`, `climateiq-h3-pipeline-1770319032` and `climateiq-h3-tiles` never take a prefix.
-
-## Hand-offs between stages
-
-| From → to | Location | Signal |
-|---|---|---|
-| 1 → 2 | `climateiq-study-areas/<area>/header.json` | Upload |
-| 1 → 2 | `climateiq-study-area-chunks/<area>/chunk_<x>_<y>.tar` | Upload |
-| 1 → 2 | `climateiq-flood-simulation-config/<area>_config/Rainfall_Data_<N>.txt` | Upload |
-| 2 → 3 | `climateiq-study-area-feature-chunks/<area>/scaled_chunk_<x>_<y>.npy`, plus Firestore records | `study_areas/<area>` state is `rescaling-done` |
-| 3 → 4 | `climateiq-predictions/flood_predictions/...`, see `3_prediction/README.md` | Mosaics for all 9 scenarios uploaded |
-| 4 → dashboard | `climateiq-h3-tiles/<area>/h3_<area>.geojson`, `USA_Combined/admin.geojson` | Upload starts the Mapbox publish |
 
 ## Stage 1: Add area
 
@@ -64,7 +53,7 @@ Each function runs on an upload to the bucket shown, unless marked otherwise.
 
 ## Stage 3: Prediction
 
-Manual, and the least documented stage. See `3_prediction/README.md`.
+Manual. See `3_prediction/README.md`.
 
 ## Stage 4: Post-processing
 
@@ -86,39 +75,7 @@ Manual, and the least documented stage. See `3_prediction/README.md`.
    - Status is recorded in `tile_sources/<tileset>/publish.json`.
    - To publish again by hand: `gcloud workflows run h3-tile-publish --location us-central1 --data='{"force": true, "data": {"bucket": "climateiq-h3-tiles", "name": "<area>/h3_<area>.geojson"}}'`
 
-**Still manual**
-- The dashboard reads the US-wide tilesets `timonm.region-us-grid-12` and `timonm.region-us-admin-level-hazard-v1`. Someone uploads `output/*.geojson` to them by hand.
-- `tileserver/latest/` is never served directly. No code copies it to `tileserver/files/` or writes `tileserver/releases/`.
-
 **Older export pipeline.** Uploads to `climateiq-predictions` also start `trigger-export-pipeline` → `spatialize-chunk-predictions` → `merge-scenario-predictions` → `export-to-aws`. That code lives in the climateiq-frontend repo.
-
-## Where do I change...
-
-| To change | Look in |
-|---|---|
-| How a city gets its name | `usl_lib/usl_lib/shared/area_names.py` |
-| Which source layers are clipped | `add_area/scripts/preprocess_h3cells.py` |
-| Rainfall scenarios | `add_area/scripts/rainfall_scenario_generator.py` |
-| Chunking and tar contents | `study_area_uploader/study_area_uploader/chunkers/study_area_chunkers.py` |
-| Feature channels | `usl_lib/usl_lib/transformers/feature_raster_transformers.py` |
-| Feature rescaling | `_start_feature_rescaling_if_ready` in `cloud_functions/main.py` |
-| Bucket names | `usl_lib/usl_lib/storage/cloud_storage.py` |
-| Firestore schema | `usl_lib/usl_lib/storage/metastore.py`, and `../usl_models/usl_models/flood_ml/metastore.py`, which copies the names by hand |
-| The flood model | `../usl_models/usl_models/flood_ml/` |
-| Stage 4 entry points | `cloud_functions/postprocessing/entry_points.py` |
-| The steps of a stage 4 run | `cloud_functions/postprocessing/city_pipeline.py` |
-| H3 aggregation | `cloud_functions/postprocessing/cli_preprocess_tiff_to_h3csv.py` |
-| H3 resolutions and scenario names | `cloud_functions/postprocessing/city_config.py` |
-| Mapbox tilesets and layers | `cloud_functions/postprocessing/tile_publish.py` |
-| PMTiles | `cloud_functions/postprocessing/pmtiles_build.py` |
-| MongoDB sync | `cloud_functions/postprocessing/mongo_sync.py` |
-| What gets deployed, memory, timeouts | `../.github/deploy/functions.json`, plus climateiq-terraform |
-| What ships in a function | `../scripts/stage_cloud_functions.sh`, plus the zip lists in climateiq-terraform |
-
-## Known gaps
-
-- A new `add_area` city can't reach the tilesets yet. `_city_output_folder` turns `USA_GA_Atlanta` into `USA_GA_USA_GA_Atlanta`, which fails the area name check in `publish_tiles`.
-- Stage 3 output paths are built from legacy names like `Chicago_Predictions`, not `<area>`. See `3_prediction/README.md`.
 
 ## Development
 
