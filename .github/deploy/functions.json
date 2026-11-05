@@ -3,8 +3,8 @@
   "groups": {
     "preprocessing": {
       "description": "Stage 2 Cloud Functions (gen2). Infra is owned by climateiq-terraform/modules/data_pipeline; only code is deployed from here.",
-      "source": "usl_pipeline/cloud_functions",
-      "stage": "scripts/stage_cloud_functions.sh",
+      "source": "usl_pipeline/2_preprocessing",
+      "stage": "scripts/stage_preprocessing.sh",
       "runtime": "python311",
       "functions": {
         "write-citycat-config-data": {"entry_point": "write_flood_scenario_metadata_and_features", "memory": "512Mi", "timeout": 60},

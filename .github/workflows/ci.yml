@@ -66,10 +66,10 @@ jobs:
               - 'usl_pipeline/usl_lib/**'
               - 'usl_pipeline/study_area_uploader/**'
               - 'usl_pipeline/add_area/**'
-            cloud_functions:
+            preprocessing:
               - 'usl_pipeline/usl_lib/**'
-              - 'usl_pipeline/cloud_functions/**'
-              - 'scripts/stage_cloud_functions.sh'
+              - 'usl_pipeline/2_preprocessing/**'
+              - 'scripts/stage_preprocessing.sh'
               - '.github/deploy/functions.json'
             postprocessing:
               - 'usl_pipeline/usl_lib/**'
@@ -80,8 +80,8 @@ jobs:
               - 'usl_models/**'
             deploy_preprocessing:
               - 'usl_pipeline/usl_lib/**'
-              - 'usl_pipeline/cloud_functions/**'
-              - 'scripts/stage_cloud_functions.sh'
+              - 'usl_pipeline/2_preprocessing/**'
+              - 'scripts/stage_preprocessing.sh'
               - '.github/deploy/**'
               - '.github/workflows/_deploy.yml'
             deploy_postprocessing:

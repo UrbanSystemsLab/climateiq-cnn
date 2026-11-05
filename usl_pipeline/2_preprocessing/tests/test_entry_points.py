@@ -15,10 +15,20 @@ import netCDF4
 import numpy
 import pytest
 import rasterio
+import wrf
 import xarray
 
 import main
-from usl_lib.shared import geo_data, wps_data
+from preprocessing import (
+    feature_metadata,
+    feature_rescaling,
+    flood_features,
+    flood_labels,
+    flood_scenarios,
+)
+from preprocessing.heat import features as heat_features
+from preprocessing.heat import study_area_chunks
+from usl_lib.shared import function_runtime, geo_data, wps_data
 from usl_lib.storage import file_names, metastore
 
 
@@ -30,8 +40,8 @@ def _add_to_tar(tar: tarfile.TarFile, file_name: str, content_bytes: bytes):
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
 def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, _):
     # Get some random data to place in a tiff file.
     height = 2
@@ -208,8 +218,8 @@ def test_build_feature_matrix_flood(mock_storage_client, mock_firestore_client, 
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
 def test_build_feature_matrix_flood_already_done_will_be_skipped(
     mock_storage_client, mock_firestore_client, _
 ):
@@ -280,8 +290,8 @@ def test_build_feature_matrix_from_archive_empty_polygons():
     # Seek to the beginning so the file can be read.
     archive.seek(0)
 
-    feature_matrix, metadata, header = main._build_flood_feature_matrix_from_archive(
-        archive
+    feature_matrix, metadata, header = (
+        flood_features._build_flood_feature_matrix_from_archive(archive)
     )
 
     # Slope channel (index 8): (0,0) is NoData (elev==nodata==1); (0,1) and
@@ -310,7 +320,7 @@ def test_build_feature_matrix_from_archive_empty_polygons():
     )
 
     # Ensure we set the elevation and slope min & max
-    assert metadata == main.FeatureMetadata(
+    assert metadata == feature_metadata.FeatureMetadata(
         elevation_min=2,
         elevation_max=6,
         slope_min=316.227783203125,
@@ -340,7 +350,7 @@ def test_build_feature_matrix_from_archive_elevation_file_missing():
     archive.seek(0)
 
     try:
-        main._build_flood_feature_matrix_from_archive(archive)
+        flood_features._build_flood_feature_matrix_from_archive(archive)
     except Exception as e:
         # Check expected error:
         assert isinstance(e, ValueError)
@@ -358,16 +368,16 @@ class TestVar(Enum):
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
-@mock.patch("main.wps_data.Var", TestVar)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
+@mock.patch("usl_lib.shared.wps_data.Var", TestVar)
 @mock.patch.dict(
-    main.wps_data.ML_REQUIRED_VARS,
+    wps_data.ML_REQUIRED_VARS,
     {wps_data.VarType.SPATIOTEMPORAL: [TestVar.GHT, TestVar.RH]},
     clear=True,
 )
 @mock.patch.dict(
-    main.wps_data.VAR_CONFIGS,
+    wps_data.VAR_CONFIGS,
     {
         TestVar.GHT: wps_data.VarConfig(
             scaling=wps_data.ScalingConfig(type=wps_data.ScalingType.LOCAL)
@@ -511,7 +521,9 @@ def test_process_wps_feature_drop_time_axis():
     arr = numpy.array([[[1, 2], [3, 4]]], dtype=numpy.float32)  # shape=(1,2,2)
     xrdarr = xarray.DataArray(arr, name="RH", dims=("Time", "south_north", "west_east"))
 
-    processed = main._process_wps_feature(xrdarr, wps_data.VAR_CONFIGS[wps_data.Var.RH])
+    processed = heat_features._process_wps_feature(
+        xrdarr, wps_data.VAR_CONFIGS[wps_data.Var.RH]
+    )
 
     numpy.testing.assert_equal((2, 2), processed.shape)
 
@@ -524,7 +536,7 @@ def test_process_wps_feature_reorder_spatial_dims():
         arr, name="RH", dims=("Time", "num_metgrid_levels", "south_north", "west_east")
     )
 
-    processed = main._process_wps_feature(xrdarr, wps_data.VarConfig())
+    processed = heat_features._process_wps_feature(xrdarr, wps_data.VarConfig())
 
     expected = [[10, 30], [20, 40]]
     numpy.testing.assert_array_equal(expected, processed)
@@ -536,7 +548,7 @@ def test_process_wps_feature_extract_fnl_spatial_dim():
         arr, name="RH", dims=("Time", "south_north", "west_east", "num_metgrid_levels")
     )
 
-    processed = main._process_wps_feature(xrdarr, wps_data.VarConfig())
+    processed = heat_features._process_wps_feature(xrdarr, wps_data.VarConfig())
 
     expected = [[10, 20], [30, 40]]
     # Expected arr will also have lat/lon axis swapped
@@ -552,7 +564,7 @@ def test_process_wps_feature_extract_monthly_climate_map_dim():
         coords={"Time": [b"2010-02-02_18:00:00"]},
     )
 
-    processed = main._process_wps_feature(xrdarr, wps_data.VarConfig())
+    processed = heat_features._process_wps_feature(xrdarr, wps_data.VarConfig())
 
     # Since dataset datetime is February (2), then the corresponding index to select
     # from z-dimension0012 will be 1
@@ -573,7 +585,9 @@ def test_process_wps_feature_convert_percent_to_decimal():
         ),
     )
 
-    processed = main._process_wps_feature(xrdarr, wps_data.VAR_CONFIGS[wps_data.Var.RH])
+    processed = heat_features._process_wps_feature(
+        xrdarr, wps_data.VAR_CONFIGS[wps_data.Var.RH]
+    )
 
     expected = [[0.3245, 0.1511], [0.7374, 0.3321]]
     # Expected arr will also have lat/lon axis swapped
@@ -588,7 +602,7 @@ def test_process_wps_feature_apply_minmax_scaler():
         dims=("Time", "south_north", "west_east"),
     )
 
-    processed = main._process_wps_feature(
+    processed = heat_features._process_wps_feature(
         xrdarr,
         wps_data.VarConfig(
             scaling=wps_data.ScalingConfig(
@@ -634,7 +648,7 @@ def test_compute_wind_components():
     ncfile_bytes = memfile.tobytes()
     ds = xarray.open_dataset(io.BytesIO(ncfile_bytes))
 
-    processed_ds = main._compute_wind_components(ds)
+    processed_ds = heat_features._compute_wind_components(ds)
 
     # Check computations of new variables
     wspd = processed_ds.data_vars["WSPD"]
@@ -701,7 +715,7 @@ def test_compute_solar_time_components():
     ds["Times"] = times  # Overwrite the time reading with fake data conversion
 
     # Process the dataset with the _compute_solar_time_components function
-    processed_ds = main._compute_solar_time_components(ds)
+    processed_ds = heat_features._compute_solar_time_components(ds)
 
     # Check the computed sine values of solar time
     solartime_sin = processed_ds.data_vars["SOLAR_TIME_SIN"]
@@ -724,8 +738,8 @@ def test_compute_solar_time_components():
     )
 
 
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
 def test_write_wps_chunk_metastore_entry_handles_subfolders(
     mock_storage_client, mock_firestore_client
 ):
@@ -750,10 +764,10 @@ def test_write_wps_chunk_metastore_entry_handles_subfolders(
 
     mock_storage_client.reset_mock()
 
-    main._write_wps_chunk_metastore_entry(
+    heat_features._write_wps_chunk_metastore_entry(
         mock_chunk_blob,
         mock_feature_blob,
-        main.FeatureMetadata(time=datetime.datetime(2010, 2, 2, 18, 0, 0)),
+        feature_metadata.FeatureMetadata(time=datetime.datetime(2010, 2, 2, 18, 0, 0)),
     )
 
     # Ensure we wrote firestore entries for the chunk.
@@ -795,8 +809,8 @@ def test_write_wps_chunk_metastore_entry_handles_subfolders(
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
 def test_build_feature_matrix_errors(
     mock_storage_client,
     mock_firestore_client,
@@ -845,9 +859,9 @@ def test_build_feature_matrix_errors(
     )
 
 
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
-@mock.patch.object(main, "_get_crs_from_wps", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
+@mock.patch.object(study_area_chunks, "_get_crs_from_wps", autospec=True)
 def test_build_and_upload_study_area_chunk(
     mock_get_crs_from_wps, mock_storage_client, mock_firestore_client
 ):
@@ -939,8 +953,8 @@ def test_build_and_upload_study_area_chunk(
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
 def test_write_heat_scenario_config_metadata(
     mock_storage_client, mock_firestore_client, _
 ):
@@ -1014,9 +1028,9 @@ def test_write_heat_scenario_config_metadata(
     )
 
 
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
-@mock.patch.object(main, "_get_crs_from_wps", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
+@mock.patch.object(study_area_chunks, "_get_crs_from_wps", autospec=True)
 def test_build_and_upload_study_area_chunk_handles_subfolders(
     mock_get_crs_from_wps, mock_storage_client, mock_firestore_client
 ):
@@ -1113,8 +1127,8 @@ def test_build_and_upload_study_area_chunk_handles_subfolders(
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
 def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _):
     # Return the elevation header from the mock storage client.
     mock_storage_client().bucket("").blob("").open.return_value = io.StringIO(
@@ -1192,9 +1206,9 @@ def test_write_study_area_metadata(mock_storage_client, mock_firestore_client, _
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
-@mock.patch.object(main.wrf, "getvar", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
+@mock.patch.object(wrf, "getvar", autospec=True)
 def test_build_wrf_label_matrix(
     mock_wrf_getvar, mock_storage_client, mock_firestore_client, _
 ):
@@ -1320,8 +1334,8 @@ def test_build_wrf_label_matrix(
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
 def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_client, _):
     """Ensure we sync config uploads to the metastore."""
     config_blob = mock.Mock(spec=storage.Blob)
@@ -1380,7 +1394,7 @@ def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_clien
         uploaded_array,
         numpy.pad(
             numpy.array([0.0, 0.0000019756, 0.0000019756, 0.0000019756, 0.0000039511]),
-            (0, main._RAINFALL_VECTOR_LENGTH - 5),
+            (0, flood_scenarios._RAINFALL_VECTOR_LENGTH - 5),
         ),
     )
 
@@ -1409,8 +1423,8 @@ def test_write_flood_scenario_metadata(mock_storage_client, mock_firestore_clien
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
-@mock.patch.object(main.storage, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
 def test_write_flood_scenario_metadata_rejects_too_long_rainfall(
     mock_storage_client, mock_firestore_client, mock_error_reporting_client
 ):
@@ -1421,9 +1435,9 @@ def test_write_flood_scenario_metadata_rejects_too_long_rainfall(
 
     # Create a rainfall config file with too many entries.
     bad_config_file = io.StringIO()
-    bad_config_file.write(f"{main._RAINFALL_VECTOR_LENGTH + 3}\n")
+    bad_config_file.write(f"{flood_scenarios._RAINFALL_VECTOR_LENGTH + 3}\n")
     bad_config_file.writelines(
-        "0   0.0000000000\n" for _ in range(main._RAINFALL_VECTOR_LENGTH + 3)
+        "0   0.0000000000\n" for _ in range(flood_scenarios._RAINFALL_VECTOR_LENGTH + 3)
     )
     bad_config_file.seek(0)
     config_blob.open.return_value = bad_config_file
@@ -1452,7 +1466,7 @@ def test_write_flood_scenario_metadata_rejects_too_long_rainfall(
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_write_flood_scenario_metadata_ignore_non_rainfall_files(
     mock_firestore_client, _
 ):
@@ -1472,7 +1486,7 @@ def test_write_flood_scenario_metadata_ignore_non_rainfall_files(
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_delete_flood_scenario_metadata(mock_firestore_client, _):
     """Ensure we sync config uploads to the metastore."""
     main.delete_flood_scenario_metadata(
@@ -1498,7 +1512,7 @@ def test_delete_flood_scenario_metadata(mock_firestore_client, _):
 
 
 @mock.patch.object(error_reporting, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_delete_flood_scenario_metadata_ignore_non_rainfall_files(
     mock_firestore_client, _
 ):
@@ -1521,7 +1535,7 @@ def test_delete_flood_scenario_metadata_ignore_non_rainfall_files(
 def test_retry_decorator_runs_decorated_func(mock_error_reporter):
     """Ensures our retry decorator passes the event to the decorated function."""
     mock_func = mock.MagicMock()
-    decorated_func = main._retry_and_report_errors()(mock_func)
+    decorated_func = function_runtime.retry_and_report_errors()(mock_func)
 
     event = functions_framework.CloudEvent(
         {"source": "test", "type": "event"},
@@ -1542,7 +1556,7 @@ def test_retry_decorator_runs_decorated_func(mock_error_reporter):
 def test_retry_decorator_skips_gcloud_tmp_files(_):
     """Ensures our retry decorator skips GCS events for temp gcloud files."""
     mock_func = mock.MagicMock()
-    decorated_func = main._retry_and_report_errors()(mock_func)
+    decorated_func = function_runtime.retry_and_report_errors()(mock_func)
 
     decorated_func(
         functions_framework.CloudEvent(
@@ -1561,7 +1575,7 @@ def test_retry_decorator_skips_gcloud_tmp_files(_):
 def test_retry_decorator_error_reporting(mock_error_reporter):
     """Ensures our retry decorator logs and raises errors."""
     mock_func = mock.MagicMock(side_effect=RuntimeError("oh no!"))
-    decorated_func = main._retry_and_report_errors()(mock_func)
+    decorated_func = function_runtime.retry_and_report_errors()(mock_func)
 
     with pytest.raises(RuntimeError):
         decorated_func(
@@ -1586,7 +1600,7 @@ def test_retry_decorator_custom_error_reporting(mock_error_reporter):
     error = RuntimeError("oh no!")
     mock_func = mock.MagicMock(side_effect=error)
     error_handler = mock.MagicMock()
-    decorated_func = main._retry_and_report_errors(error_handler)(mock_func)
+    decorated_func = function_runtime.retry_and_report_errors(error_handler)(mock_func)
 
     event = functions_framework.CloudEvent(
         {"source": "test", "type": "event"},
@@ -1608,7 +1622,7 @@ def test_retry_decorator_custom_error_reporting(mock_error_reporter):
 def test_retry_decorator_error_timeout(mock_error_reporter):
     """Ensures our retry decorator halts on old invocations."""
     mock_func = mock.MagicMock(side_effect=RuntimeError("oh no!"))
-    decorated_func = main._retry_and_report_errors()(mock_func)
+    decorated_func = function_runtime.retry_and_report_errors()(mock_func)
 
     decorated_func(
         functions_framework.CloudEvent(
@@ -1626,7 +1640,7 @@ def test_retry_decorator_error_timeout(mock_error_reporter):
     mock_error_reporter.assert_not_called()
 
 
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_write_city_cat_output_chunks(mock_firestore_client):
     """Ensures we write the correct chunks to GCS."""
     # Create a fake .rsl file simulation result to read.
@@ -1671,7 +1685,7 @@ def test_write_city_cat_output_chunks(mock_firestore_client):
 
     mock_blob.reset_mock()
     mock_firestore_client.reset_mock()
-    main._write_city_cat_output_chunks(mock_blob, blob_path, chunk_size=3)
+    flood_labels._write_city_cat_output_chunks(mock_blob, blob_path, chunk_size=3)
 
     # Ensure we wrote the two expected chunks.
     for buf in buffers:
@@ -1720,7 +1734,7 @@ def test_write_city_cat_output_chunks(mock_firestore_client):
     )
 
 
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_collapse_city_cat_output_chunks(mock_firestore_client):
     """Ensures we write the correct chunks to GCS."""
     # Have firestore return a three-timestep configuration.
@@ -1795,7 +1809,9 @@ def test_collapse_city_cat_output_chunks(mock_firestore_client):
 
     mock_blob.reset_mock()
     mock_labels_bucket.reset_mock()
-    main._collapse_city_cat_output_chunks(mock_blob, blob_path, mock_labels_bucket)
+    flood_labels._collapse_city_cat_output_chunks(
+        mock_blob, blob_path, mock_labels_bucket
+    )
 
     # Ensure we checked the right prefix.
     mock_blob.bucket.list_blobs.assert_called_once_with(
@@ -1843,7 +1859,7 @@ def test_collapse_city_cat_output_chunks(mock_firestore_client):
         blob.delete.assert_called_once()
 
 
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_collapse_city_cat_output_chunks_missing_timesteps(mock_firestore_client):
     """Ensures halt if files for all timesteps are not present."""
     # Have firestore return a three-timestep configuration.
@@ -1880,7 +1896,9 @@ def test_collapse_city_cat_output_chunks_missing_timesteps(mock_firestore_client
 
     mock_blob.reset_mock()
     mock_labels_bucket.reset_mock()
-    main._collapse_city_cat_output_chunks(mock_blob, blob_path, mock_labels_bucket)
+    flood_labels._collapse_city_cat_output_chunks(
+        mock_blob, blob_path, mock_labels_bucket
+    )
 
     # Ensure we didn't try to write to the mock labels.
     mock_labels_bucket.blob.assert_not_called()
@@ -1900,7 +1918,7 @@ def test_collapse_city_cat_output_chunks_missing_timesteps(mock_firestore_client
         blob.delete.assert_not_called()
 
 
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_collapse_city_cat_output_chunks_deleted_chunks(mock_firestore_client):
     """Ensures halt if files for timesteps are deleted when read."""
     # Have firestore return a three-timestep configuration.
@@ -1945,7 +1963,9 @@ def test_collapse_city_cat_output_chunks_deleted_chunks(mock_firestore_client):
 
     mock_blob.reset_mock()
     mock_labels_bucket.reset_mock()
-    main._collapse_city_cat_output_chunks(mock_blob, blob_path, mock_labels_bucket)
+    flood_labels._collapse_city_cat_output_chunks(
+        mock_blob, blob_path, mock_labels_bucket
+    )
 
     # Ensure we tried to read the deleted blob.
     mock_blob.bucket.list_blobs.return_value[0].open.assert_called_once()
@@ -1978,10 +1998,10 @@ def test_calculate_metadata_for_elevation_happy_path():
         nodata_value=0.0,
     )
     data = numpy.array([[0.0, 1.0], [4.0, 5.0]])
-    metadata = main._calculate_metadata_for_elevation(
+    metadata = flood_features._calculate_metadata_for_elevation(
         geo_data.Elevation(header=header, data=data)
     )
-    assert metadata == main.FeatureMetadata(
+    assert metadata == feature_metadata.FeatureMetadata(
         elevation_min=1.0, elevation_max=5.0, chunk_size=2
     )
 
@@ -1996,13 +2016,15 @@ def test_calculate_metadata_for_elevation_empty_area():
         nodata_value=0.0,
     )
     data = numpy.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
-    metadata = main._calculate_metadata_for_elevation(
+    metadata = flood_features._calculate_metadata_for_elevation(
         geo_data.Elevation(header=header, data=data)
     )
-    assert metadata == main.FeatureMetadata(elevation_min=None, elevation_max=None)
+    assert metadata == feature_metadata.FeatureMetadata(
+        elevation_min=None, elevation_max=None
+    )
 
 
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_rescale_feature_matrices_trigger_files_generated(mock_firestore_client):
     # Return a study area geography from the mock firestore client.
     mock_db = mock_firestore_client()
@@ -2040,7 +2062,9 @@ def test_rescale_feature_matrices_trigger_files_generated(mock_firestore_client)
         input3_mock_blob,
     ]
 
-    main._start_feature_rescaling_if_ready(feature_bucket, "TestArea/chunk_0_0.npy")
+    feature_rescaling._start_feature_rescaling_if_ready(
+        feature_bucket, "TestArea/chunk_0_0.npy"
+    )
 
     feature_bucket.assert_has_calls(
         [
@@ -2057,7 +2081,7 @@ def test_rescale_feature_matrices_trigger_files_generated(mock_firestore_client)
     )
 
 
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_rescale_feature_matrices_trigger_file_processed(mock_firestore_client):
     # Return a study area geography from the mock firestore client.
     mock_db = mock_firestore_client()
@@ -2127,7 +2151,7 @@ def test_rescale_feature_matrices_trigger_file_processed(mock_firestore_client):
         chunk_metadata_ref_mock,
     ]
 
-    main._start_feature_rescaling_if_ready(
+    feature_rescaling._start_feature_rescaling_if_ready(
         feature_bucket, "TestArea/chunk_0_0.scale_trigger"
     )
 
@@ -2197,7 +2221,7 @@ def test_rescale_feature_matrices_trigger_file_processed(mock_firestore_client):
     )
 
 
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_rescale_feature_matrices_for_wrong_file(mock_firestore_client):
     ref = mock_firestore_client().collection().document().collection().document().get()
     ref.exists = False
@@ -2205,15 +2229,15 @@ def test_rescale_feature_matrices_for_wrong_file(mock_firestore_client):
     feature_bucket = mock.MagicMock(spec=storage.Bucket)
     feature_bucket.name = "features"
 
-    main._start_feature_rescaling_if_ready(
+    feature_rescaling._start_feature_rescaling_if_ready(
         feature_bucket, "TestArea/scaled_chunk_0_0.npy"
     )
 
     feature_bucket.assert_not_called()
 
 
-@mock.patch.object(main.storage, "Client", autospec=True)
-@mock.patch.object(main.firestore, "Client", autospec=True)
+@mock.patch.object(storage, "Client", autospec=True)
+@mock.patch.object(firestore, "Client", autospec=True)
 def test_rescale_feature_matrices_skips_wps_files(
     mock_firestore_client, mock_storage_client
 ):

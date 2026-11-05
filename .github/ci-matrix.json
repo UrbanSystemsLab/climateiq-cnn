@@ -30,15 +30,15 @@
     "install": "pip install -r requirements-dev.txt && cd usl_pipeline/add_area && pip install -r requirements.txt --extra-index-url https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple && pip install -e ../usl_lib -e ../study_area_uploader"
   },
   {
-    "service": "cloud_functions",
-    "path": "usl_pipeline/cloud_functions",
+    "service": "preprocessing",
+    "path": "usl_pipeline/2_preprocessing",
     "mypy_path": "usl_pipeline/usl_lib",
     "runner": "ubuntu-24.04",
     "gdal": false,
     "emulator": false,
     "pytest": true,
-    "deps": "requirements-dev.txt\nusl_pipeline/cloud_functions/requirements.txt\nusl_pipeline/usl_lib/setup.py",
-    "install": "pip install -r requirements-dev.txt && cd usl_pipeline/cloud_functions && pip install -r requirements.txt && pip install --no-deps -e ../usl_lib"
+    "deps": "requirements-dev.txt\nusl_pipeline/2_preprocessing/requirements.txt\nusl_pipeline/usl_lib/setup.py",
+    "install": "pip install -r requirements-dev.txt && cd usl_pipeline/2_preprocessing && pip install -r requirements.txt && pip install --no-deps -e ../usl_lib"
   },
   {
     "service": "postprocessing",

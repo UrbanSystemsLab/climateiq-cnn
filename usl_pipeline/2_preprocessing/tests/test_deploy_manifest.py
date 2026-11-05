@@ -9,7 +9,7 @@ import yaml
 
 import main
 
-_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _MANIFEST = _ROOT / ".github" / "deploy" / "functions.json"
 _CI_MATRIX = _ROOT / ".github" / "ci-matrix.json"
 _CI_WORKFLOW = _ROOT / ".github" / "workflows" / "ci.yml"
@@ -19,10 +19,11 @@ import pathlib
 import sys
 
 import main
+import preprocessing
 import usl_lib
 
 staged = pathlib.Path.cwd().resolve()
-for module in (main, usl_lib):
+for module in (main, preprocessing, usl_lib):
     assert pathlib.Path(module.__file__).resolve().is_relative_to(staged), module
 for entry_point in sys.argv[1:]:
     assert callable(getattr(main, entry_point, None)), entry_point

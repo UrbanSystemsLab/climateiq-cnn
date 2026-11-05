@@ -5,7 +5,7 @@ Takes a city from raw geodata to flood predictions on the ClimateIQ dashboard. F
 | # | Stage | Runs on | Started by | Code |
 |---|---|---|---|---|
 | 1 | Add area | Cloud Run job `add-area` | by hand | `add_area/`, `study_area_uploader/` |
-| 2 | Preprocessing | 12 Cloud Functions | Stage 1's uploads | `cloud_functions/main.py` |
+| 2 | Preprocessing | 12 Cloud Functions | Stage 1's uploads | `2_preprocessing/` |
 | 3 | Prediction | On-prem HPC cluster | by hand | `../usl_models/`, see `3_prediction/README.md` |
 | 4 | Post-processing | 3 Cloud Functions | Stage 3's uploads | `4_postprocessing/` |
 
@@ -41,7 +41,7 @@ Each function runs on an upload to the bucket shown, unless marked otherwise.
 | `write-processed-citycat-labels` | `process_citycat_outputs` | `climateiq-flood-simulation-output` | Writes training labels to `climateiq-study-area-label-chunks` |
 | `generate-feature-matrix-http` | `build_feature_matrix_http` | HTTP | Re-runs either feature build by hand |
 
-**Heat path.** These run alongside the flood path and depend on the `wrf-python` wheel in `cloud_functions/wheels/`.
+**Heat path.** These run alongside the flood path and depend on the `wrf-python` wheel in `2_preprocessing/wheels/`.
 
 | Function | Entry point | Runs on |
 |---|---|---|

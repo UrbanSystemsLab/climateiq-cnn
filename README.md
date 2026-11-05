@@ -5,6 +5,10 @@ ClimateIQ CNN Workstream
 
 Instructions for setting up dev environment.
 
+## Pipeline
+
+[usl_pipeline/README.md](usl_pipeline/README.md) describes the stages, what each reads and writes, and where to change things.
+
 ### Install GCloud CLI
 
 To install `gcloud` CLI on linux:
