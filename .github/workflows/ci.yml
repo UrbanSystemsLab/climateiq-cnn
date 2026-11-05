@@ -134,6 +134,8 @@ jobs:
         if: matrix.pytest
         run: pytest ${{ matrix.path }}
       - name: mypy
+        env:
+          MYPYPATH: ${{ matrix.mypy_path }}
         run: mypy ${{ matrix.path }}
 
   ci-ok:

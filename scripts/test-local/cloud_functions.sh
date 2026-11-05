@@ -4,4 +4,4 @@ set -euo pipefail
 flake8 usl_pipeline/cloud_functions --show-source --statistics
 black usl_pipeline/cloud_functions --check
 pytest usl_pipeline/cloud_functions
-mypy usl_pipeline/cloud_functions
+MYPYPATH=usl_pipeline/usl_lib mypy usl_pipeline/cloud_functions

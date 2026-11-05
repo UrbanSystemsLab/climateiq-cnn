@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-from setuptools import setup, find_packages
+from setuptools import setup, find_namespace_packages
 
 setup(
     name="usl_lib",
-    packages=find_packages(),
+    packages=find_namespace_packages(include=["usl_lib*"]),
     install_requires=[
         "geopandas",
         "google-cloud-firestore",

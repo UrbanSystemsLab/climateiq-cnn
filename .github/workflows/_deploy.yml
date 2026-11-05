@@ -39,8 +39,7 @@ jobs:
       bucket_prefix: ${{ steps.plan.outputs.bucket_prefix }}
       sha: ${{ steps.plan.outputs.sha }}
     steps:
-      # The workflow's own commit supplies the manifest and scripts; inputs.ref
-      # is only the code to ship, so rollbacks to older commits still work.
+      # Full history: the manifest is read at inputs.ref.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -72,13 +71,13 @@ jobs:
             fi
           fi
 
-          all=$(jq -c '
+          all=$(git show "$sha:.github/deploy/functions.json" | jq -c '
             .groups | to_entries[] | .key as $group | .value as $g
             | $g.functions | to_entries[]
             | {group: $group, name: .key, entry_point: .value.entry_point,
                runtime: $g.runtime, stage: $g.stage,
                memory: (.value.memory // null), timeout: (.value.timeout // null)}
-          ' .github/deploy/functions.json | jq -sc '.')
+          ' | jq -sc '.')
 
           case "$FUNCTIONS" in
             all)     selected="$all" ;;
@@ -122,10 +121,8 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.functions) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
         with:
           ref: ${{ needs.plan.outputs.sha }}
-          path: src
       - uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
@@ -135,7 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/source"
-          REPO_ROOT="$GITHUB_WORKSPACE/src" bash "${{ matrix.stage }}" "$out" >/dev/null
+          bash "${{ matrix.stage }}" "$out" >/dev/null
           echo "dir=$out" >> "$GITHUB_OUTPUT"
           (cd "$out" && find . -type f | sort)
       - name: Deploy ${{ matrix.name }}
@@ -241,7 +238,8 @@ jobs:
         run: |
           set -euo pipefail
           gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
-          docker build -f usl_pipeline/add_area/Dockerfile -t "$IMAGE:$SHA" -t "$IMAGE:$ENV_TAG" .
+          dockerfile=$(ls usl_pipeline/*add_area/Dockerfile)
+          docker build -f "$dockerfile" -t "$IMAGE:$SHA" -t "$IMAGE:$ENV_TAG" .
           docker push "$IMAGE:$SHA"
           docker push "$IMAGE:$ENV_TAG"
       - name: Update Cloud Run job
