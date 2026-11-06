@@ -2201,7 +2201,10 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
 # ---------------------------------------------------------------------------
 
 
-def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_run):
+def _merge_and_upload_outputs(
+    bucket_name, output_prefix, output_dir, cities_in_run,
+    output_bucket=None, city_output_dir=None,
+):
     """Upload per-city files, then compose all_cities via GCS server-side compose.
 
     For each admin level:
@@ -2233,11 +2236,14 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
     FEATURES_RAW_PREFIX = f"{output_prefix}features_raw"
     CHUNK = 256 * 1024 * 1024
 
-    for local_path in output_files:
-        fname = os.path.basename(local_path)
-        per_city_dest = f"{output_prefix}by_city/{city_name}/{fname}"
-        _upload_to_gcs(bucket_name, local_path, per_city_dest)
-        logging.info("Uploaded per-city: %s", per_city_dest)
+    header_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_header.bin")
+    header_blob.upload_from_string(
+        b'{"type":"FeatureCollection","features":['
+    )
+    comma_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_comma.bin")
+    comma_blob.upload_from_string(b",")
+    footer_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_footer.bin")
+    footer_blob.upload_from_string(b"]}")
 
     def _strip_fc_wrapper(data):
         """Return the content between [ and ] in a FeatureCollection."""
@@ -2309,18 +2315,71 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
         all_cities_path = f"{output_prefix}{fname}"
 
         try:
-            with open(local_path, "rb") as f:
-                content = f.read()
-            features_raw = _strip_fc_wrapper(content)
+            per_city_dest = f"{output_prefix}by_city/{city_name}/{fname}"
+            _upload_to_gcs(bucket_name, local_path, per_city_dest)
+            logging.info("Uploaded per-city: %s", per_city_dest)
 
-            raw_path = f"{FEATURES_RAW_PREFIX}/{city_name}/level_{level_str}.bin"
+            raw_path = (
+                f"{FEATURES_RAW_PREFIX}/{city_name}/level_{level_str}.bin"
+            )
             raw_blob = bucket_obj.blob(raw_path)
-            raw_blob.upload_from_string(features_raw)
+            file_size = os.path.getsize(local_path)
+
+            if file_size < 500 * 1024 * 1024:
+                with open(local_path, "rb") as f:
+                    content = f.read()
+                features_raw = _strip_fc_wrapper(content)
+                raw_blob.upload_from_string(features_raw)
+                raw_size = len(features_raw)
+                del content, features_raw
+            else:
+                raw_blob.chunk_size = CHUNK
+                with open(local_path, "rb") as inp, raw_blob.open(
+                    "wb"
+                ) as out:
+                    header_done = False
+                    leftover = b""
+                    while True:
+                        block = inp.read(CHUNK)
+                        if not block:
+                            if leftover:
+                                end = leftover.rfind(b"]")
+                                if end > 0:
+                                    out.write(leftover[:end])
+                            break
+                        if not header_done:
+                            combined = leftover + block
+                            bracket = combined.find(b"[")
+                            if bracket == -1:
+                                leftover = combined[-100:]
+                                continue
+                            header_done = True
+                            leftover = combined[bracket + 1 :]
+                            continue
+                        if leftover:
+                            out.write(leftover)
+                        leftover = block
+                raw_size = raw_blob.size or file_size
+
+            if file_size > 500 * 1024 * 1024:
+                if output_bucket and city_output_dir and int(level_str) > 100:
+                    _pub_bkt = client.bucket(output_bucket)
+                    _pub_dest = f"{city_output_dir}/{fname}"
+                    _pub_bkt.blob(_pub_dest).upload_from_filename(local_path)
+                    logging.info(
+                        "Published H3 (pre-delete): gs://%s/%s (%.0f MB)",
+                        output_bucket, _pub_dest, file_size / 1e6,
+                    )
+                os.remove(local_path)
+                logging.info(
+                    "Freed %.0f MB tmpfs: %s", file_size / 1e6, fname
+                )
+
             logging.info(
                 "Uploaded features_raw for %s level %s (%d bytes)",
                 city_name,
                 level_str,
-                len(features_raw),
+                raw_size,
             )
 
             by_city_prefix = f"{output_prefix}by_city/"
@@ -2352,17 +2411,10 @@ def _merge_and_upload_outputs(bucket_name, output_prefix, output_dir, cities_in_
                     city_raw_blobs.append((c, rb))
 
             if not city_raw_blobs:
-                logging.warning("No features_raw blobs found for level %s", level_str)
+                logging.warning(
+                    "No features_raw blobs for level %s", level_str
+                )
                 continue
-
-            header_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_header.bin")
-            header_blob.upload_from_string(b'{"type":"FeatureCollection","features":[')
-
-            comma_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_comma.bin")
-            comma_blob.upload_from_string(b",")
-
-            footer_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_footer.bin")
-            footer_blob.upload_from_string(b"]}")
 
             sources = [header_blob]
             for i, (c, rb) in enumerate(city_raw_blobs):
@@ -3011,7 +3063,12 @@ def _process_city_from_predictions(
         if city_build:
             pmtiles_builds.append(city_build)
 
-    _merge_and_upload_outputs(pipeline_bucket, "output/", output_dir, {city_name})
+    out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
+
+    _merge_and_upload_outputs(
+        pipeline_bucket, "output/", output_dir, {city_name},
+        output_bucket=out_bucket, city_output_dir=city_output_dir,
+    )
 
     if tiles_bucket:
         pmtiles_builds.append(
@@ -3019,8 +3076,6 @@ def _process_city_from_predictions(
                 pipeline_bucket, "output/", tiles_bucket, tiles_dir
             )
         )
-
-    out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
 
     _publish_combined_outputs(
         output_dir, city_output_dir, out_bucket, pipeline_bucket, state_fips=state_fips
@@ -3038,7 +3093,10 @@ def _process_city_from_predictions(
     results["output_bucket"] = out_bucket
     results["city_output_folder"] = city_output_dir
 
-    _sync_to_mongodb(output_dir, city_name)
+    _sync_to_mongodb(
+        output_dir, city_name,
+        output_bucket=out_bucket, city_output_dir=city_output_dir,
+    )
 
     if tiles_bucket:
         uploaded = [_upload_pmtiles_build(b, tiles_bucket) for b in pmtiles_builds]
@@ -3080,7 +3138,6 @@ def _publish_combined_outputs(
     National:  USA_Combined/admin.geojson
     """
     import glob as _glob
-    import json as _json
     import re as _re
 
     output_files = _glob.glob(os.path.join(output_dir, "*.geojson"))
@@ -3103,22 +3160,151 @@ def _publish_combined_outputs(
     client = storage.Client()
     out_bucket = client.bucket(output_bucket)
 
-    if h3_files:
-        combined_h3 = _combine_geojson_files(h3_files)
-        h3_fname = f"h3_{city_folder}.geojson"
-        h3_local = os.path.join(output_dir, h3_fname)
-        with open(h3_local, "w") as f:
-            _json.dump(combined_h3, f)
-        dest = f"{city_folder}/{h3_fname}"
-        out_bucket.blob(dest).upload_from_filename(h3_local)
+    for local_path in h3_files:
+        fname = os.path.basename(local_path)
+        dest = f"{city_folder}/{fname}"
+        out_bucket.blob(dest).upload_from_filename(local_path)
+        file_mb = os.path.getsize(local_path) / (1024 * 1024)
         logging.info(
-            "Published combined H3: gs://%s/%s (%d features)",
+            "Published H3: gs://%s/%s (%.1f MB)",
             output_bucket,
             dest,
-            len(combined_h3["features"]),
+            file_mb,
         )
 
+    _create_combined_h3(h3_files, city_folder, output_bucket, client)
+
     _publish_national_admin(admin_files, output_bucket)
+
+
+def _copy_features_raw(readable, writer, prepend_comma, chunk_size=4 * 1024 * 1024):
+    """Copy feature JSON from a GeoJSON FeatureCollection to *writer*.
+
+    Streams the text between the ``[`` and ``]`` of the features array
+    without parsing individual features, keeping memory constant.
+    Returns True if any content was written.
+    """
+    buf = ""
+    while True:
+        chunk = readable.read(chunk_size)
+        if not chunk:
+            readable.close()
+            return False
+        if isinstance(chunk, bytes):
+            chunk = chunk.decode("utf-8")
+        buf += chunk
+        bracket = buf.find("[")
+        if bracket != -1:
+            pending = buf[bracket + 1 :]
+            break
+
+    wrote = False
+    while True:
+        chunk = readable.read(chunk_size)
+        is_last = not chunk
+
+        if is_last:
+            close = pending.rfind("]")
+            if close >= 0:
+                pending = pending[:close]
+
+        text = pending
+
+        if not wrote:
+            text = text.lstrip()
+            if text.startswith(","):
+                text = text[1:].lstrip()
+
+        if is_last:
+            text = text.rstrip()
+            if text.endswith(","):
+                text = text[:-1]
+
+        if text and not text.isspace():
+            if not wrote and prepend_comma:
+                writer.write(",\n")
+            writer.write(text)
+            wrote = True
+
+        if is_last:
+            break
+
+        if isinstance(chunk, bytes):
+            chunk = chunk.decode("utf-8")
+        pending = chunk
+
+    readable.close()
+    return wrote
+
+
+def _create_combined_h3(h3_local, city_folder, output_bucket, client):
+    """Merge per-resolution H3 files into {city_folder}/h3_{city_folder}.geojson.
+
+    The combined file triggers the Mapbox tile-publish workflow via Eventarc.
+    Streams directly to GCS so the full combined file never sits in RAM.
+    """
+    import re as _re
+
+    out_bkt = client.bucket(output_bucket)
+    dest = f"{city_folder}/h3_{city_folder}.geojson"
+
+    local_names = {os.path.basename(p) for p in h3_local}
+    gcs_only = []
+    for blob in out_bkt.list_blobs(prefix=f"{city_folder}/admin_level_1"):
+        bname = os.path.basename(blob.name)
+        if bname.endswith(".geojson") and bname not in local_names:
+            gcs_only.append(blob)
+
+    if not h3_local and not gcs_only:
+        return
+
+    def _level_key(name):
+        m = _re.search(r"admin_level_(\d+)", name)
+        return int(m.group(1)) if m else 0
+
+    sources = []
+    for p in sorted(h3_local, key=lambda x: _level_key(os.path.basename(x))):
+        sources.append(("local", p))
+    for b in sorted(gcs_only, key=lambda x: _level_key(os.path.basename(x.name))):
+        sources.append(("gcs", b))
+
+    combined_blob = out_bkt.blob(dest)
+    combined_blob.chunk_size = 10 * 1024 * 1024
+    need_sep = False
+
+    with combined_blob.open("w") as out:
+        out.write('{"type":"FeatureCollection","features":[\n')
+
+        for src_type, src in sources:
+            if src_type == "local":
+                fh = open(src)
+                label = os.path.basename(src)
+            else:
+                fh = src.open("r")
+                label = os.path.basename(src.name)
+
+            if _copy_features_raw(fh, out, need_sep):
+                need_sep = True
+            logging.info("Combined H3: streamed %s", label)
+
+        out.write("\n]}")
+
+    combined_blob.reload()
+    sz = (combined_blob.size or 0) / (1024 * 1024)
+    logging.info(
+        "Published combined H3: gs://%s/%s (%.1f MB)",
+        output_bucket,
+        dest,
+        sz,
+    )
+
+    for src_type, src in sources:
+        if src_type == "local":
+            bname = os.path.basename(src)
+        else:
+            bname = os.path.basename(src.name)
+        out_bkt.blob(f"{city_folder}/{bname}").delete()
+    logging.info("Cleaned up %d per-resolution H3 files from output bucket", len(sources))
 
 
 def _publish_national_admin(local_admin_files, output_bucket):
@@ -3200,7 +3386,7 @@ def _get_mongo_uri():
         return None
 
 
-def _sync_to_mongodb(output_dir, city_name):
+def _sync_to_mongodb(output_dir, city_name, output_bucket=None, city_output_dir=None):
     """Push combined GeoJSON to MongoDB Atlas.
 
     Reads the combined h3_{city_folder}.geojson → h3 collection
@@ -3235,16 +3421,59 @@ def _sync_to_mongodb(output_dir, city_name):
         logging.error("MongoDB connection failed: %s", e)
         return
 
-    h3_files = [
+    h3_files = sorted(
         f
         for f in os.listdir(output_dir)
-        if f.startswith("h3_") and f.endswith(".geojson")
-    ]
-    if h3_files:
-        h3_path = os.path.join(output_dir, h3_files[0])
-        _mongo_replace_city_file(db[MONGO_H3_COLLECTION], h3_path, city_name, _json)
+        if _re.search(r"admin_level_1\d{2}_", f) and f.endswith(".geojson")
+    )
+
+    gcs_only_blobs = []
+    if output_bucket and city_output_dir:
+        gcs_client = storage.Client()
+        out_bkt = gcs_client.bucket(output_bucket)
+        local_set = set(h3_files)
+        for blob in out_bkt.list_blobs(prefix=f"{city_output_dir}/"):
+            bname = os.path.basename(blob.name)
+            if (
+                _re.search(r"admin_level_1\d{2}_", bname)
+                and bname.endswith(".geojson")
+                and bname not in local_set
+            ):
+                gcs_only_blobs.append(blob)
+                logging.info(
+                    "H3 file %s missing locally — will stream from GCS", bname
+                )
+
+    if h3_files or gcs_only_blobs:
+        removed = _mongo_batched_delete(
+            db[MONGO_H3_COLLECTION], {"properties.city": city_name}
+        )
+        logging.info(
+            "MongoDB %s: removed %d old %s docs",
+            db[MONGO_H3_COLLECTION].name,
+            removed,
+            city_name,
+        )
+        for h3_fname in h3_files:
+            h3_path = os.path.join(output_dir, h3_fname)
+            file_size = os.path.getsize(h3_path)
+            if file_size > 500 * 1024 * 1024:
+                with open(h3_path) as fh:
+                    _mongo_stream_insert_geojson(
+                        db[MONGO_H3_COLLECTION], fh, city_name, h3_fname
+                    )
+            else:
+                _mongo_insert_from_geojson(
+                    db[MONGO_H3_COLLECTION], h3_path, city_name, _json
+                )
+        for blob in gcs_only_blobs:
+            with blob.open("r") as fh:
+                _mongo_stream_insert_geojson(
+                    db[MONGO_H3_COLLECTION], fh, city_name,
+                    os.path.basename(blob.name),
+                )
     else:
-        logging.info("No combined H3 file found — skipping H3 MongoDB sync")
+        logging.info("No H3 resolution files found — skipping H3 MongoDB sync")
 
     admin_features = []
     for local_path in sorted(_glob.glob(os.path.join(output_dir, "*.geojson"))):
@@ -3306,6 +3535,101 @@ def _mongo_batched_delete(collection, filter_dict, batch_size=50000):
     return total
 
 
+def _mongo_insert_from_geojson(collection, file_path, city_name, _json):
+    """Insert docs from a single GeoJSON file (no delete)."""
+    try:
+        with open(file_path) as f:
+            fc = _json.load(f)
+    except Exception as e:
+        logging.error("Failed to read %s: %s", file_path, e)
+        return
+    features = fc.get("features", [])
+    if not features:
+        return
+    docs = [
+        {
+            "type": "Feature",
+            "properties": feat.get("properties", {}),
+            "geometry": feat.get("geometry"),
+        }
+        for feat in features
+    ]
+    del fc, features
+    _mongo_batch_insert(collection, docs, city_name)
+
+
+def _mongo_stream_insert_geojson(collection, readable, city_name, source_name):
+    """Stream-insert features from a GeoJSON readable without loading all into memory."""
+    import json as _json
+
+    BATCH = 5000
+    READ_SIZE = 2 * 1024 * 1024
+    decoder = _json.JSONDecoder()
+    docs = []
+    total = 0
+
+    buf = ""
+    while True:
+        chunk = readable.read(READ_SIZE)
+        if not chunk:
+            return
+        if isinstance(chunk, bytes):
+            chunk = chunk.decode("utf-8")
+        buf += chunk
+        idx = buf.find("[")
+        if idx != -1:
+            buf = buf[idx + 1:]
+            break
+
+    WS = frozenset(" ,\n\r\t")
+    eof = False
+    while True:
+        pos = 0
+        buf_len = len(buf)
+        while pos < buf_len:
+            while pos < buf_len and buf[pos] in WS:
+                pos += 1
+            if pos >= buf_len:
+                break
+            if buf[pos] == "]":
+                eof = True
+                break
+            try:
+                feat, end_idx = decoder.raw_decode(buf, pos)
+                pos = end_idx
+                docs.append({
+                    "type": "Feature",
+                    "properties": feat.get("properties", {}),
+                    "geometry": feat.get("geometry"),
+                })
+                del feat
+                if len(docs) >= BATCH:
+                    _mongo_batch_insert(collection, docs, city_name)
+                    total += len(docs)
+                    docs = []
+            except _json.JSONDecodeError:
+                break
+
+        if eof:
+            break
+
+        buf = buf[pos:]
+        chunk = readable.read(READ_SIZE)
+        if not chunk:
+            break
+        if isinstance(chunk, bytes):
+            chunk = chunk.decode("utf-8")
+        buf += chunk
+
+    if docs:
+        _mongo_batch_insert(collection, docs, city_name)
+        total += len(docs)
+
+    logging.info(
+        "MongoDB: streamed %d features from %s", total, source_name,
+    )
+
+
 def _mongo_replace_city_file(collection, file_path, city_name, _json):
     """Replace a city's docs from a GeoJSON file."""
     try:
@@ -3320,10 +3644,10 @@ def _mongo_replace_city_file(collection, file_path, city_name, _json):
     docs = [
         {
             "type": "Feature",
-            "properties": f.get("properties", {}),
-            "geometry": f.get("geometry"),
+            "properties": feat.get("properties", {}),
+            "geometry": feat.get("geometry"),
         }
-        for f in features
+        for feat in features
     ]
     del fc, features
     removed = _mongo_batched_delete(collection, {"properties.city": city_name})
