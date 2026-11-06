@@ -99,11 +99,12 @@ def resample_to_10m(src_path: str, dst_path: str) -> None:
 
 
 def _process_window(args: Tuple) -> Optional[dict]:
-    """Worker: collect wet pixel values per H3 res-12 cell via jittered sampling.
+    """Worker: compute p90 of wet pixel values per H3 res-12 cell.
 
-    Returns dict of {cell_code: [wet_values]} or None if empty.
+    Returns dict of {cell_code: (p90_value, sample_count)} or None.
     Only pixels above WET_THRESHOLD are kept (prop_p90wet method).
-    Coarser resolutions (6-11) are derived bottom-up after all windows merge.
+    Computing p90 per-window keeps memory bounded — the caller
+    merges across windows with a weighted average.
     """
     tiff_path, window = args
     h3_values: dict = defaultdict(list)
@@ -139,7 +140,12 @@ def _process_window(args: Tuple) -> Optional[dict]:
                         cell = h3.latlng_to_cell(lat, lon, H3_BASE_RES)
                         h3_values[cell].append(val)
 
-    return h3_values if h3_values else None
+    if not h3_values:
+        return None
+    return {
+        cell: (float(np.percentile(vals, 90)), len(vals))
+        for cell, vals in h3_values.items()
+    }
 
 
 def _aggregate_bottom_up(res12_df: pd.DataFrame) -> pd.DataFrame:
@@ -196,24 +202,25 @@ def tiff_to_h3_dataframe(tiff_10m_path: str, n_workers: int = 4) -> pd.DataFrame
 
     print(f"    [tiff->h3] {len(windows)} windows, {n_workers} workers")
 
-    global_values: dict = defaultdict(list)
+    global_p90_weighted: dict = defaultdict(float)
+    global_count: dict = defaultdict(int)
 
     args = [(tiff_10m_path, w) for w in windows]
     with ProcessPoolExecutor(max_workers=n_workers) as executor:
         for result in executor.map(_process_window, args, chunksize=8):
             if result is None:
                 continue
-            for cell, vals in result.items():
-                global_values[cell].extend(vals)
+            for cell, (p90, count) in result.items():
+                global_p90_weighted[cell] += p90 * count
+                global_count[cell] += count
 
     res12_rows = [
         {
             "cell_code": cell,
             "h3_res": H3_BASE_RES,
-            "value": float(np.percentile(vals, 90)),
+            "value": global_p90_weighted[cell] / global_count[cell],
         }
-        for cell, vals in global_values.items()
-        if vals
+        for cell in global_p90_weighted
     ]
     res12_df = pd.DataFrame(res12_rows)
     print(f"    [tiff->h3] res 12: {len(res12_df):,} cells")
