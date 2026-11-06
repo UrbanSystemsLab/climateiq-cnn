@@ -194,7 +194,16 @@ def _process_city_from_predictions(
         if city_build:
             pmtiles_builds.append(city_build)
 
-    _merge_and_upload_outputs(pipeline_bucket, "output/", output_dir, {city_name})
+    out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
+
+    _merge_and_upload_outputs(
+        pipeline_bucket,
+        "output/",
+        output_dir,
+        {city_name},
+        output_bucket=out_bucket,
+        city_output_dir=city_output_dir,
+    )
 
     if tiles_bucket:
         pmtiles_builds.append(
@@ -202,8 +211,6 @@ def _process_city_from_predictions(
                 pipeline_bucket, "output/", tiles_bucket, tiles_dir
             )
         )
-
-    out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
 
     _publish_combined_outputs(
         output_dir, city_output_dir, out_bucket, pipeline_bucket, state_fips=state_fips
@@ -221,7 +228,12 @@ def _process_city_from_predictions(
     results["output_bucket"] = out_bucket
     results["city_output_folder"] = city_output_dir
 
-    _sync_to_mongodb(output_dir, city_name)
+    _sync_to_mongodb(
+        output_dir,
+        city_name,
+        output_bucket=out_bucket,
+        city_output_dir=city_output_dir,
+    )
 
     if tiles_bucket:
         uploaded = [_upload_pmtiles_build(b, tiles_bucket) for b in pmtiles_builds]

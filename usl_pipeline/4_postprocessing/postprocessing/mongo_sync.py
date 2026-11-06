@@ -3,6 +3,8 @@
 import logging
 import os
 
+from google.cloud import storage
+
 MONGO_ADMIN_COLLECTION = "admin_level"
 
 
@@ -27,7 +29,7 @@ def _get_mongo_uri():
         return None
 
 
-def _sync_to_mongodb(output_dir, city_name):
+def _sync_to_mongodb(output_dir, city_name, output_bucket=None, city_output_dir=None):
     """Push combined GeoJSON to MongoDB Atlas.
 
     Reads the combined h3_{city_folder}.geojson → h3 collection
@@ -62,16 +64,59 @@ def _sync_to_mongodb(output_dir, city_name):
         logging.error("MongoDB connection failed: %s", e)
         return
 
-    h3_files = [
+    h3_files = sorted(
         f
         for f in os.listdir(output_dir)
-        if f.startswith("h3_") and f.endswith(".geojson")
-    ]
-    if h3_files:
-        h3_path = os.path.join(output_dir, h3_files[0])
-        _mongo_replace_city_file(db[MONGO_H3_COLLECTION], h3_path, city_name, _json)
+        if _re.search(r"admin_level_1\d{2}_", f) and f.endswith(".geojson")
+    )
+
+    gcs_only_blobs = []
+    if output_bucket and city_output_dir:
+        gcs_client = storage.Client()
+        out_bkt = gcs_client.bucket(output_bucket)
+        local_set = set(h3_files)
+        for blob in out_bkt.list_blobs(prefix=f"{city_output_dir}/"):
+            bname = os.path.basename(blob.name)
+            if (
+                _re.search(r"admin_level_1\d{2}_", bname)
+                and bname.endswith(".geojson")
+                and bname not in local_set
+            ):
+                gcs_only_blobs.append(blob)
+                logging.info("H3 file %s missing locally — will stream from GCS", bname)
+
+    if h3_files or gcs_only_blobs:
+        removed = _mongo_batched_delete(
+            db[MONGO_H3_COLLECTION], {"properties.city": city_name}
+        )
+        logging.info(
+            "MongoDB %s: removed %d old %s docs",
+            db[MONGO_H3_COLLECTION].name,
+            removed,
+            city_name,
+        )
+        for h3_fname in h3_files:
+            h3_path = os.path.join(output_dir, h3_fname)
+            file_size = os.path.getsize(h3_path)
+            if file_size > 500 * 1024 * 1024:
+                with open(h3_path) as fh:
+                    _mongo_stream_insert_geojson(
+                        db[MONGO_H3_COLLECTION], fh, city_name, h3_fname
+                    )
+            else:
+                _mongo_insert_from_geojson(
+                    db[MONGO_H3_COLLECTION], h3_path, city_name, _json
+                )
+        for blob in gcs_only_blobs:
+            with blob.open("r") as fh:
+                _mongo_stream_insert_geojson(
+                    db[MONGO_H3_COLLECTION],
+                    fh,
+                    city_name,
+                    os.path.basename(blob.name),
+                )
     else:
-        logging.info("No combined H3 file found — skipping H3 MongoDB sync")
+        logging.info("No H3 resolution files found — skipping H3 MongoDB sync")
 
     admin_features = []
     for local_path in sorted(_glob.glob(os.path.join(output_dir, "*.geojson"))):
@@ -133,6 +178,105 @@ def _mongo_batched_delete(collection, filter_dict, batch_size=50000):
     return total
 
 
+def _mongo_insert_from_geojson(collection, file_path, city_name, _json):
+    """Insert docs from a single GeoJSON file (no delete)."""
+    try:
+        with open(file_path) as f:
+            fc = _json.load(f)
+    except Exception as e:
+        logging.error("Failed to read %s: %s", file_path, e)
+        return
+    features = fc.get("features", [])
+    if not features:
+        return
+    docs = [
+        {
+            "type": "Feature",
+            "properties": feat.get("properties", {}),
+            "geometry": feat.get("geometry"),
+        }
+        for feat in features
+    ]
+    del fc, features
+    _mongo_batch_insert(collection, docs, city_name)
+
+
+def _mongo_stream_insert_geojson(collection, readable, city_name, source_name):
+    """Stream-insert GeoJSON features without full load."""
+    import json as _json
+
+    BATCH = 5000
+    READ_SIZE = 2 * 1024 * 1024
+    decoder = _json.JSONDecoder()
+    docs = []
+    total = 0
+
+    buf = ""
+    while True:
+        chunk = readable.read(READ_SIZE)
+        if not chunk:
+            return
+        if isinstance(chunk, bytes):
+            chunk = chunk.decode("utf-8")
+        buf += chunk
+        idx = buf.find("[")
+        if idx != -1:
+            buf = buf[idx + 1 :]
+            break
+
+    WS = frozenset(" ,\n\r\t")
+    eof = False
+    while True:
+        pos = 0
+        buf_len = len(buf)
+        while pos < buf_len:
+            while pos < buf_len and buf[pos] in WS:
+                pos += 1
+            if pos >= buf_len:
+                break
+            if buf[pos] == "]":
+                eof = True
+                break
+            try:
+                feat, end_idx = decoder.raw_decode(buf, pos)
+                pos = end_idx
+                docs.append(
+                    {
+                        "type": "Feature",
+                        "properties": feat.get("properties", {}),
+                        "geometry": feat.get("geometry"),
+                    }
+                )
+                del feat
+                if len(docs) >= BATCH:
+                    _mongo_batch_insert(collection, docs, city_name)
+                    total += len(docs)
+                    docs = []
+            except _json.JSONDecodeError:
+                break
+
+        if eof:
+            break
+
+        buf = buf[pos:]
+        chunk = readable.read(READ_SIZE)
+        if not chunk:
+            break
+        if isinstance(chunk, bytes):
+            chunk = chunk.decode("utf-8")
+        buf += chunk
+
+    if docs:
+        _mongo_batch_insert(collection, docs, city_name)
+        total += len(docs)
+
+    logging.info(
+        "MongoDB: streamed %d features from %s",
+        total,
+        source_name,
+    )
+
+
 def _mongo_replace_city_file(collection, file_path, city_name, _json):
     """Replace a city's docs from a GeoJSON file."""
     try:
@@ -147,10 +291,10 @@ def _mongo_replace_city_file(collection, file_path, city_name, _json):
     docs = [
         {
             "type": "Feature",
-            "properties": f.get("properties", {}),
-            "geometry": f.get("geometry"),
+            "properties": feat.get("properties", {}),
+            "geometry": feat.get("geometry"),
         }
-        for f in features
+        for feat in features
     ]
     del fc, features
     removed = _mongo_batched_delete(collection, {"properties.city": city_name})

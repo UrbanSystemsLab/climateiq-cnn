@@ -253,9 +253,8 @@ def combine_geojson_files(
 
     print(f"[unified] Combining {len(file_paths)} files into {output_path}")
 
-    # Fast path: single file — just move it, no need to load through geopandas
     if len(file_paths) == 1:
-        shutil.copy2(file_paths[0], output_path)
+        shutil.move(file_paths[0], output_path)
         file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
         print(f"[unified]   ✓ Combined tileset: {file_size_mb:.2f} MB")
         return
