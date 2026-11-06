@@ -259,5 +259,5 @@ jobs:
                              spec.template.spec.template.spec.serviceAccountName,
                              spec.template.spec.template.spec.containers[0].env)'
           else
-            echo "::warning title=add-area job missing::No Cloud Run job 'add-area' in $PROJECT. Image pushed as $IMAGE:$SHA and :$ENV_TAG; create the job per usl_pipeline/add_area/README.md."
+            echo "::warning title=add-area job missing::No Cloud Run job 'add-area' in $PROJECT. Image pushed as $IMAGE:$SHA and :$ENV_TAG; create the job per usl_pipeline/1_add_area/README.md."
           fi

@@ -4,10 +4,13 @@ Getting Started
 Script to add a new area to ClimateIQ.
 
 ```bash
-pip install -r requirements.txt \
+pip install -r requirements.txt "GDAL==$(gdal-config --version)" \
   --extra-index-url https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple
-pip install -e ../usl_lib -e ../study_area_uploader
 ```
+
+`requirements.txt` leaves out GDAL because its Python bindings must match the
+system library. The image gets them from `python3-gdal`, and CI pins the version
+in `.github/ci-matrix.json`.
 
 * **`BUCKET_PREFIX`** chooses the buckets. `add_area` sets it to `test-` when
   unset, so the test environment is the default.
@@ -17,10 +20,10 @@ pip install -e ../usl_lib -e ../study_area_uploader
 ```bash
 # Test, the default
 gcloud config set project climateiq-test
-python usl_pipeline/add_area/main.py ...
+python usl_pipeline/1_add_area/main.py ...
 
 # Production, both explicit
-GOOGLE_CLOUD_PROJECT=climateiq BUCKET_PREFIX= python usl_pipeline/add_area/main.py ...
+GOOGLE_CLOUD_PROJECT=climateiq BUCKET_PREFIX= python usl_pipeline/1_add_area/main.py ...
 ```
 
 The derived bucket paths are printed at startup and by `--dry-run`, so check
@@ -36,14 +39,14 @@ Usage
 =====
 
 ```bash
-python usl_pipeline/add_area/main.py \
+python usl_pipeline/1_add_area/main.py \
   --country "United States" --city "Kansas City" \
   --verbose
 ```
 
-`scripts/` is imported as a sibling package, so run `main.py` by path (or from
-this directory) rather than with `python -m`. The stage scripts are also
-runnable on their own.
+`add_area/` and `study_area_uploader/` are imported as sibling packages, so run
+`main.py` by path (or from this directory) rather than with `python -m`. The
+stage scripts are also runnable on their own.
 
 Areas are named `<ISO3>_<STATE>_<City>` with the city in PascalCase, for example
 `USA_MO_KansasCity`. The ISO code and state are read from the urban areas
@@ -144,7 +147,7 @@ Cloud Run Job
 Build and push:
 
 ```bash
-gcloud builds submit --config=usl_pipeline/add_area/cloudbuild.yaml .
+gcloud builds submit --config=usl_pipeline/1_add_area/cloudbuild.yaml .
 ```
 
 `BUCKET_PREFIX=test-` is the default and is set here; a production job
@@ -177,10 +180,24 @@ Layout
 
 ```
 main.py    CLI, naming, and the three-stage flow
-scripts/   stage scripts, also runnable on their own
+add_area/  stage scripts, also runnable on their own
   preprocess_h3cells.py           H3 tiles -> city rasters and vectors
   rainfall_scenario_generator.py  NOAA Atlas 14 -> design storm files
+study_area_uploader/  uploads a study area's files and chunks them
+tests/
 ```
+
+Uploading on its own
+====================
+
+To upload files you already have, from this directory:
+
+```bash
+python -m study_area_uploader.main --help
+```
+
+Set the gcloud project, and `BUCKET_PREFIX=test-` for the test environment.
+Uploading starts the stage 2 functions, so processing begins on its own.
 
 Development
 ===========

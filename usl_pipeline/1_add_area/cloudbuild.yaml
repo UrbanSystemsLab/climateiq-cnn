@@ -1,5 +1,5 @@
 # Builds the add_area Cloud Run Job image. Run from the repository root:
-#   gcloud builds submit --config=usl_pipeline/add_area/cloudbuild.yaml .
+#   gcloud builds submit --config=usl_pipeline/1_add_area/cloudbuild.yaml .
 #
 # Substitutions let the same config target either project:
 #   --substitutions=_PROJECT=climateiq,_TAG=prod
@@ -9,7 +9,7 @@ steps:
       [
         "build",
         "--tag=us-central1-docker.pkg.dev/${_PROJECT}/usl-pipeline/add-area:${_TAG}",
-        "--file=./usl_pipeline/add_area/Dockerfile",
+        "--file=./usl_pipeline/1_add_area/Dockerfile",
         ".",
       ]
 options:

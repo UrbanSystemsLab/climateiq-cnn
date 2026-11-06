@@ -4,7 +4,7 @@ Takes a city from raw geodata to flood predictions on the ClimateIQ dashboard. F
 
 | # | Stage | Runs on | Started by | Code |
 |---|---|---|---|---|
-| 1 | Add area | Cloud Run job `add-area` | by hand | `add_area/`, `study_area_uploader/` |
+| 1 | Add area | Cloud Run job `add-area` | by hand | `1_add_area/` |
 | 2 | Preprocessing | 12 Cloud Functions | Stage 1's uploads | `2_preprocessing/` |
 | 3 | Prediction | On-prem HPC cluster | by hand | `../usl_models/`, see `3_prediction/README.md` |
 | 4 | Post-processing | 3 Cloud Functions | Stage 3's uploads | `4_postprocessing/` |
@@ -18,7 +18,7 @@ Takes a city from raw geodata to flood predictions on the ClimateIQ dashboard. F
 
 ## Stage 1: Add area
 
-1. Someone starts the `add-area` job, or runs `add_area/main.py` locally, with a city and country.
+1. Someone starts the `add-area` job, or runs `1_add_area/main.py` locally, with a city and country.
 2. It clips source layers from `gs://raw-data-h3index` (`Working_files/`, `CONUS_Data_H3Index/`) and downloads NOAA Atlas 14 rainfall.
 3. It calls `study_area_uploader`, which writes:
    - `climateiq-study-areas/<area>/`: `header.json`, `boundaries.txt`, `elevation.tif`, `buildings.txt`, `green_areas.txt`, `soil_classes.txt`
@@ -88,7 +88,7 @@ pytest <path>
 mypy <path>
 ```
 
-`add_area` and `study_area_uploader` need GDAL.
+`1_add_area` needs GDAL.
 
 ### Integration tests
 

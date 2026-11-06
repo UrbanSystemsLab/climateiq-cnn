@@ -3,7 +3,7 @@
 Runs the three stages that add an area to the flood pipeline
 
 1. Extract city-clipped DEM, buildings, soil and green areas from the H3 source
-   tiles (``scripts/preprocess_h3cells.py``).
+   tiles (``add_area/preprocess_h3cells.py``).
 2. Generate NOAA Atlas 14 design storm rainfall scenarios for the city centroid
    locally, before publishing any study area data.
 3. Upload the spatial inputs to the study areas bucket and chunk them into the
@@ -33,7 +33,7 @@ from usl_lib.shared.area_names import canonical_area_name  # noqa: E402
 from usl_lib.storage import cloud_storage  # noqa: E402
 from usl_lib.storage import metastore  # noqa: E402
 
-from scripts import preprocess_h3cells  # noqa: E402
+from add_area import preprocess_h3cells  # noqa: E402
 
 # How long to wait for the cloud functions to take a study area all the way to
 # RESCALING_DONE before giving up and telling the caller where to look.
@@ -188,39 +188,6 @@ def _chunk_errors(db: firestore.Client, area_name: str) -> list[str]:
     return errors
 
 
-def _build_uploader_argv(
-    area_name: str, outputs: dict, args: argparse.Namespace
-) -> list:
-    """Builds the command line for the study area uploader.
-
-    Args:
-      area_name: Canonical study area name.
-      outputs: Preprocessing output paths, keyed as process_city_data returns them.
-      args: Parsed add_area arguments supplying the upload options.
-
-    Returns:
-      An argument list accepted by study_area_uploader.main.
-    """
-    argv = [
-        f"--name={area_name}",
-        f"--elevation-file={outputs['dem']}",
-        f"--building-footprint-file={outputs['buildings']}",
-        f"--green-areas-file={outputs['green_spaces_polygons']}",
-        f"--soil-type-file={outputs['soil']}",
-        f"--boundaries-file={outputs['city_boundary']}",
-        f"--elevation-geotiff-band={args.elevation_geotiff_band}",
-    ]
-
-    if args.overwrite:
-        argv.append("--overwrite")
-    if args.export_to_citycat:
-        argv.append("--export-to-citycat")
-    if args.verbose:
-        argv.append("--verbose")
-
-    return argv
-
-
 def resolve_identity(args: argparse.Namespace) -> tuple:
     """Resolves the canonical study area name from the urban areas shapefile.
 
@@ -317,7 +284,7 @@ def add_area(args: argparse.Namespace) -> str:
             latitude, longitude = derive_centroid_lat_lon(outputs["city_boundary"])
             logger.info("City centroid: lat=%.5f lon=%.5f", latitude, longitude)
 
-            from scripts import rainfall_scenario_generator as rainfall
+            from add_area import rainfall_scenario_generator as rainfall
 
             rainfall_dir = work_dir / "rainfall"
             atlas14_csv = rainfall.part1_download_atlas14(
@@ -329,7 +296,17 @@ def add_area(args: argparse.Namespace) -> str:
         # The uploader waits for study area metadata to be registered before chunking.
         import study_area_uploader.main as uploader_main
 
-        uploader_main.main(_build_uploader_argv(area_name, outputs, args))
+        uploader_main.upload_study_area(
+            name=area_name,
+            elevation_file=str(outputs["dem"]),
+            boundaries_file=str(outputs["city_boundary"]),
+            building_footprint_file=str(outputs["buildings"]),
+            green_areas_file=str(outputs["green_spaces_polygons"]),
+            soil_type_file=str(outputs["soil"]),
+            elevation_geotiff_band=args.elevation_geotiff_band,
+            export_to_citycat=args.export_to_citycat,
+            overwrite=args.overwrite,
+        )
 
         if rainfall_dir is not None:
             upload_rainfall_scenarios(rainfall_dir, config_group, storage.Client())
@@ -450,7 +427,7 @@ def _get_args_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Entry point. Run as ``python usl_pipeline/add_area/main.py``."""
+    """Entry point. Run as ``python usl_pipeline/1_add_area/main.py``."""
     args = _get_args_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,

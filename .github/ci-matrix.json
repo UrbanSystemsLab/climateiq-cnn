@@ -10,24 +10,14 @@
     "install": "pip install -e usl_pipeline/usl_lib[dev]"
   },
   {
-    "service": "study_area_uploader",
-    "path": "usl_pipeline/study_area_uploader",
+    "service": "add_area",
+    "path": "usl_pipeline/1_add_area",
     "runner": "ubuntu-22.04",
     "gdal": true,
     "emulator": false,
     "pytest": true,
-    "deps": "usl_pipeline/study_area_uploader/requirements.txt\nusl_pipeline/study_area_uploader/setup.py\nusl_pipeline/usl_lib/setup.py",
-    "install": "cd usl_pipeline/study_area_uploader && pip install -r requirements.txt && pip install -e .[dev]"
-  },
-  {
-    "service": "add_area",
-    "path": "usl_pipeline/add_area",
-    "runner": "ubuntu-22.04",
-    "gdal": true,
-    "emulator": false,
-    "pytest": false,
-    "deps": "requirements-dev.txt\nusl_pipeline/add_area/requirements.txt\nusl_pipeline/study_area_uploader/requirements.txt\nusl_pipeline/study_area_uploader/setup.py\nusl_pipeline/usl_lib/setup.py",
-    "install": "pip install -r requirements-dev.txt && cd usl_pipeline/add_area && pip install -r requirements.txt --extra-index-url https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple && pip install -e ../usl_lib -e ../study_area_uploader"
+    "deps": "requirements-dev.txt\nusl_pipeline/1_add_area/requirements.txt\nusl_pipeline/usl_lib/setup.py",
+    "install": "pip install -r requirements-dev.txt && cd usl_pipeline/1_add_area && pip install -r requirements.txt GDAL==3.6.4 --extra-index-url https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple"
   },
   {
     "service": "preprocessing",

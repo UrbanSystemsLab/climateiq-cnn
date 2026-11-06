@@ -4,7 +4,7 @@ import pathlib
 import sys
 import tempfile
 import time
-from typing import Sequence
+from typing import Iterable, Sequence
 
 from google.cloud import firestore
 from google.cloud import storage
@@ -13,6 +13,8 @@ from study_area_uploader.chunkers import study_area_chunkers
 from study_area_uploader.transformers import study_area_transformers
 from usl_lib.storage import cloud_storage
 from usl_lib.storage import metastore
+
+_DEFAULT_SOIL_TYPE_PROPERTY = "soil_class"
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -23,18 +25,51 @@ def main(argv: Sequence[str] | None = None) -> None:
     """
     args = _parse_args(argv)
     # Setting up logging:
-    logging.getLogger("rasterio").setLevel(logging.WARNING)
     if args.verbose:
         logging.basicConfig(level=logging.INFO)
     else:
         logging.basicConfig(level=logging.ERROR)
 
+    upload_study_area(
+        name=args.name,
+        elevation_file=args.elevation_file,
+        boundaries_file=args.boundaries_file,
+        building_footprint_file=args.building_footprint_file,
+        green_areas_file=args.green_areas_file,
+        soil_type_file=args.soil_type_file,
+        elevation_geotiff_band=args.elevation_geotiff_band,
+        soil_type_mask_feature_property=args.soil_type_mask_feature_property,
+        non_green_area_soil_classes=args.non_green_area_soil_classes,
+        export_to_citycat=args.export_to_citycat,
+        overwrite=args.overwrite,
+    )
+
+
+def upload_study_area(
+    *,
+    name: str,
+    elevation_file: str,
+    boundaries_file: str | None,
+    building_footprint_file: str,
+    green_areas_file: str,
+    soil_type_file: str,
+    elevation_geotiff_band: int = 1,
+    soil_type_mask_feature_property: str = _DEFAULT_SOIL_TYPE_PROPERTY,
+    non_green_area_soil_classes: Iterable[int] = (),
+    export_to_citycat: bool = False,
+    overwrite: bool = False,
+) -> None:
+    """Uploads a study area's files and chunks to GCS.
+
+    Exits with status 1 if the study area already has files and overwrite is False.
+    """
+    logging.getLogger("rasterio").setLevel(logging.WARNING)
+
     db = firestore.Client()
     storage_client = storage.Client()
 
     # Let's check and cleanup old files before uploading new ones.
-    study_area_file_prefix = f"{args.name}/"
-    overwrite = args.overwrite
+    study_area_file_prefix = f"{name}/"
     study_area_bucket = storage_client.bucket(cloud_storage.STUDY_AREA_BUCKET)
     if not _check_and_delete_storage_files_with_prefix(
         study_area_bucket, study_area_file_prefix, overwrite
@@ -42,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         sys.exit(1)
 
     citycat_bucket = None
-    if args.export_to_citycat:
+    if export_to_citycat:
         citycat_bucket = storage_client.bucket(
             cloud_storage.FLOOD_SIMULATION_INPUT_BUCKET
         )
@@ -70,35 +105,35 @@ def main(argv: Sequence[str] | None = None) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         work_dir = pathlib.Path(temp_dir)
         prepared_inputs = study_area_transformers.prepare_and_upload_study_area_files(
-            args.name,
-            args.elevation_file,
-            args.boundaries_file,
-            args.building_footprint_file,
-            args.green_areas_file,
-            args.soil_type_file,
-            args.soil_type_mask_feature_property,
+            name,
+            elevation_file,
+            boundaries_file,
+            building_footprint_file,
+            green_areas_file,
+            soil_type_file,
+            soil_type_mask_feature_property,
             work_dir,
             study_area_bucket,
-            input_non_green_area_soil_classes=set(args.non_green_area_soil_classes),
+            input_non_green_area_soil_classes=set(non_green_area_soil_classes),
         )
 
-        if args.export_to_citycat:
+        if export_to_citycat:
             if citycat_bucket is None:
                 raise ValueError("Internal error, CityCat bucket should be set earlier")
             study_area_transformers.prepare_and_upload_citycat_input_files(
-                args.name,
+                name,
                 prepared_inputs,
                 work_dir,
                 citycat_bucket,
-                elevation_geotiff_band=args.elevation_geotiff_band,
+                elevation_geotiff_band=elevation_geotiff_band,
             )
             study_area_chunkers.build_and_upload_chunks_citycat(
-                args.name,
+                name,
                 prepared_inputs,
                 work_dir,
                 citycat_bucket_chunked,
                 1000,
-                input_elevation_band=args.elevation_geotiff_band,
+                input_elevation_band=elevation_geotiff_band,
             )
 
         # Wait till study area metadata is registered by cloud_function triggered by
@@ -106,7 +141,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         retries = 0
         while True:
             try:
-                metastore.StudyArea.get(db, args.name)
+                metastore.StudyArea.get(db, name)
             except ValueError:
                 if retries > 2:
                     raise RuntimeError(
@@ -120,12 +155,12 @@ def main(argv: Sequence[str] | None = None) -> None:
                 break
 
         study_area_chunkers.build_and_upload_chunks(
-            args.name,
+            name,
             prepared_inputs,
             work_dir,
             chunk_bucket,
             1000,
-            input_elevation_band=args.elevation_geotiff_band,
+            input_elevation_band=elevation_geotiff_band,
         )
 
 
@@ -216,7 +251,7 @@ def _get_args_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--soil-type-mask-feature-property",
-        default="soil_class",
+        default=_DEFAULT_SOIL_TYPE_PROPERTY,
         help=(
             "Optional name of the property in the soil type shape which provides "
             "soil classes."
