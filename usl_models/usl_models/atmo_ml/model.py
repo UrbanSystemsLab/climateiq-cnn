@@ -55,7 +55,7 @@ class AtmoModel:
         spatial_activation: Activation = "relu"
         st_activation: Activation = "relu"
         lstm_activation: Activation = "tanh"
-        output_activation: Activation = "relu"
+        output_activation: Activation = "linear"
 
         # The optimizer configuration.
         optimizer: keras.optimizers.Optimizer = dataclasses.field(
@@ -431,7 +431,9 @@ class AtmoConvLSTM(keras.Model):
 
         # Output CNNs (upsampling via TransposeConv)
         # We return separate sub-models (i.e., branches) for each output.
-        output_cnn_params = ConvParams(activation="relu", padding="valid")
+        output_cnn_params = ConvParams(
+            activation=self._params.output_activation, padding="valid"
+        )
         output_cnn_input_shape = (T, LSTM_H, LSTM_W, LSTM_FILTERS // 2)
 
         # Output: T2 (2m temperature)
