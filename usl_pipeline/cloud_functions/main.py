@@ -2202,8 +2202,12 @@ def _add_breadcrumbs_to_outputs(output_dir, config_dict=None):
 
 
 def _merge_and_upload_outputs(
-    bucket_name, output_prefix, output_dir, cities_in_run,
-    output_bucket=None, city_output_dir=None,
+    bucket_name,
+    output_prefix,
+    output_dir,
+    cities_in_run,
+    output_bucket=None,
+    city_output_dir=None,
 ):
     """Upload per-city files, then compose all_cities via GCS server-side compose.
 
@@ -2237,9 +2241,7 @@ def _merge_and_upload_outputs(
     CHUNK = 256 * 1024 * 1024
 
     header_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_header.bin")
-    header_blob.upload_from_string(
-        b'{"type":"FeatureCollection","features":['
-    )
+    header_blob.upload_from_string(b'{"type":"FeatureCollection","features":[')
     comma_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_comma.bin")
     comma_blob.upload_from_string(b",")
     footer_blob = bucket_obj.blob(f"{FEATURES_RAW_PREFIX}/_footer.bin")
@@ -2319,9 +2321,7 @@ def _merge_and_upload_outputs(
             _upload_to_gcs(bucket_name, local_path, per_city_dest)
             logging.info("Uploaded per-city: %s", per_city_dest)
 
-            raw_path = (
-                f"{FEATURES_RAW_PREFIX}/{city_name}/level_{level_str}.bin"
-            )
+            raw_path = f"{FEATURES_RAW_PREFIX}/{city_name}/level_{level_str}.bin"
             raw_blob = bucket_obj.blob(raw_path)
             file_size = os.path.getsize(local_path)
 
@@ -2334,9 +2334,7 @@ def _merge_and_upload_outputs(
                 del content, features_raw
             else:
                 raw_blob.chunk_size = CHUNK
-                with open(local_path, "rb") as inp, raw_blob.open(
-                    "wb"
-                ) as out:
+                with open(local_path, "rb") as inp, raw_blob.open("wb") as out:
                     header_done = False
                     leftover = b""
                     while True:
@@ -2368,12 +2366,12 @@ def _merge_and_upload_outputs(
                     _pub_bkt.blob(_pub_dest).upload_from_filename(local_path)
                     logging.info(
                         "Published H3 (pre-delete): gs://%s/%s (%.0f MB)",
-                        output_bucket, _pub_dest, file_size / 1e6,
+                        output_bucket,
+                        _pub_dest,
+                        file_size / 1e6,
                     )
                 os.remove(local_path)
-                logging.info(
-                    "Freed %.0f MB tmpfs: %s", file_size / 1e6, fname
-                )
+                logging.info("Freed %.0f MB tmpfs: %s", file_size / 1e6, fname)
 
             logging.info(
                 "Uploaded features_raw for %s level %s (%d bytes)",
@@ -2411,9 +2409,7 @@ def _merge_and_upload_outputs(
                     city_raw_blobs.append((c, rb))
 
             if not city_raw_blobs:
-                logging.warning(
-                    "No features_raw blobs for level %s", level_str
-                )
+                logging.warning("No features_raw blobs for level %s", level_str)
                 continue
 
             sources = [header_blob]
@@ -3066,8 +3062,12 @@ def _process_city_from_predictions(
     out_bucket = os.environ.get("OUTPUT_BUCKET", OUTPUT_BUCKET)
 
     _merge_and_upload_outputs(
-        pipeline_bucket, "output/", output_dir, {city_name},
-        output_bucket=out_bucket, city_output_dir=city_output_dir,
+        pipeline_bucket,
+        "output/",
+        output_dir,
+        {city_name},
+        output_bucket=out_bucket,
+        city_output_dir=city_output_dir,
     )
 
     if tiles_bucket:
@@ -3094,8 +3094,10 @@ def _process_city_from_predictions(
     results["city_output_folder"] = city_output_dir
 
     _sync_to_mongodb(
-        output_dir, city_name,
-        output_bucket=out_bucket, city_output_dir=city_output_dir,
+        output_dir,
+        city_name,
+        output_bucket=out_bucket,
+        city_output_dir=city_output_dir,
     )
 
     if tiles_bucket:
@@ -3305,7 +3307,8 @@ def _create_combined_h3(h3_local, city_folder, output_bucket, client):
             bname = os.path.basename(src.name)
         out_bkt.blob(f"{city_folder}/{bname}").delete()
     logging.info(
-        "Cleaned up %d per-resolution H3 files", len(sources),
+        "Cleaned up %d per-resolution H3 files",
+        len(sources),
     )
 
 
@@ -3442,9 +3445,7 @@ def _sync_to_mongodb(output_dir, city_name, output_bucket=None, city_output_dir=
                 and bname not in local_set
             ):
                 gcs_only_blobs.append(blob)
-                logging.info(
-                    "H3 file %s missing locally — will stream from GCS", bname
-                )
+                logging.info("H3 file %s missing locally — will stream from GCS", bname)
 
     if h3_files or gcs_only_blobs:
         removed = _mongo_batched_delete(
@@ -3471,7 +3472,9 @@ def _sync_to_mongodb(output_dir, city_name, output_bucket=None, city_output_dir=
         for blob in gcs_only_blobs:
             with blob.open("r") as fh:
                 _mongo_stream_insert_geojson(
-                    db[MONGO_H3_COLLECTION], fh, city_name,
+                    db[MONGO_H3_COLLECTION],
+                    fh,
+                    city_name,
                     os.path.basename(blob.name),
                 )
     else:
@@ -3580,7 +3583,7 @@ def _mongo_stream_insert_geojson(collection, readable, city_name, source_name):
         buf += chunk
         idx = buf.find("[")
         if idx != -1:
-            buf = buf[idx + 1:]
+            buf = buf[idx + 1 :]
             break
 
     WS = frozenset(" ,\n\r\t")
@@ -3599,11 +3602,13 @@ def _mongo_stream_insert_geojson(collection, readable, city_name, source_name):
             try:
                 feat, end_idx = decoder.raw_decode(buf, pos)
                 pos = end_idx
-                docs.append({
-                    "type": "Feature",
-                    "properties": feat.get("properties", {}),
-                    "geometry": feat.get("geometry"),
-                })
+                docs.append(
+                    {
+                        "type": "Feature",
+                        "properties": feat.get("properties", {}),
+                        "geometry": feat.get("geometry"),
+                    }
+                )
                 del feat
                 if len(docs) >= BATCH:
                     _mongo_batch_insert(collection, docs, city_name)
@@ -3628,7 +3633,9 @@ def _mongo_stream_insert_geojson(collection, readable, city_name, source_name):
         total += len(docs)
 
     logging.info(
-        "MongoDB: streamed %d features from %s", total, source_name,
+        "MongoDB: streamed %d features from %s",
+        total,
+        source_name,
     )
 
 
