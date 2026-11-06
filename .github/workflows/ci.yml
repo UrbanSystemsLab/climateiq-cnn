@@ -29,7 +29,7 @@ jobs:
       actions: read
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
-      deploy_functions: ${{ steps.filter.outputs.deploy_functions }}
+      deploy_functions: ${{ steps.deploy.outputs.functions }}
       deploy_add_area: ${{ steps.filter.outputs.deploy_add_area }}
     steps:
       - uses: actions/checkout@v4
@@ -59,30 +59,52 @@ jobs:
               - 'mypy.ini'
             usl_lib:
               - 'usl_pipeline/usl_lib/**'
-            study_area_uploader:
-              - 'usl_pipeline/usl_lib/**'
-              - 'usl_pipeline/study_area_uploader/**'
             add_area:
               - 'usl_pipeline/usl_lib/**'
-              - 'usl_pipeline/study_area_uploader/**'
-              - 'usl_pipeline/add_area/**'
-            cloud_functions:
+              - 'usl_pipeline/1_add_area/**'
+            preprocessing:
               - 'usl_pipeline/usl_lib/**'
-              - 'usl_pipeline/cloud_functions/**'
+              - 'usl_pipeline/2_preprocessing/**'
+              - 'scripts/stage_preprocessing.sh'
+              - '.github/deploy/functions.json'
+            postprocessing:
+              - 'usl_pipeline/usl_lib/**'
+              - 'usl_pipeline/4_postprocessing/**'
+              - 'scripts/stage_postprocessing.sh'
               - '.github/deploy/functions.json'
             usl_models:
               - 'usl_models/**'
-            deploy_functions:
+            deploy_preprocessing:
               - 'usl_pipeline/usl_lib/**'
-              - 'usl_pipeline/cloud_functions/**'
-              - 'scripts/stage_cloud_functions.sh'
+              - 'usl_pipeline/2_preprocessing/**'
+              - 'scripts/stage_preprocessing.sh'
+              - '.github/deploy/**'
+              - '.github/workflows/_deploy.yml'
+            deploy_postprocessing:
+              - 'usl_pipeline/usl_lib/**'
+              - 'usl_pipeline/4_postprocessing/**'
+              - 'scripts/stage_postprocessing.sh'
               - '.github/deploy/**'
               - '.github/workflows/_deploy.yml'
             deploy_add_area:
               - 'usl_pipeline/usl_lib/**'
-              - 'usl_pipeline/study_area_uploader/**'
-              - 'usl_pipeline/add_area/**'
+              - 'usl_pipeline/1_add_area/**'
               - '.github/workflows/_deploy.yml'
+      - name: Choose functions to deploy
+        id: deploy
+        env:
+          PREPROCESSING: ${{ steps.filter.outputs.deploy_preprocessing }}
+          POSTPROCESSING: ${{ steps.filter.outputs.deploy_postprocessing }}
+        run: |
+          set -euo pipefail
+          case "$PREPROCESSING,$POSTPROCESSING" in
+            true,true) functions=all ;;
+            true,*)    functions=group:preprocessing ;;
+            *,true)    functions=group:postprocessing ;;
+            *)         functions=none ;;
+          esac
+          echo "functions=$functions" >> "$GITHUB_OUTPUT"
+          echo "Functions to deploy: $functions"
       - name: Build check matrix
         id: matrix
         env:
@@ -134,6 +156,8 @@ jobs:
         if: matrix.pytest
         run: pytest ${{ matrix.path }}
       - name: mypy
+        env:
+          MYPYPATH: ${{ matrix.mypy_path }}
         run: mypy ${{ matrix.path }}
 
   ci-ok:
@@ -159,7 +183,7 @@ jobs:
       !cancelled()
       && needs.ci-ok.result == 'success'
       && github.event_name == 'push'
-      && (needs.changes.outputs.deploy_functions == 'true'
+      && (needs.changes.outputs.deploy_functions != 'none'
           || needs.changes.outputs.deploy_add_area == 'true')
     permissions:
       id-token: write
@@ -168,6 +192,6 @@ jobs:
     secrets: inherit
     with:
       environment: ${{ github.ref_name == 'release' && 'production' || 'test' }}
-      functions: ${{ needs.changes.outputs.deploy_functions == 'true' && 'all' || 'none' }}
+      functions: ${{ needs.changes.outputs.deploy_functions }}
       add_area: ${{ needs.changes.outputs.deploy_add_area == 'true' }}
       ref: ${{ github.sha }}

@@ -15,8 +15,8 @@ on:
         required: true
       functions:
         description: >-
-          Cloud Functions to deploy: "all", "none", or comma-separated names
-          from .github/deploy/functions.json
+          Cloud Functions to deploy: "all", "none", "group:<name>", or
+          comma-separated names from .github/deploy/functions.json
         type: string
         default: all
       add_area:
