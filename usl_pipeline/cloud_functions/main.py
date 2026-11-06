@@ -3304,7 +3304,9 @@ def _create_combined_h3(h3_local, city_folder, output_bucket, client):
         else:
             bname = os.path.basename(src.name)
         out_bkt.blob(f"{city_folder}/{bname}").delete()
-    logging.info("Cleaned up %d per-resolution H3 files from output bucket", len(sources))
+    logging.info(
+        "Cleaned up %d per-resolution H3 files", len(sources),
+    )
 
 
 def _publish_national_admin(local_admin_files, output_bucket):
@@ -3559,7 +3561,7 @@ def _mongo_insert_from_geojson(collection, file_path, city_name, _json):
 
 
 def _mongo_stream_insert_geojson(collection, readable, city_name, source_name):
-    """Stream-insert features from a GeoJSON readable without loading all into memory."""
+    """Stream-insert GeoJSON features without full load."""
     import json as _json
 
     BATCH = 5000
