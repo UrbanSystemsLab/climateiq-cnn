@@ -192,8 +192,12 @@ def make_hybrid_loss(y_true, y_pred):
     log_pred = tf.math.log1p(y_pred_relu)
     log_squared_error = tf.square(log_true - log_pred)
 
+    # weighted_log_mse = tf.reduce_sum(
+    #     flood_weight * log_squared_error * effective_mask
+    # ) / (tf.reduce_sum(effective_mask) + 1e-8)
+
     weighted_log_mse = tf.reduce_sum(
-        flood_weight * log_squared_error * effective_mask
+        log_squared_error * effective_mask
     ) / (tf.reduce_sum(effective_mask) + 1e-8)
 
     # weighted_log_mse = tf.reduce_sum(

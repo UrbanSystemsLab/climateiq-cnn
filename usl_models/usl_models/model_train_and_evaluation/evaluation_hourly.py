@@ -16,6 +16,7 @@ for gpu in tf.config.list_physical_devices("GPU"):
 from usl_models.flood_ml.model import FloodModel
 from usl_models.flood_ml.model import SpatialAttention
 from usl_models.flood_ml.dataset import load_dataset_windowed_patches
+# from usl_models.flood_ml.dataset_improved import load_dataset_windowed_patches
 from usl_models.flood_ml.Eva_sup import *
 import pandas as pd
 
@@ -23,18 +24,18 @@ SEED = 42
 keras.utils.set_random_seed(SEED)
 
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
-OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output/semi_physical_test_6_steps_no_mass_loss/evaluation_hourly")
+OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output/semi_new_test_v03_overall_flow_2/evaluation_2_hours")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PATCH_SIZE   = 256
 N_FLOOD_MAPS = 5
 M_RAINFALL   = 6
-N_STEMPS = 12
+N_STEMPS = 24
 N_SAMPLES = 1000  # batches — more = more reliable correlation estimate
 
 CHECKPOINTS = {
     "R14 (focal loss, 8 US cities)": pathlib.Path(
-        "/scratch/hw4402/climateiq_output/semi_physical_test_6_steps_no_mass_loss/weights_ordered.npz"
+        "/scratch/hw4402/climateiq_output/semi_new_test_v03_overall_flow_2/weights_ordered.npz"
     ),
 }
 
@@ -267,7 +268,7 @@ for sim_idx, sim in enumerate(all_sim_list):
             
             pred_max = tf.reduce_max(pred, axis=1)
             ###########################################
-            # GET percentail value map:
+            # # GET percentail value map:
             
             # tensor_pred = tf.transpose(pred, perm=[0, 2, 3, 1])
             # T = tf.shape(tensor_pred)[-1]
@@ -278,8 +279,13 @@ for sim_idx, sim in enumerate(all_sim_list):
 
             ###########################################
             label_max = tf.reduce_max(labels, axis=1)
+<<<<<<< HEAD
             pred_time_split[-1].append(pred_max)
             # pred_time_split[-1].append(percential_max)
+=======
+            # pred_time_split[-1].append(pred_max)
+            pred_time_split[-1].append(pred_max)
+>>>>>>> physics-informed-model-structure-v0.3
             label_time_split[-1].append(label_max)
         except:
             print("some error occurs")

@@ -19,6 +19,8 @@ PadMode: TypeAlias = Literal["REFLECT", "CONSTANT"]
 RESOLUTION = 2
 REVOLVESTEPS = 30
 EPS = 1e-7 
+V_MAX = 1
+N_BPTT = 30
 
 @register_keras_serializable()
 class SpatialAttention(layers.Layer):
@@ -688,7 +690,7 @@ class FloodPhysicConvLSTM(keras.Model):
         # the loss gradient flow unconstrained; clip to ≥0 at inference.
         self.output_d_conv = layers.Conv2D(2, 3, padding="same", activation="tanh")
         self.output_s_conv = layers.Conv2D(2, 3, padding="same", activation="linear")
-        self.infil_transp_conv = layers.Conv2D(1, 3, padding="same", activation="linear")
+        self.infil_transp_conv = layers.Conv2D(1, 3, padding="same", activation="relu")
 
         # Physics-based infiltration correction (no trainable weights)
         self.green_ampt_gate = GreenAmptGate(name="green_ampt_gate")
@@ -809,41 +811,31 @@ class FloodPhysicConvLSTM(keras.Model):
         # the speed for 4 direction s_8: output [B, H, W, 2]
         # flood_s = self.output_s_conv(x)
 
-        # flood_velocity = flood_d * flood_s
-        flood_velocity = self.output_s_conv(x)
+        flood_flow = self.output_s_conv(x) # [B, H, W, 2]
         # the infiltration
         infiltration_transpiration = self.infil_transp_conv(x)
+        infiltration_volume = infiltration_transpiration * RESOLUTION**2
 
-        step_time = 300 / REVOLVESTEPS # in seconds
-        # the rainfall: rain_rate
-        rain_volume = rain_rate[:, -1] * RESOLUTION**2 * 300 / REVOLVESTEPS # cubic meters per time step
-        infil_transp_volume = infiltration_transpiration * RESOLUTION**2 / REVOLVESTEPS
+        rain_volume = rain_rate[:, -1] * RESOLUTION**2 * 300 # cubic meters per 5 minutes
 
-        adj_v = tf.pad(flood_velocity, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT")
-        adj_v = self.v_core_layer(adj_v)
-        
-        for i in range(REVOLVESTEPS):
+        flow_padded = tf.pad(flood_flow, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
+        # adj_v = self.v_core_layer(adj_v)
+        self_v_u = tf.nn.relu(flood_flow[..., 0:1])
+        self_v_v = tf.nn.relu(flood_flow[..., 1:2])
+        adj_v_u = tf.nn.relu(-1 * flow_padded[:, 1:-1, 0:-2, 0:1]) # [B, H, W, 1]
+        adj_v_v = tf.nn.relu(-1 * flow_padded[:, 0:-2, 1:-1, 1:2]) # [B, H, W, 1]
+        out_flow = tf.concat([self_v_u, self_v_v, adj_v_u, adj_v_v], axis=-1) # [B, H, W, 4]
 
-            self_out = tf.nn.relu(flood_velocity) * current_depth * RESOLUTION
+        out_volume = tf.reduce_sum(out_flow, axis=-1, keepdims=True) # [B, H, W, 1]
 
-            adj_out = tf.nn.relu(-1 * adj_v) * current_depth * RESOLUTION
+        out_flow_padded = tf.pad(out_flow, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT") # [B, H, W, 4]
+        in_volume = out_flow_padded[:, 1:-1, 0:-2, 0:1] + out_flow_padded[:, 1:-1, 2:, 2:3] + out_flow_padded[:, 0:-2, 1:-1, 1:2] + out_flow_padded[:, 2:, 1:-1, 3:4] # [B, H, W, 1]
 
-            total_out = tf.reduce_sum(self_out, axis=-1, keepdims=True) + tf.reduce_sum(adj_out, axis=-1, keepdims=True)
-            out_rate = tf.clip_by_value((current_depth * RESOLUTION**2 + EPS) / (total_out + EPS), 0, 1)
+        new_volume = current_depth*RESOLUTION**2 + rain_volume - infiltration_volume - out_volume + in_volume
 
-            self_out = self_out * out_rate
-            adj_out = adj_out * out_rate
+        new_depth = new_volume/RESOLUTION**2
 
-            out_flow = tf.concat([self_out, adj_out], axis=-1) # [B, H, W, 4]
-            in_flow = tf.pad(out_flow, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="REFLECT") 
-            in_flow = self.core_layer(in_flow) # [B, H, W, 4]
-
-            volume_change = tf.reduce_sum(in_flow - out_flow, axis=-1, keepdims=True) + rain_volume -  infil_transp_volume
-
-            current_depth = tf.nn.relu(current_depth + volume_change/(RESOLUTION**2))
-
-        return current_depth
-
+        return new_depth
 
     def call_n(self, full_input: FloodModel.Input, n: int = 1) -> tf.Tensor:
         """Runs the entire autoregressive model.
@@ -1016,23 +1008,26 @@ class FloodPhysicConvLSTM(keras.Model):
                     },
                     training=True,
                 )
-                pred = tf.nn.relu(pred)
+                # pred = tf.nn.relu(pred)
 
                 # Green-Ampt infiltration correction
                 # pred, cumul_F = self.green_ampt_gate(pred, geospatial, cumul_F)
 
                 step_loss = self.compute_loss(y=yk, y_pred=pred)
 
-                # # Mass preservation: penalise mismatch in mean depth
+                # # # Mass preservation: penalise mismatch in mean depth
                 # pred_mass = tf.reduce_mean(pred, axis=[1, 2, 3])
                 # gt_mass = tf.reduce_mean(yk, axis=[1, 2, 3])
                 # mass_loss = tf.reduce_mean(tf.square(pred_mass - gt_mass))
 
+                # negative value penalty
+                negative_values = tf.nn.relu(-1 * pred)
+                negative_loss = tf.reduce_mean(tf.square(negative_values))
+
                 # Later steps matter more (error should not accumulate)
                 time_weight = 1.0 + 0.3 * k
 
-                # total_loss += time_weight * (step_loss + 0.2 * mass_loss)
-                total_loss += (time_weight * step_loss)
+                total_loss += time_weight * (step_loss + 10 * negative_loss)
 
                 # Feed corrected prediction back: clip at 4.0m to match GT depth cap
                 # (was 2.5m which caused hard ceiling — pred never learned >2.5m)
@@ -1066,7 +1061,9 @@ class FloodPhysicConvLSTM(keras.Model):
                 metric.update_state(total_loss)
             else:
                 metric.update_state(y_steps[:, -1], last_pred)
-        return {m.name: m.result() for m in self.metrics}
+        logs = {m.name: m.result() for m in self.metrics}
+
+        return logs
 
     def test_step(self, data):
         """Autoregressive unrolling validation step (mirrors train_step)."""

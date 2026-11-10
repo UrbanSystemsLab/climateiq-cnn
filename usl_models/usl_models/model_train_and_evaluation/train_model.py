@@ -20,7 +20,7 @@ import pathlib
 import numpy as np
 import tensorflow as tf
 import keras
-import matplotlib
+import matplotlib 
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -53,7 +53,7 @@ from usl_models.flood_ml.dataset_improved import load_dataset_windowed_patches
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
 OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LOG_NAME = "semi_physical_test_6_steps_no_mass_loss"
+LOG_NAME = "semi_new_test_v03_overall_flow_3"
 
 PATCH_SIZE = 256
 PATCH_STRIDE = 128
@@ -61,7 +61,7 @@ BATCH_SIZE = 8   # reverted from 6 — batch 4 had 16x better MAE (0.012 vs 0.19
 EPOCHS = 100  # ROUND 5 ABLATION — V3 loss only, validate before long run
 N_FLOOD_MAPS = 5
 M_RAINFALL = 6
-N_FUTURE_STEPS = 6  # 13 → 0 windows (last_t = T - n_future = 13 - 13 = 0); 12 gives last_t=1 per chunk
+N_FUTURE_STEPS = 12  # 13 → 0 windows (last_t = T - n_future = 13 - 13 = 0); 12 gives last_t=1 per chunk
 DEPTH_CAP = 4.0  # metres — raised from 2.5; covers Atlanta peak (~4.4m capped at 4m)
                   # Manhattan 5-7m ponding in closed canyons above this are outliers
 DRY_TIMESTEP_FRACTION = 0.12  # calibrated from prior best run to avoid dry-step dominance
@@ -70,7 +70,7 @@ DRY_TIMESTEP_FRACTION = 0.12  # calibrated from prior best run to avoid dry-step
 # For clean baseline testing, we start fresh
 
 PRETRAINED_WEIGHTS = pathlib.Path(
-    "/scratch/hw4402/climateiq_output/09_21_VariedLength_6_steps_loss_no_peak/weights_ordered.npz"
+    "/scratch/hw4402/climateiq_output/semi_new_test_v03_overall_flow_2/weights_ordered.npz"
 )
 
 # ── Old cities (already trained in ep29 checkpoint) ──────────────────
@@ -219,7 +219,7 @@ STEPS_PER_EPOCH = 2000  # V1 baseline — only rain_broadcast is the variable
 # Strategy: keep V1 loss + V1 weights, add rain_broadcast as the ONLY change.
 # This way we strictly build on V1's 30+ epochs of prior knowledge.
 ARCH_V3 = True                     # framework flag
-WARM_START = False                  # load V3 Round 3 weights (incremental on top of V3 R3)
+WARM_START = True                  # load V3 Round 3 weights (incremental on top of V3 R3)
 USE_RAIN_BROADCAST = True          # kept from R3 (neutral-positive)
 USE_DILATED_GEO = False            # still disabled
 USE_STORM_EMBED = False            # still disabled
@@ -234,10 +234,10 @@ PRETRAINED_WEIGHTS_V3R3 = PRETRAINED_WEIGHTS
 with strategy.scope():
     # Same LR schedule as V1 — we're fine-tuning not training from scratch
     cosine_lr = keras.optimizers.schedules.CosineDecay(
-        initial_learning_rate=1e-6,
+        initial_learning_rate=1e-4,
         decay_steps=STEPS_PER_EPOCH * EPOCHS,
         alpha=1e-6,
-        warmup_target=2e-5,                         # ROUND 6: V3 R3 baseline LR (back to proven)
+        warmup_target=1e-4,                         # ROUND 6: V3 R3 baseline LR (back to proven)
         warmup_steps=500,
     )
     params = FloodModel.Params(
@@ -256,7 +256,15 @@ with strategy.scope():
         optimizer=keras.optimizers.Adam(learning_rate=cosine_lr, global_clipnorm=1.0),
     )
     model = FloodModel(params=params, spatial_dims=(PATCH_SIZE, PATCH_SIZE))
+    _dummy = {
+    "geospatial":     tf.zeros((1, PATCH_SIZE, PATCH_SIZE, 12)),
+    "spatiotemporal": tf.zeros((1, N_FLOOD_MAPS, PATCH_SIZE, PATCH_SIZE, 1)),
+    "temporal":       tf.zeros((1, N_FLOOD_MAPS, M_RAINFALL)),
+    }
+    _ = model._model(_dummy)                                      # 先创建模型变量
+    model._model.optimizer.build(model._model.trainable_variables)  # 再创建 Adam 的 m/v 变量
 
+    REINIT_GEO_CH10_11 = False
     if WARM_START:
         _dummy = {
             "geospatial":     tf.zeros((1, PATCH_SIZE, PATCH_SIZE, 12)),
@@ -276,10 +284,13 @@ with strategy.scope():
             _wlist[_geo_idx] = np.pad(_wlist[_geo_idx], [(0,0),(0,0),(0,2),(0,0)])
             print(f"✓ Expanded geo kernel 10→12 ch at index {_geo_idx}")
         except StopIteration:
-            _geo_idx = next(i for i, w in enumerate(_wlist) if w.shape == (5, 5, 12, 16))
-            _wlist[_geo_idx] = _wlist[_geo_idx].copy()
-            _wlist[_geo_idx][:, :, 10:12, :] = np.random.normal(0, 0.01, (5, 5, 2, 16))
-            print(f"✓ Small-random init ch10/11 slice of geo kernel at index {_geo_idx}")
+            if REINIT_GEO_CH10_11:
+                _geo_idx = next(i for i, w in enumerate(_wlist) if w.shape == (5, 5, 12, 16))
+                _wlist[_geo_idx] = _wlist[_geo_idx].copy()
+                _wlist[_geo_idx][:, :, 10:12, :] = np.random.normal(0, 0.01, (5, 5, 2, 16))
+                print(f"✓ Small-random init ch10/11 slice of geo kernel at index {_geo_idx}")
+            else:
+                print("Geo kernel already 12 ch - kept as-is")
 
         # Fix 2: st_cnn_stage1 first conv — expand 1→3 ch for rain_broadcast
         # V1 had shape (5,5,1,8); V3 with rain_broadcast needs (5,5,3,8).
