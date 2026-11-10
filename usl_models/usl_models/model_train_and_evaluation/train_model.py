@@ -53,7 +53,7 @@ from usl_models.flood_ml.dataset_improved import load_dataset_windowed_patches
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
 OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LOG_NAME = "semi_new_test_v03_overall_flow_1"
+LOG_NAME = "semi_new_test_v03_overall_flow_3"
 
 PATCH_SIZE = 256
 PATCH_STRIDE = 128
@@ -61,7 +61,7 @@ BATCH_SIZE = 8   # reverted from 6 — batch 4 had 16x better MAE (0.012 vs 0.19
 EPOCHS = 100  # ROUND 5 ABLATION — V3 loss only, validate before long run
 N_FLOOD_MAPS = 5
 M_RAINFALL = 6
-N_FUTURE_STEPS = 6  # 13 → 0 windows (last_t = T - n_future = 13 - 13 = 0); 12 gives last_t=1 per chunk
+N_FUTURE_STEPS = 12  # 13 → 0 windows (last_t = T - n_future = 13 - 13 = 0); 12 gives last_t=1 per chunk
 DEPTH_CAP = 4.0  # metres — raised from 2.5; covers Atlanta peak (~4.4m capped at 4m)
                   # Manhattan 5-7m ponding in closed canyons above this are outliers
 DRY_TIMESTEP_FRACTION = 0.12  # calibrated from prior best run to avoid dry-step dominance
@@ -70,7 +70,7 @@ DRY_TIMESTEP_FRACTION = 0.12  # calibrated from prior best run to avoid dry-step
 # For clean baseline testing, we start fresh
 
 PRETRAINED_WEIGHTS = pathlib.Path(
-    "/scratch/hw4402/climateiq_output/semi_physical_test_6_step_60_mid_check_full_grad_loss_no_mass_same_to_old_train_loss/weights_ordered.npz"
+    "/scratch/hw4402/climateiq_output/semi_new_test_v03_overall_flow_2/weights_ordered.npz"
 )
 
 # ── Old cities (already trained in ep29 checkpoint) ──────────────────
@@ -219,7 +219,7 @@ STEPS_PER_EPOCH = 2000  # V1 baseline — only rain_broadcast is the variable
 # Strategy: keep V1 loss + V1 weights, add rain_broadcast as the ONLY change.
 # This way we strictly build on V1's 30+ epochs of prior knowledge.
 ARCH_V3 = True                     # framework flag
-WARM_START = False                  # load V3 Round 3 weights (incremental on top of V3 R3)
+WARM_START = True                  # load V3 Round 3 weights (incremental on top of V3 R3)
 USE_RAIN_BROADCAST = True          # kept from R3 (neutral-positive)
 USE_DILATED_GEO = False            # still disabled
 USE_STORM_EMBED = False            # still disabled

@@ -24,18 +24,18 @@ SEED = 42
 keras.utils.set_random_seed(SEED)
 
 FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
-OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output/semi_new_test_v03_4/evaluation_hourly")
+OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output/semi_new_test_v03_overall_flow_2/evaluation_2_hours")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PATCH_SIZE   = 256
 N_FLOOD_MAPS = 5
 M_RAINFALL   = 6
-N_STEMPS = 12
+N_STEMPS = 24
 N_SAMPLES = 1000  # batches — more = more reliable correlation estimate
 
 CHECKPOINTS = {
     "R14 (focal loss, 8 US cities)": pathlib.Path(
-        "/scratch/hw4402/climateiq_output/semi_new_test_v03_4/weights_ordered.npz"
+        "/scratch/hw4402/climateiq_output/semi_new_test_v03_overall_flow_2/weights_ordered.npz"
     ),
 }
 
