@@ -912,12 +912,10 @@ def load_dataset_windowed_patches(
                     # get patch label
                     labels_patch = labels_full[:, y0:y0+patch_size, x0:x0+patch_size]
                     if not _is_valid_patch(labels_patch[t:t+n_future_steps]):
-                        if dataset_split == "train":
+                        if dataset_split in ["train", "val"]:
                             random_possible = np.random.rand()
                             if random_possible > 0.15:
                                 continue
-                        else:
-                            continue
                     # labels_tensor = tf.convert_to_tensor(labels_patch, dtype=tf.float32)
                     labels_tensor = labels_patch.astype(np.float32)
 

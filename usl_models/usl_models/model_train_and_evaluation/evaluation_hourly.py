@@ -15,22 +15,22 @@ for gpu in tf.config.list_physical_devices("GPU"):
 
 from usl_models.flood_ml.model import FloodModel
 from usl_models.flood_ml.model import SpatialAttention
-from usl_models.flood_ml.dataset import load_dataset_windowed_patches
-# from usl_models.flood_ml.dataset_improved import load_dataset_windowed_patches
+# from usl_models.flood_ml.dataset import load_dataset_windowed_patches
+from usl_models.flood_ml.dataset_improved import load_dataset_windowed_patches
 from usl_models.flood_ml.Eva_sup import *
 import pandas as pd
 
 SEED = 42
 keras.utils.set_random_seed(SEED)
 
-FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
-OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output/semi_new_test_v03_overall_flow_2/evaluation_2_hours")
+FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_validatioin")
+OUTPUT_DIR = pathlib.Path("/scratch/hw4402/climateiq_output/semi_new_test_v03_overall_flow_2/evaluation_validation")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 PATCH_SIZE   = 256
 N_FLOOD_MAPS = 5
 M_RAINFALL   = 6
-N_STEMPS = 24
+N_STEMPS = 12
 N_SAMPLES = 1000  # batches — more = more reliable correlation estimate
 
 CHECKPOINTS = {
@@ -39,71 +39,79 @@ CHECKPOINTS = {
     ),
 }
 
-# test 1 step
-Atlanta = [
-    "Atlanta-Atlanta_config/Rainfall_Data_1.txt",
-    "Atlanta-Atlanta_config/Rainfall_Data_2.txt",
-    "Atlanta-Atlanta_config/Rainfall_Data_5.txt",]
-Phoenix_SM = [
-    # Phoenix SM (4 scenarios)
-    "Phoenix_SM-PHX_SM/Rainfall_Data_1.txt",
-    "Phoenix_SM-PHX_SM/Rainfall_Data_5.txt",
-    "Phoenix_SM-PHX_SM/Rainfall_Data_15.txt",
-    "Phoenix_SM-PHX_SM/Rainfall_Data_16.txt",
-]
-Manhattan = [
-    # Manhattan (8 scenarios; 7 and 15 reserved for test)
-    "Manhattan-Manhattan_config/Rainfall_Data_1.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_2.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_5.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_6.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_10.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_13.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_16.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_19.txt",
-]
+# # test 1 step
+# Atlanta = [
+#     "Atlanta-Atlanta_config/Rainfall_Data_1.txt",
+#     "Atlanta-Atlanta_config/Rainfall_Data_2.txt",
+#     "Atlanta-Atlanta_config/Rainfall_Data_5.txt",]
+# Phoenix_SM = [
+#     # Phoenix SM (4 scenarios)
+#     "Phoenix_SM-PHX_SM/Rainfall_Data_1.txt",
+#     "Phoenix_SM-PHX_SM/Rainfall_Data_5.txt",
+#     "Phoenix_SM-PHX_SM/Rainfall_Data_15.txt",
+#     "Phoenix_SM-PHX_SM/Rainfall_Data_16.txt",
+# ]
+# Manhattan = [
+#     # Manhattan (8 scenarios; 7 and 15 reserved for test)
+#     "Manhattan-Manhattan_config/Rainfall_Data_1.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_2.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_5.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_6.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_10.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_13.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_16.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_19.txt",
+# ]
 
 
-Phoenix_PV = [
-    # Phoenix PV (2 scenarios)
-    "Phoenix_PV-PHX_PV/Rainfall_Data_1.txt",
-    "Phoenix_PV-PHX_PV/Rainfall_Data_5.txt",
-]
+# Phoenix_PV = [
+#     # Phoenix PV (2 scenarios)
+#     "Phoenix_PV-PHX_PV/Rainfall_Data_1.txt",
+#     "Phoenix_PV-PHX_PV/Rainfall_Data_5.txt",
+# ]
 
-Denton = [
-    # Denton TX (13 timesteps, 1 chunk each)
-    "Denton_TX-Denton_config/Rainfall_Data_1.txt",
-    "Denton_TX-Denton_config/Rainfall_Data_2.txt",
-    "Denton_TX-Denton_config/Rainfall_Data_5.txt",
-]
+# Denton = [
+#     # Denton TX (13 timesteps, 1 chunk each)
+#     "Denton_TX-Denton_config/Rainfall_Data_1.txt",
+#     "Denton_TX-Denton_config/Rainfall_Data_2.txt",
+#     "Denton_TX-Denton_config/Rainfall_Data_5.txt",
+# ]
 
-Lafayettee = [
-    # Lafayette LA (13 timesteps, 1 chunk each)
-    "Lafayette_LA-Lafayette_config/Rainfall_Data_1.txt",
-    "Lafayette_LA-Lafayette_config/Rainfall_Data_2.txt",
-    "Lafayette_LA-Lafayette_config/Rainfall_Data_5.txt",
-]
+# Lafayettee = [
+#     # Lafayette LA (13 timesteps, 1 chunk each)
+#     "Lafayette_LA-Lafayette_config/Rainfall_Data_1.txt",
+#     "Lafayette_LA-Lafayette_config/Rainfall_Data_2.txt",
+#     "Lafayette_LA-Lafayette_config/Rainfall_Data_5.txt",
+# ]
 
-Boise = [# Boise ID (13 timesteps, 1 chunk each)
-    "Boise_ID-Boise_config/Rainfall_Data_1.txt",
-    "Boise_ID-Boise_config/Rainfall_Data_2.txt",
-    "Boise_ID-Boise_config/Rainfall_Data_5.txt",]
+# Boise = [# Boise ID (13 timesteps, 1 chunk each)
+#     "Boise_ID-Boise_config/Rainfall_Data_1.txt",
+#     "Boise_ID-Boise_config/Rainfall_Data_2.txt",
+#     "Boise_ID-Boise_config/Rainfall_Data_5.txt",]
 
-Navarre = [
-    # Navarre FL (13 timesteps, 1-2 chunks each)
-    "Navarre_FL-Navarre_config/Rainfall_Data_1.txt",
-    "Navarre_FL-Navarre_config/Rainfall_Data_2.txt",
-    "Navarre_FL-Navarre_config/Rainfall_Data_5.txt",
-]
+# Navarre = [
+#     # Navarre FL (13 timesteps, 1-2 chunks each)
+#     "Navarre_FL-Navarre_config/Rainfall_Data_1.txt",
+#     "Navarre_FL-Navarre_config/Rainfall_Data_2.txt",
+#     "Navarre_FL-Navarre_config/Rainfall_Data_5.txt",
+# ]
 
-New_Orleans = [
-    "New_Orleans-New_Orleans_config/Rainfall_Data_1.txt",
-    "New_Orleans-New_Orleans_config/Rainfall_Data_2.txt",
-    "New_Orleans-New_Orleans_config/Rainfall_Data_5.txt",
-]
+# New_Orleans = [
+#     "New_Orleans-New_Orleans_config/Rainfall_Data_1.txt",
+#     "New_Orleans-New_Orleans_config/Rainfall_Data_2.txt",
+#     "New_Orleans-New_Orleans_config/Rainfall_Data_5.txt",
+# ]
+# sim_names = sim_names + [f"USA_TX_Houston-USA_TX_Houston_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+# sim_names = sim_names + [f"USA_MD_Baltimore-USA_MD_Baltimore_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
 
-all_sim_list = [Atlanta, Phoenix_SM, Manhattan, Phoenix_PV, Denton, Lafayettee, Boise, Navarre, New_Orleans]
-city_names = ["Atlanta", "Phoenix_SM", "Manhattan", "Phoenix_PV", "Denton", "Lafayettee", "Boise", "Navarre", "New_Orleans"]
+Houston = [f"USA_TX_Houston-USA_TX_Houston_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+Baltimore = [f"USA_MD_Baltimore-USA_MD_Baltimore_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+
+# all_sim_list = [Atlanta, Phoenix_SM, Manhattan, Phoenix_PV, Denton, Lafayettee, Boise, Navarre, New_Orleans]
+# city_names = ["Atlanta", "Phoenix_SM", "Manhattan", "Phoenix_PV", "Denton", "Lafayettee", "Boise", "Navarre", "New_Orleans"]
+
+all_sim_list = [Houston, Baltimore]
+city_names = ["Houston", "Baltimore"]
 
 def build_model():
     params = FloodModel.Params(
@@ -279,13 +287,8 @@ for sim_idx, sim in enumerate(all_sim_list):
 
             ###########################################
             label_max = tf.reduce_max(labels, axis=1)
-<<<<<<< HEAD
-            pred_time_split[-1].append(pred_max)
-            # pred_time_split[-1].append(percential_max)
-=======
             # pred_time_split[-1].append(pred_max)
             pred_time_split[-1].append(pred_max)
->>>>>>> physics-informed-model-structure-v0.3
             label_time_split[-1].append(label_max)
         except:
             print("some error occurs")
