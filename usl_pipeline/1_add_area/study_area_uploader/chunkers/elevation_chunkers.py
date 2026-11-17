@@ -1,4 +1,5 @@
 import pathlib
+from typing import Iterator
 
 from osgeo import gdal
 
@@ -11,8 +12,10 @@ def split_geotiff_into_chunks(
     chunk_size: int,
     output_dir_path: str | pathlib.Path,
     chunk_file_name_pattern: str = "chunk_{x}_{y}",
-) -> list[chunkers_data.ChunkDescriptor]:
+) -> Iterator[chunkers_data.ChunkDescriptor]:
     """Produces a grid of chunk GeoTIFF files based on input GeoTIFF file.
+
+    Each chunk file is written when its descriptor is yielded.
 
     Args:
         elevation_file_path: GeoTIFF file with elevation data to be split into chunks.
@@ -20,8 +23,8 @@ def split_geotiff_into_chunks(
         output_dir_path: Path to the directory where chunk files will be stored.
         chunk_file_name_pattern: Format pattern used to generate chink file names.
 
-    Returns:
-        List of descriptors for produced chunk files.
+    Yields:
+        Descriptors of the chunk files, row by row.
     """
     with pathlib.Path(elevation_file_path).open("rb") as input_file:
         elevation = elevation_readers.read_from_geotiff(input_file, header_only=True)
@@ -32,7 +35,6 @@ def split_geotiff_into_chunks(
     y_chunk_count = (global_row_count + chunk_size - 1) // chunk_size
 
     ds = gdal.Open(str(elevation_file_path))
-    chunk_descriptors: list[chunkers_data.ChunkDescriptor] = []
     for y_chunk_index in range(y_chunk_count):
         for x_chunk_index in range(x_chunk_count):
             chunk_file_path = pathlib.Path(
@@ -49,12 +51,8 @@ def split_geotiff_into_chunks(
                 srcWin=[col_start, row_start, col_count, row_count],
                 creationOptions=["COMPRESS=LZW"],
             )
-            chunk_descriptors.append(
-                chunkers_data.ChunkDescriptor(
-                    y_chunk_index=y_chunk_index,
-                    x_chunk_index=x_chunk_index,
-                    path=chunk_file_path,
-                )
+            yield chunkers_data.ChunkDescriptor(
+                y_chunk_index=y_chunk_index,
+                x_chunk_index=x_chunk_index,
+                path=chunk_file_path,
             )
-
-    return chunk_descriptors

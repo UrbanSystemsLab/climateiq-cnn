@@ -23,7 +23,7 @@ def crop_geotiff_to_sub_area(
     target_elevation_file_path: str | pathlib.Path,
     sub_area_bounding_box: geo_data.BoundingBox,
     border_cell_count: int = 1,
-) -> None:
+) -> pathlib.Path:
     """Crops the elevation data from input file according to sub-area bounding box.
 
     Args:
@@ -34,6 +34,10 @@ def crop_geotiff_to_sub_area(
             source elevation data.
         border_cell_count: Number of cells to add on borders of a new area to include to
             output elevation data.
+
+    Returns:
+        Path to the cropped elevation data: the target file, or the source file
+        when the crop window covers the whole raster and no file is written.
     """
     with pathlib.Path(source_elevation_file_path).open("rb") as input_file:
         header = elevation_readers.read_from_geotiff(
@@ -58,6 +62,14 @@ def crop_geotiff_to_sub_area(
     row_start = max(0, int(upper_row) - border_cell_count)
     row_end = min(header.row_count, int(math.ceil(lower_row)) + border_cell_count)
 
+    if (col_start, row_start, col_end, row_end) == (
+        0,
+        0,
+        header.col_count,
+        header.row_count,
+    ):
+        return pathlib.Path(source_elevation_file_path)
+
     ds = gdal.Open(str(source_elevation_file_path))
     # Compressed because scratch space on Cloud Run is memory, and a large city's
     # uncompressed elevation (Houston: ~11 GB) would exceed the job's memory limit.
@@ -67,6 +79,7 @@ def crop_geotiff_to_sub_area(
         srcWin=[col_start, row_start, col_end - col_start, row_end - row_start],
         creationOptions=GEOTIFF_CREATION_OPTIONS,
     )
+    return pathlib.Path(target_elevation_file_path)
 
 
 def transform_geotiff_with_boundaries_to_esri_ascii(

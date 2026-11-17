@@ -165,10 +165,13 @@ def prepare_and_upload_study_area_files(
         )
         # Crop elevation data
         logging.info("Cropping study area elevation data...")
-        output_elevation_file_path = work_dir / file_names.ELEVATION_TIF
-        elevation_transformers.crop_geotiff_to_sub_area(
-            elevation_file_path, str(output_elevation_file_path), sub_area_bounding_box
+        output_elevation_file_path = elevation_transformers.crop_geotiff_to_sub_area(
+            elevation_file_path,
+            work_dir / file_names.ELEVATION_TIF,
+            sub_area_bounding_box,
         )
+        if output_elevation_file_path == pathlib.Path(elevation_file_path):
+            logging.info("Boundaries cover the whole elevation raster; not cropping.")
         with open(output_elevation_file_path, "rb") as input_file:
             elevation_header = elevation_readers.read_from_geotiff(
                 input_file, header_only=True
