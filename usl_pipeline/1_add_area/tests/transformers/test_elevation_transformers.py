@@ -52,14 +52,14 @@ def assert_crop_geotiff(
     border_cell_count: int = 0,
 ):
     with tempfile.NamedTemporaryFile() as temp_file:
-        output_file_path = temp_file.name
-        elevation_transformers.crop_geotiff_to_sub_area(
+        output_file_path = elevation_transformers.crop_geotiff_to_sub_area(
             input_file_path,
-            output_file_path,
+            temp_file.name,
             bounding_box,
             border_cell_count=border_cell_count,
         )
-        with pathlib.Path(output_file_path).open("rb") as output_file:
+        assert output_file_path == pathlib.Path(temp_file.name)
+        with output_file_path.open("rb") as output_file:
             output_elevation = elevation_readers.read_from_geotiff(output_file)
         assert output_elevation.header == expected_elevation_header
         testing.assert_array_equal(output_elevation.data, expected_elevation_data)
@@ -127,6 +127,33 @@ def test_crop_geotiff_to_sub_area():
             [[6.0, 7.0, 8.0], [11.0, 12.0, 13], [16.0, 17.0, 18.0]],
             border_cell_count=1,
         )
+
+
+def test_crop_geotiff_to_sub_area_covering_whole_raster_returns_source():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_file_path = pathlib.Path(temp_dir) / "input.tif"
+        prepare_test_geotiff_elevation_file(
+            [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0], [6.0, 7.0, 8.0]],
+            input_file_path,
+            x_ll_corner=10,
+            y_ll_corner=20,
+            cell_size=2,
+        )
+        target_file_path = pathlib.Path(temp_dir) / "output.tif"
+
+        for bounding_box, border_cell_count in [
+            ((10.0, 20.0, 16.0, 26.0), 0),
+            ((11.0, 21.0, 15.0, 25.0), 1),
+        ]:
+            output_file_path = elevation_transformers.crop_geotiff_to_sub_area(
+                input_file_path,
+                target_file_path,
+                geo_data.BoundingBox.from_tuple(bounding_box),
+                border_cell_count=border_cell_count,
+            )
+
+            assert output_file_path == input_file_path
+            assert not target_file_path.exists()
 
 
 def test_transform_geotiff_with_boundaries_to_esri_ascii():

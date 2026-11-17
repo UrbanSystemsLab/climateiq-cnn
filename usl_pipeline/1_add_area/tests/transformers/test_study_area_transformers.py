@@ -211,6 +211,49 @@ def test_prepare_and_upload_study_area_files_no_boundaries_buildings_only():
         )
 
 
+def test_prepare_and_upload_study_area_files_boundaries_cover_whole_raster():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        work_dir = pathlib.Path(temp_dir)
+        elevation_input_file_path = work_dir / "input_elevation.tif"
+        prepare_elevation_data(elevation_input_file_path, [[1.0] * 5] * 5)
+        boundaries_input_file_path = work_dir / "boundaries.shp"
+        prepare_shape_file(boundaries_input_file_path, [(bbox_polygon(0, 0, 5, 5), 1)])
+
+        boundaries_blob = mock.MagicMock(spec=storage.Blob)
+        boundaries_blob.open.return_value = StringIO()
+        header_blob = mock.MagicMock(spec=storage.Blob)
+        header_blob.open.return_value = StringIO()
+        elevation_blob = mock.MagicMock(spec=storage.Blob)
+        study_area_bucket = mock.MagicMock(spec=storage.Bucket)
+        study_area_bucket.blob.side_effect = [
+            boundaries_blob,
+            header_blob,
+            elevation_blob,
+        ]
+
+        prepared_inputs = study_area_transformers.prepare_and_upload_study_area_files(
+            "TestArea1",
+            elevation_input_file_path,
+            boundaries_input_file_path,
+            None,
+            None,
+            None,
+            None,
+            work_dir,
+            study_area_bucket,
+        )
+
+        assert prepared_inputs.elevation_file_path == elevation_input_file_path
+        assert not (work_dir / "elevation.tif").exists()
+        assert elevation_blob.mock_calls == [
+            mock.call.upload_from_filename(
+                str(elevation_input_file_path),
+                timeout=study_area_transformers.UPLOAD_TIMEOUT_SECONDS,
+                retry=mock.ANY,
+            )
+        ]
+
+
 def test_prepare_and_upload_study_area_files_with_boundaries_green_areas_soil_classes():
     with tempfile.TemporaryDirectory() as temp_dir:
         work_dir = pathlib.Path(temp_dir)

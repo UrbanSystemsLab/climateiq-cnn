@@ -69,8 +69,10 @@ def test_split_geotiff_into_chunks() -> None:
         with tempfile.NamedTemporaryFile() as temp_file:
             input_file_path = temp_file.name
             prepare_test_geotiff_elevation_file(input_file_path)
-            chunk_descriptors = elevation_chunkers.split_geotiff_into_chunks(
-                input_file_path, 2, temp_dir
+            chunk_descriptors = list(
+                elevation_chunkers.split_geotiff_into_chunks(
+                    input_file_path, 2, temp_dir
+                )
             )
 
             assert chunk_descriptors == [
@@ -146,3 +148,25 @@ def test_split_geotiff_into_chunks() -> None:
                 ),
                 [[8.0]],
             )
+
+
+def test_split_geotiff_into_chunks_writes_each_chunk_when_yielded() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.NamedTemporaryFile() as temp_file:
+            prepare_test_geotiff_elevation_file(temp_file.name)
+            chunks = elevation_chunkers.split_geotiff_into_chunks(
+                temp_file.name, 2, temp_dir
+            )
+            assert list(pathlib.Path(temp_dir).iterdir()) == []
+
+            written = []
+            for descriptor in chunks:
+                written.append(sorted(p.name for p in pathlib.Path(temp_dir).iterdir()))
+                descriptor.path.unlink()
+
+            assert written == [
+                ["chunk_0_0"],
+                ["chunk_1_0"],
+                ["chunk_0_1"],
+                ["chunk_1_1"],
+            ]

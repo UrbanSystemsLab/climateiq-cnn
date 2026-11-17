@@ -165,6 +165,17 @@ def test_build_and_upload_chunks():
             chunk_1_0_blob,
             chunk_1_1_blob,
         ]
+        elevation_chunks_dir = work_dir / "elevation_chunks"
+        elevation_chunks_at_upload = []
+
+        def record_elevation_chunks(*args, **kwargs):
+            elevation_chunks_at_upload.append(
+                sorted(p.name for p in elevation_chunks_dir.iterdir())
+            )
+
+        for blob in (chunk_0_0_blob, chunk_0_1_blob, chunk_1_0_blob, chunk_1_1_blob):
+            blob.upload_from_file.side_effect = record_elevation_chunks
+
         study_area_chunkers.build_and_upload_chunks(
             "TestArea1",
             study_area_transformers.PreparedInputData(
@@ -180,6 +191,14 @@ def test_build_and_upload_chunks():
             chunk_size=3,
             extend_soil_classes_chunk_border=False,
         )
+
+        assert elevation_chunks_at_upload == [
+            ["chunk_0_0"],
+            ["chunk_1_0"],
+            ["chunk_0_1"],
+            ["chunk_1_1"],
+        ]
+        assert list(elevation_chunks_dir.iterdir()) == []
 
         chunk_0_0_tar_path = chunk_0_0_blob.upload_from_file.mock_calls[0].args[0]
         chunk_0_1_tar_path = chunk_0_1_blob.upload_from_file.mock_calls[0].args[0]
