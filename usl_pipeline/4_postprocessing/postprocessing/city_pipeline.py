@@ -34,9 +34,9 @@ from postprocessing.gcs_io import (
 from postprocessing.mongo_sync import _sync_to_mongodb
 from postprocessing.pmtiles_publish import (
     TILESERVER_BUCKET_ENV,
+    _publish_pmtiles_builds,
     _start_city_pmtiles_build,
     _start_national_admin_pmtiles_build,
-    _upload_pmtiles_build,
 )
 from postprocessing.water_polygons import _ensure_water_polygon
 
@@ -236,7 +236,8 @@ def _process_city_from_predictions(
     )
 
     if tiles_bucket:
-        uploaded = [_upload_pmtiles_build(b, tiles_bucket) for b in pmtiles_builds]
-        results["pmtiles"] = [uri for uri in uploaded if uri]
+        results["pmtiles"], results["tileserver_release"] = _publish_pmtiles_builds(
+            pmtiles_builds, tiles_bucket
+        )
 
     return results

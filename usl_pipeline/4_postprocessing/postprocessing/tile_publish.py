@@ -21,6 +21,12 @@ from usl_lib.shared import area_names
 TILE_SOURCES_PREFIX = "tile_sources"
 # <tileset>.pmtiles, overwritten by each build.
 TILESERVER_LATEST_PREFIX = "tileserver/latest"
+# <tileset>/<generation>.pmtiles, never overwritten.
+TILESERVER_FILES_PREFIX = "tileserver/files"
+# <release>-config.json, never overwritten.
+TILESERVER_RELEASES_PREFIX = "tileserver/releases"
+# Name of the release tileserver-gl serves.
+TILESERVER_CURRENT_RELEASE = "tileserver/releases/current"
 CITY_H3_SOURCE = "{area}/h3_{area}.geojson"
 NATIONAL_ADMIN_SOURCE = "USA_Combined/admin.geojson"
 CITY_H3_TILESET_PREFIX = "climateiq-h3-"
