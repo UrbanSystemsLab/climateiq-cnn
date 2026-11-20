@@ -1,0 +1,47 @@
+# Cloud Run job h3-pipeline-job (climateiq-test): one execution per city, started
+# by the h3-pipeline and h3-pipeline-tiff-trigger functions. /tmp is an
+# ephemeral disk. CI (_deploy.yml) updates the image; create or change the rest with
+#   gcloud run jobs replace usl_pipeline/4_postprocessing/job.yaml \
+#     --region us-central1 --project climateiq-test
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: h3-pipeline-job
+  labels:
+    cloud.googleapis.com/location: us-central1
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      taskCount: 1
+      parallelism: 1
+      template:
+        spec:
+          serviceAccountName: 27139891303-compute@developer.gserviceaccount.com
+          timeoutSeconds: 21600
+          maxRetries: 0
+          containers:
+            - image: us-central1-docker.pkg.dev/climateiq-test/usl-pipeline/h3-pipeline:dev
+              resources:
+                limits:
+                  cpu: "8"
+                  memory: 32Gi
+              env:
+                - name: BUCKET_PREFIX
+                  value: test-
+                - name: GCS_BUCKET
+                  value: climateiq-h3-pipeline-1770319032
+                - name: OUTPUT_BUCKET
+                  value: climateiq-h3-tiles
+                - name: TILESERVER_BUCKET
+                  value: climateiq-h3-tiles
+              volumeMounts:
+                - name: scratch
+                  mountPath: /tmp
+          volumes:
+            - name: scratch
+              emptyDir:
+                medium: Disk
+                sizeLimit: 10Gi

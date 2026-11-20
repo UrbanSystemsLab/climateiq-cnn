@@ -38,6 +38,7 @@ jobs:
       image_tag: ${{ steps.plan.outputs.image_tag }}
       bucket_prefix: ${{ steps.plan.outputs.bucket_prefix }}
       sha: ${{ steps.plan.outputs.sha }}
+      h3_job: ${{ steps.plan.outputs.h3_job }}
     steps:
       # Full history: the manifest is read at inputs.ref.
       - uses: actions/checkout@v4
@@ -97,11 +98,15 @@ jobs:
               ') ;;
           esac
 
+          # The h3-pipeline-job image ships the same code as the postprocessing group.
+          h3_job=$(echo "$selected" | jq 'any(.[]; .group == "postprocessing")')
+
           {
             echo "functions=$selected"
             echo "image_tag=$image_tag"
             echo "bucket_prefix=$bucket_prefix"
             echo "sha=$sha"
+            echo "h3_job=$h3_job"
           } >> "$GITHUB_OUTPUT"
           echo "environment=$ENVIRONMENT sha=$sha image_tag=$image_tag add_area=${{ inputs.add_area }}"
           echo "functions: $(echo "$selected" | jq -c '[.[].name]')"
@@ -193,13 +198,24 @@ jobs:
           infra=()
           [ -n "$MEMORY" ] && [ "$MEMORY" != "null" ] && infra+=(--memory "$MEMORY")
           [ -n "$TIMEOUT" ] && [ "$TIMEOUT" != "null" ] && infra+=(--timeout "${TIMEOUT}s")
-          gcloud functions deploy "$NAME" "${common[@]}" \
-            --runtime "$RUNTIME" \
-            --entry-point "$ENTRY_POINT" \
-            --source "$SRC" \
-            "${update_env[@]}" \
-            "${infra[@]}" \
-            --quiet
+          # Up to 3 attempts, for transient errors such as BulkCheckOrgPolicy timeouts.
+          for attempt in 1 2 3; do
+            if gcloud functions deploy "$NAME" "${common[@]}" \
+              --runtime "$RUNTIME" \
+              --entry-point "$ENTRY_POINT" \
+              --source "$SRC" \
+              "${update_env[@]}" \
+              "${infra[@]}" \
+              --quiet; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error title=$NAME::deploy failed 3 times"
+              exit 1
+            fi
+            echo "::warning title=$NAME::deploy attempt $attempt failed; retrying in 60s"
+            sleep 60
+          done
 
           after=$(gcloud functions describe "$NAME" "${common[@]}" --format=json)
           echo "after:"; jq "$summary" <<<"$after"
@@ -260,4 +276,52 @@ jobs:
                              spec.template.spec.template.spec.containers[0].env)'
           else
             echo "::warning title=add-area job missing::No Cloud Run job 'add-area' in $PROJECT. Image pushed as $IMAGE:$SHA and :$ENV_TAG; create the job per usl_pipeline/1_add_area/README.md."
+          fi
+
+  h3-pipeline-job:
+    name: h3-pipeline-job
+    needs: plan
+    if: needs.plan.outputs.h3_job == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}-h3-pipeline-job
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/usl-pipeline/h3-pipeline
+      SHA: ${{ needs.plan.outputs.sha }}
+      ENV_TAG: ${{ needs.plan.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+      - name: Build and push image
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker build -f usl_pipeline/4_postprocessing/Dockerfile \
+            -t "$IMAGE:$SHA" -t "$IMAGE:$ENV_TAG" .
+          docker push "$IMAGE:$SHA"
+          docker push "$IMAGE:$ENV_TAG"
+      - name: Update Cloud Run job
+        run: |
+          set -euo pipefail
+          if gcloud run jobs describe h3-pipeline-job --region "$REGION" --project "$PROJECT" \
+               --format='value(name)' >/dev/null 2>&1; then
+            gcloud run jobs update h3-pipeline-job --region "$REGION" --project "$PROJECT" \
+              --image "$IMAGE:$SHA"
+            gcloud run jobs describe h3-pipeline-job --region "$REGION" --project "$PROJECT" \
+              --format='yaml(spec.template.spec.template.spec.containers[0].image,
+                             spec.template.spec.template.spec.volumes)'
+          else
+            echo "::warning title=h3-pipeline-job missing::No Cloud Run job 'h3-pipeline-job' in $PROJECT. Image pushed as $IMAGE:$SHA and :$ENV_TAG; create the job from usl_pipeline/4_postprocessing/job.yaml."
           fi

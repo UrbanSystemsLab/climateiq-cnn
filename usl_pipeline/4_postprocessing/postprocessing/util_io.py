@@ -17,6 +17,7 @@ from .stats import stats_for_group
 DEFAULT_CHUNK_SIZE = 16 * 1024 * 1024
 MAX_FEATURE_SIZE = 256 * 1024 * 1024
 SOURCE_GENERATION_KEY = "source_generation"
+SOURCE_MD5_KEY = "source_md5"
 CONTENT_TYPE = "application/x-ndjson"
 
 _FEATURES_ARRAY_START = re.compile(r'"features"\s*:\s*\[')
@@ -265,6 +266,8 @@ def convert_blob(
     dst_generation = dst.generation if dst is not None else 0
     dst = bucket.blob(dst_name)
     dst.metadata = {SOURCE_GENERATION_KEY: source_generation}
+    if src.md5_hash:
+        dst.metadata = {**dst.metadata, SOURCE_MD5_KEY: src.md5_hash}
     try:
         with src.open(
             "rt", encoding="utf-8", if_generation_match=src.generation

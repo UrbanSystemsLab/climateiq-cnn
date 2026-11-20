@@ -5,11 +5,12 @@ import datetime
 import json
 import logging
 import os
-import tempfile
 
+from google.auth.transport import requests as auth_requests
 from google.cloud import storage
 import flask
 import functions_framework
+import google.auth
 
 from usl_lib.shared.function_runtime import error_to_response as _error_to_response
 from usl_lib.shared.function_runtime import (
@@ -22,16 +23,21 @@ from postprocessing.city_config import (
     EXPECTED_SCENARIO_COUNT,
     _parse_city_folder,
 )
-from postprocessing.city_pipeline import _process_city_from_predictions
+
+H3_PIPELINE_JOB = "h3-pipeline-job"
+H3_PIPELINE_JOB_REGION = "us-central1"
 
 
 @functions_framework.http
 @_error_to_response
 def process_h3_pipeline(request: flask.Request):  # type: ignore[return]
-    """Process a city. Requires 'city_folder' and 'predictions_bucket' in JSON body.
+    """Starts a city's run of the h3-pipeline-job Cloud Run job.
 
+    Requires 'city_folder' and 'predictions_bucket' in the JSON body.
     Example: {"city_folder": "NYC_Predictions",
     "predictions_bucket": "test-climateiq-predictions"}
+
+    Returns {"status": "started", "execution"} without waiting for the run.
     """
     request_json = request.get_json(silent=True) or {}
 
@@ -58,18 +64,10 @@ def process_h3_pipeline(request: flask.Request):  # type: ignore[return]
             400,
         )
 
-    logging.info(
-        "Starting H3 pipeline — city_folder=%s predictions=%s",
-        city_folder,
-        predictions_bucket,
+    execution = _start_city_job(pipeline_bucket, predictions_bucket, city_folder)
+    return flask.jsonify(
+        {"status": "started", "city_folder": city_folder, "execution": execution}
     )
-
-    with tempfile.TemporaryDirectory() as work_dir:
-        results = _process_city_from_predictions(
-            pipeline_bucket, predictions_bucket, city_folder, work_dir
-        )
-        logging.info("Pipeline completed successfully for %s", results.get("city"))
-        return flask.jsonify(results)
 
 
 @functions_framework.cloud_event
@@ -80,7 +78,7 @@ def process_h3_pipeline_on_tiff_upload(
     """Auto-triggers when a mosaic TIF is uploaded to the predictions bucket.
 
     Detects city from the path, checks if all 9 scenarios are present,
-    and kicks off the full pipeline. No config file needed.
+    and starts the h3-pipeline-job Cloud Run job. No config file needed.
     """
     data = cloud_event.data
     src_bucket_name = data["bucket"]
@@ -142,16 +140,11 @@ def process_h3_pipeline_on_tiff_upload(
         return
 
     logging.info(
-        "%s: All %d scenarios ready — starting pipeline!",
+        "%s: All %d scenarios ready — starting the pipeline job",
         city_name,
         EXPECTED_SCENARIO_COUNT,
     )
-
-    with tempfile.TemporaryDirectory() as work_dir:
-        results = _process_city_from_predictions(
-            pipeline_bucket, src_bucket_name, city_folder, work_dir
-        )
-        logging.info("Pipeline result for %s: %s", city_name, results.get("status"))
+    _start_city_job(pipeline_bucket, src_bucket_name, city_folder)
 
 
 _TILE_PUBLISH_ACTIONS = ("plan", "convert", "upload", "publish")
@@ -162,20 +155,20 @@ _TILE_PUBLISH_ACTIONS = ("plan", "convert", "upload", "publish")
 def publish_tiles(request: flask.Request):  # type: ignore[return]
     """Publishes an object in the H3 tiles bucket as a tileset, one step per call.
 
-    The h3-tile-publish workflow calls this when a city's
-    <ISO3>_<STATE>_<City>/h3_<ISO3>_<STATE>_<City>.geojson or
-    USA_Combined/admin.geojson is uploaded: "plan", "convert", "upload", then
-    "publish".
+    The h3-tile-publish workflow, which the mapbox-release GitHub workflow runs,
+    calls this for a city's <ISO3>_<STATE>_<City>/h3_<ISO3>_<STATE>_<City>.geojson
+    or USA_Combined/admin.geojson: "plan", "convert", "upload", then "publish".
 
     JSON body:
         action: "plan", "convert", "upload" or "publish".
         name: Uploaded object, e.g. "USA_MO_KansasCity/h3_USA_MO_KansasCity.geojson".
         bucket: Defaults to the GCS_BUCKET environment variable.
-        force: "plan" only. Publish even if this generation already was.
+        force: "plan" only. Publish even if this content already was.
 
     Every action returns {"status": "skipped", "reason"} when the object feeds
-    no tileset or TILE_TARGETS is unset. "plan" also skips a generation that
-    is already published, and otherwise returns {"status": "ready", "tileset"}.
+    no tileset or TILE_TARGETS is unset. "plan" also skips an object whose MD5
+    or generation is already published, and otherwise returns
+    {"status": "ready", "tileset", "source_md5"}.
     "convert" stages the object as line-delimited GeoJSON, "upload" sends it to
     each tile server target, and "publish" publishes the tileset there and
     records the results in tile_sources/<tileset>/publish.json.
@@ -215,14 +208,12 @@ def publish_tiles(request: flask.Request):  # type: ignore[return]
         )
 
     if action == "plan":
-        published = _read_publish_status(bucket, tileset)
-        if published.get(
-            "source_generation"
-        ) == source.generation and not request_json.get("force"):
-            return _skip_tiles(
-                object_name, f"generation {source.generation} is already published"
-            )
-        return flask.jsonify({"status": "ready", "tileset": tileset.name})
+        published = _published_reason(_read_publish_status(bucket, tileset), source)
+        if published and not request_json.get("force"):
+            return _skip_tiles(object_name, published)
+        return flask.jsonify(
+            {"status": "ready", "tileset": tileset.name, "source_md5": source.md5_hash}
+        )
 
     if action == "convert":
         written = util_io.convert_blob(bucket, tileset.source_blob, tileset.staged_blob)
@@ -256,13 +247,15 @@ def publish_tiles(request: flask.Request):  # type: ignore[return]
             ),
             409,
         )
-    staged_generation = (staged.metadata or {}).get(util_io.SOURCE_GENERATION_KEY)
+    staged_metadata = staged.metadata or {}
+    staged_generation = staged_metadata.get(util_io.SOURCE_GENERATION_KEY)
 
     results = [dataclasses.asdict(target.publish(tileset)) for target in targets]
     status = {
         "tileset": tileset.name,
         "source": tileset.source_blob,
         "source_generation": int(staged_generation) if staged_generation else None,
+        "source_md5": staged_metadata.get(util_io.SOURCE_MD5_KEY),
         "published_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "results": results,
     }
@@ -272,6 +265,38 @@ def publish_tiles(request: flask.Request):  # type: ignore[return]
     return flask.jsonify({"status": "published", **status})
 
 
+def _start_city_job(
+    pipeline_bucket: str, predictions_bucket: str, city_folder: str
+) -> str:
+    """Starts an h3-pipeline-job execution for city_folder and returns its name."""
+    credentials, project = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    url = (
+        f"https://run.googleapis.com/v2/projects/{project}/locations/"
+        f"{H3_PIPELINE_JOB_REGION}/jobs/{H3_PIPELINE_JOB}:run"
+    )
+    env = {
+        "CITY_FOLDER": city_folder,
+        "PREDICTIONS_BUCKET": predictions_bucket,
+        "GCS_BUCKET": pipeline_bucket,
+    }
+    body = {
+        "overrides": {
+            "containerOverrides": [
+                {"env": [{"name": k, "value": v} for k, v in env.items()]}
+            ]
+        }
+    }
+    response = auth_requests.AuthorizedSession(credentials).post(
+        url, json=body, timeout=60
+    )
+    response.raise_for_status()
+    execution = response.json()["metadata"]["name"]
+    logging.info("Started %s for %s", execution, city_folder)
+    return execution
+
+
 def _bad_request(message: str) -> tuple[flask.Response, int]:
     return flask.jsonify({"error": message}), 400
 
@@ -279,6 +304,15 @@ def _bad_request(message: str) -> tuple[flask.Response, int]:
 def _skip_tiles(object_name: str, reason: str) -> flask.Response:
     logging.warning("Not publishing tiles for %s: %s", object_name, reason)
     return flask.jsonify({"status": "skipped", "reason": reason})
+
+
+def _published_reason(published: dict, source: storage.Blob) -> str | None:
+    """Says why source's content is already published, or returns None."""
+    if source.md5_hash and published.get("source_md5") == source.md5_hash:
+        return f"content (MD5 {source.md5_hash}) is already published"
+    if published.get("source_generation") == source.generation:
+        return f"generation {source.generation} is already published"
+    return None
 
 
 def _read_publish_status(

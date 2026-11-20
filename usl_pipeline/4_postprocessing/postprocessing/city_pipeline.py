@@ -1,7 +1,9 @@
 """Runs the H3 pipeline for one city, end to end."""
 
+import json
 import logging
 import os
+import tempfile
 
 from google.cloud import storage
 
@@ -97,9 +99,13 @@ def _run_pipeline(
 
 
 def _process_city_from_predictions(
-    pipeline_bucket, predictions_bucket, city_folder, work_dir
+    pipeline_bucket, predictions_bucket, city_folder, work_dir, free_large_files=True
 ):
-    """Fully automatic: derive everything from the city_folder name."""
+    """Fully automatic: derive everything from the city_folder name.
+
+    free_large_files: Delete local outputs over 500 MB once uploaded, for when
+        work_dir is in memory.
+    """
     city_name, config_prefix, mosaic_filename = _parse_city_folder(city_folder)
 
     city_config = _build_city_config(city_name, city_folder, predictions_bucket)
@@ -203,6 +209,7 @@ def _process_city_from_predictions(
         {city_name},
         output_bucket=out_bucket,
         city_output_dir=city_output_dir,
+        free_large_files=free_large_files,
     )
 
     if tiles_bucket:
@@ -241,3 +248,21 @@ def _process_city_from_predictions(
         )
 
     return results
+
+
+def main():
+    """Runs CITY_FOLDER's pipeline as an h3-pipeline-job task, with outputs on /tmp."""
+    logging.basicConfig(level=logging.INFO)
+    with tempfile.TemporaryDirectory() as work_dir:
+        results = _process_city_from_predictions(
+            os.environ["GCS_BUCKET"],
+            os.environ["PREDICTIONS_BUCKET"],
+            os.environ["CITY_FOLDER"],
+            work_dir,
+            free_large_files=False,
+        )
+    print(json.dumps(results, default=str))
+
+
+if __name__ == "__main__":
+    main()

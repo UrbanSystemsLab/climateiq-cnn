@@ -15,8 +15,12 @@ def _merge_and_upload_outputs(
     cities_in_run,
     output_bucket=None,
     city_output_dir=None,
+    free_large_files=True,
 ):
     """Upload per-city files, then compose all_cities via GCS server-side compose.
+
+    With free_large_files, local files over 500 MB are deleted once uploaded;
+    H3 levels among them are first published to output_bucket.
 
     For each admin level:
     1. Upload per-city GeoJSON.
@@ -166,7 +170,7 @@ def _merge_and_upload_outputs(
                         leftover = block
                 raw_size = raw_blob.size or file_size
 
-            if file_size > 500 * 1024 * 1024:
+            if free_large_files and file_size > 500 * 1024 * 1024:
                 if output_bucket and city_output_dir and int(level_str) > 100:
                     _pub_bkt = client.bucket(output_bucket)
                     _pub_dest = f"{city_output_dir}/{fname}"
