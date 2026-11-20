@@ -1,0 +1,97 @@
+# Publishes H3 tiles bucket sources to Mapbox, on demand only.
+name: Mapbox release
+
+on:
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: >-
+          "all", or space-separated objects in gs://climateiq-h3-tiles, e.g.
+          "USA_FL_Miami/h3_USA_FL_Miami.geojson USA_Combined/admin.geojson"
+        type: string
+        default: all
+      dry_run:
+        description: Only list what would be published
+        type: boolean
+        default: true
+      force:
+        description: Publish even if Mapbox already has this content
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mapbox-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Mapbox release
+    runs-on: ubuntu-24.04
+    environment: test
+    env:
+      PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      REGION: us-central1
+      BUCKET: climateiq-h3-tiles
+      SOURCES: ${{ inputs.sources }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      FORCE: ${{ inputs.force }}
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+      - name: Release
+        run: |
+          set -euo pipefail
+          if [ "$SOURCES" = all ]; then
+            mapfile -t names < <(gcloud storage objects list \
+              "gs://$BUCKET/*/h3_*.geojson" "gs://$BUCKET/USA_Combined/admin.geojson" \
+              --format='value(name)')
+          else
+            read -ra names <<<"$SOURCES"
+          fi
+          url=$(gcloud functions describe h3-tile-publish --gen2 \
+            --region "$REGION" --project "$PROJECT" --format='value(serviceConfig.uri)')
+          token=$(gcloud auth print-identity-token --audiences="$url")
+
+          {
+            echo "Dry run: $DRY_RUN, force: $FORCE"
+            echo
+            echo "| Source | Plan | Release |"
+            echo "|---|---|---|"
+          } >>"$GITHUB_STEP_SUMMARY"
+          failed=0
+          for name in "${names[@]}"; do
+            body=$(jq -nc --arg b "$BUCKET" --arg n "$name" --argjson f "$FORCE" \
+              '{action: "plan", bucket: $b, name: $n, force: $f}')
+            if ! plan=$(curl -sS --fail-with-body -m 300 -X POST "$url" \
+              -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+              -d "$body"); then
+              echo "::error title=$name::plan failed: $plan"
+              echo "| \`$name\` | plan failed | |" >>"$GITHUB_STEP_SUMMARY"
+              failed=1
+              continue
+            fi
+            status=$(jq -r .status <<<"$plan")
+            detail=$(jq -r '.reason // .tileset' <<<"$plan")
+            release=""
+            if [ "$status" = ready ] && [ "$DRY_RUN" != true ]; then
+              echo "Publishing $name"
+              data=$(jq -nc --arg b "$BUCKET" --arg n "$name" --argjson f "$FORCE" \
+                '{data: {bucket: $b, name: $n}, force: $f}')
+              if run=$(gcloud workflows run h3-tile-publish --location "$REGION" \
+                --project "$PROJECT" --data="$data" --format=json); then
+                release=$(jq -r '[.state, ((.result // "null") | (fromjson? // .)
+                  | if type == "object" then .status else tostring end)] | join(" ")' <<<"$run")
+              else
+                release="workflow failed"
+              fi
+              [[ "$release" == "SUCCEEDED published" ]] || failed=1
+            fi
+            echo "$name: $status ($detail) $release"
+            echo "| \`$name\` | $status: $detail | $release |" >>"$GITHUB_STEP_SUMMARY"
+          done
+          exit "$failed"
