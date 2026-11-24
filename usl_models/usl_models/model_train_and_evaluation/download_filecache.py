@@ -14,77 +14,95 @@ from google.cloud import storage
 from usl_models.flood_ml.dataset import download_dataset
 
 # Must match FILECACHE_DIR in run_quick_train.py.
-FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_us")
+FILECACHE_DIR = pathlib.Path("/scratch/hw4402/climateiq_filecache_validation_raw")
 PROJECT = "climateiq-test"
 
-# ── Old cities (already trained in ep29 checkpoint) ──────────────────
-old_sims = [
-    # Atlanta (3 scenarios)
-    "Atlanta-Atlanta_config/Rainfall_Data_1.txt",
-    "Atlanta-Atlanta_config/Rainfall_Data_2.txt",
-    "Atlanta-Atlanta_config/Rainfall_Data_5.txt",
-    # Phoenix SM (4 scenarios)
-    "Phoenix_SM-PHX_SM/Rainfall_Data_1.txt",
-    "Phoenix_SM-PHX_SM/Rainfall_Data_5.txt",
-    "Phoenix_SM-PHX_SM/Rainfall_Data_15.txt",
-    "Phoenix_SM-PHX_SM/Rainfall_Data_16.txt",
-    # Manhattan (8 scenarios; 7 and 15 reserved for test)
-    "Manhattan-Manhattan_config/Rainfall_Data_1.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_2.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_5.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_6.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_10.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_13.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_16.txt",
-    "Manhattan-Manhattan_config/Rainfall_Data_19.txt",
-    # Phoenix PV (2 scenarios)
-    "Phoenix_PV-PHX_PV/Rainfall_Data_1.txt",
-    "Phoenix_PV-PHX_PV/Rainfall_Data_5.txt",
-]
+# # ── Old cities (already trained in ep29 checkpoint) ──────────────────
+# old_sims = [
+#     # Atlanta (3 scenarios)
+#     "Atlanta-Atlanta_config/Rainfall_Data_1.txt",
+#     "Atlanta-Atlanta_config/Rainfall_Data_2.txt",
+#     "Atlanta-Atlanta_config/Rainfall_Data_5.txt",
+#     # Phoenix SM (4 scenarios)
+#     "Phoenix_SM-PHX_SM/Rainfall_Data_1.txt",
+#     "Phoenix_SM-PHX_SM/Rainfall_Data_5.txt",
+#     "Phoenix_SM-PHX_SM/Rainfall_Data_15.txt",
+#     "Phoenix_SM-PHX_SM/Rainfall_Data_16.txt",
+#     # Manhattan (8 scenarios; 7 and 15 reserved for test)
+#     "Manhattan-Manhattan_config/Rainfall_Data_1.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_2.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_5.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_6.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_10.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_13.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_16.txt",
+#     "Manhattan-Manhattan_config/Rainfall_Data_19.txt",
+#     # Phoenix PV (2 scenarios)
+#     "Phoenix_PV-PHX_PV/Rainfall_Data_1.txt",
+#     "Phoenix_PV-PHX_PV/Rainfall_Data_5.txt",
+# ]
+
+# # ── New cities (never seen by model) ─────────────────────────────────
+# new_sims = [
+#     # Denton TX (13 timesteps, 1 chunk each)
+#     "Denton_TX-Denton_config/Rainfall_Data_1.txt",
+#     "Denton_TX-Denton_config/Rainfall_Data_2.txt",
+#     "Denton_TX-Denton_config/Rainfall_Data_5.txt",
+#     # Lafayette LA (13 timesteps, 1 chunk each)
+#     "Lafayette_LA-Lafayette_config/Rainfall_Data_1.txt",
+#     "Lafayette_LA-Lafayette_config/Rainfall_Data_2.txt",
+#     "Lafayette_LA-Lafayette_config/Rainfall_Data_5.txt",
+#     # Boise ID (13 timesteps, 1 chunk each)
+#     "Boise_ID-Boise_config/Rainfall_Data_1.txt",
+#     "Boise_ID-Boise_config/Rainfall_Data_2.txt",
+#     "Boise_ID-Boise_config/Rainfall_Data_5.txt",
+#     # Navarre FL (13 timesteps, 1-2 chunks each)
+#     "Navarre_FL-Navarre_config/Rainfall_Data_1.txt",
+#     "Navarre_FL-Navarre_config/Rainfall_Data_2.txt",
+#     "Navarre_FL-Navarre_config/Rainfall_Data_5.txt",
+#     # New Orleans
+#     "New_Orleans-New_Orleans_config/Rainfall_Data_1.txt",
+#     "New_Orleans-New_Orleans_config/Rainfall_Data_2.txt",
+#     "New_Orleans-New_Orleans_config/Rainfall_Data_5.txt",
+
+#     # # Copenhagen
+#     # "Copenhagen-Copenhagen_config/Rainfall_Data_1.txt",
+#     # "Copenhagen-Copenhagen_config/Rainfall_Data_5.txt",
+#     # "Copenhagen-Copenhagen_config/Rainfall_Data_10.txt",
+#     # "Copenhagen-Copenhagen_config/Rainfall_Data_15.txt",
+#     # "Copenhagen-Copenhagen_config/Rainfall_Data_20.txt",
+#     # # CapeTown
+#     # "CapeTown_Watershed_1-CapeTown_config/Rainfall_Data_1.txt",
+#     # "CapeTown_Watershed_1-CapeTown_config/Rainfall_Data_5.txt",
+#     # "CapeTown_Watershed_1-CapeTown_config/Rainfall_Data_10.txt",
+#     # "CapeTown_Watershed_1-CapeTown_config/Rainfall_Data_15.txt",
+#     # "CapeTown_Watershed_1-CapeTown_config/Rainfall_Data_20.txt",
+#     # "CapeTown_Watershed_2-CapeTown_config/Rainfall_Data_1.txt",
+#     # "CapeTown_Watershed_2-CapeTown_config/Rainfall_Data_5.txt",
+#     # "CapeTown_Watershed_2-CapeTown_config/Rainfall_Data_10.txt",
+#     # "CapeTown_Watershed_2-CapeTown_config/Rainfall_Data_15.txt",
+#     # "CapeTown_Watershed_2-CapeTown_config/Rainfall_Data_20.txt",
+# ]
+
+# sim_names = old_sims + new_sims
 
 # ── New cities (never seen by model) ─────────────────────────────────
-new_sims = [
-    # Denton TX (13 timesteps, 1 chunk each)
-    "Denton_TX-Denton_config/Rainfall_Data_1.txt",
-    "Denton_TX-Denton_config/Rainfall_Data_2.txt",
-    "Denton_TX-Denton_config/Rainfall_Data_5.txt",
-    # Lafayette LA (13 timesteps, 1 chunk each)
-    "Lafayette_LA-Lafayette_config/Rainfall_Data_1.txt",
-    "Lafayette_LA-Lafayette_config/Rainfall_Data_2.txt",
-    "Lafayette_LA-Lafayette_config/Rainfall_Data_5.txt",
-    # Boise ID (13 timesteps, 1 chunk each)
-    "Boise_ID-Boise_config/Rainfall_Data_1.txt",
-    "Boise_ID-Boise_config/Rainfall_Data_2.txt",
-    "Boise_ID-Boise_config/Rainfall_Data_5.txt",
-    # Navarre FL (13 timesteps, 1-2 chunks each)
-    "Navarre_FL-Navarre_config/Rainfall_Data_1.txt",
-    "Navarre_FL-Navarre_config/Rainfall_Data_2.txt",
-    "Navarre_FL-Navarre_config/Rainfall_Data_5.txt",
-    # New Orleans
-    "New_Orleans-New_Orleans_config/Rainfall_Data_1.txt",
-    "New_Orleans-New_Orleans_config/Rainfall_Data_2.txt",
-    "New_Orleans-New_Orleans_config/Rainfall_Data_5.txt",
-
-    # # Copenhagen
-    # "Copenhagen-Copenhagen_config/Rainfall_Data_1.txt",
-    # "Copenhagen-Copenhagen_config/Rainfall_Data_5.txt",
-    # "Copenhagen-Copenhagen_config/Rainfall_Data_10.txt",
-    # "Copenhagen-Copenhagen_config/Rainfall_Data_15.txt",
-    # "Copenhagen-Copenhagen_config/Rainfall_Data_20.txt",
-    # # CapeTown
-    # "CapeTown_Watershed_1-CapeTown_config/Rainfall_Data_1.txt",
-    # "CapeTown_Watershed_1-CapeTown_config/Rainfall_Data_5.txt",
-    # "CapeTown_Watershed_1-CapeTown_config/Rainfall_Data_10.txt",
-    # "CapeTown_Watershed_1-CapeTown_config/Rainfall_Data_15.txt",
-    # "CapeTown_Watershed_1-CapeTown_config/Rainfall_Data_20.txt",
-    # "CapeTown_Watershed_2-CapeTown_config/Rainfall_Data_1.txt",
-    # "CapeTown_Watershed_2-CapeTown_config/Rainfall_Data_5.txt",
-    # "CapeTown_Watershed_2-CapeTown_config/Rainfall_Data_10.txt",
-    # "CapeTown_Watershed_2-CapeTown_config/Rainfall_Data_15.txt",
-    # "CapeTown_Watershed_2-CapeTown_config/Rainfall_Data_20.txt",
+sim_names = []
+# sim_names = sim_names + [f"USA_TX_Houston-USA_TX_Houston_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+sim_names = [
+    "USA_MD_Baltimore-USA_MD_Baltimore_config/Rainfall_Data_1.txt",
+    "USA_MD_Baltimore-USA_MD_Baltimore_config/Rainfall_Data_2.txt"
 ]
 
-sim_names = old_sims + new_sims
+# sim_names = sim_names + [f"Manhattan-Manhattan_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+# sim_names = sim_names + [f"Phoenix_PV-PHX_PV/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+
+# sim_names = sim_names + [f"Denton_TX-Denton_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+# sim_names = sim_names + [f"Lafayette_LA-Lafayette_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+# sim_names = sim_names + [f"Boise_ID-Boise_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+# sim_names = sim_names + [f"Navarre_FL-Navarre_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+# sim_names = sim_names + [f"New_Orleans-New_Orleans_config/Rainfall_Data_{str(i+1)}.txt" for i in range(29)]
+
 
 def main():
     FILECACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -106,7 +124,8 @@ def main():
             dataset_splits=["train", "val", "test"],
             allow_missing_sim=True,
         )
-
+# gs://test-climateiq-flood-simulation-output/USA_MD_Baltimore/chunk_15_14/USA_MD_Baltimore_config/Rainfall_Data_2.txt
+# gs://test-climateiq-flood-simulation-output/Atlanta/chunk_1_1/Atlanta_config/Rainfall_Data_1.txt
     print("Done.")
 
 
